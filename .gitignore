@@ -12,9 +12,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Data & Assets (Consider uncommenting if you don't want to commit these)
-# data/
-# assets/
+# Data & Assets
+assets/
+data/
+4.18（测试）.txt
 
 # IDEs
 .idea/
