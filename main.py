@@ -5,7 +5,9 @@
 ============================================================
 """
 import re
+import os
 import sys
+import time
 import logging
 import markdown
 import traceback
@@ -17,6 +19,10 @@ from image_handler import download_image, download_cover_image, reset_image_cach
 from wechat_api import WeChatPublisher, send_to_qywechat
 from config import (WECHAT_APP_ID, WECHAT_APP_SECRET, QYWECHAT_WEBHOOK,
                     BRAND_NAME, WECHAT_TITLE_MAX_LEN)
+
+# 强制 UTF-8 输出，防止 Windows GBK 编码崩溃
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
 
 logging.basicConfig(
     level=logging.INFO,
@@ -123,10 +129,44 @@ def _print_review_report(title, word_count, image_count, sensitive_words, cover_
     return all_ok
 
 
+def cleanup_old_assets(base_dir="assets", max_age_days=5):
+    """清理超过指定天数的本地下载文件，释放磁盘空间"""
+    if not os.path.exists(base_dir):
+        return
+    now = time.time()
+    cutoff = now - max_age_days * 86400
+    removed_count = 0
+    removed_dirs = 0
+    for root, dirs, files in os.walk(base_dir, topdown=False):
+        for fname in files:
+            fpath = os.path.join(root, fname)
+            try:
+                if os.path.getmtime(fpath) < cutoff:
+                    os.remove(fpath)
+                    removed_count += 1
+            except OSError:
+                pass
+        # 删除已清空的子目录
+        for dname in dirs:
+            dpath = os.path.join(root, dname)
+            try:
+                if not os.listdir(dpath):
+                    os.rmdir(dpath)
+                    removed_dirs += 1
+            except OSError:
+                pass
+    if removed_count > 0:
+        logger.info("🧹 自动清理：已删除 %d 个过期文件和 %d 个空目录 (>%d天)",
+                    removed_count, removed_dirs, max_age_days)
+
+
 def run_main():
     print("\n" + "=" * 60)
     print(f"  🚀 「{BRAND_NAME}」全自动 AI 内容工厂 v5.0")
     print("=" * 60 + "\n")
+
+    # 0. 自动清理超过 5 天的本地缓存文件
+    cleanup_old_assets("assets", max_age_days=5)
 
     try:
         # 1. 扫描全网热点
