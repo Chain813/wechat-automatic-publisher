@@ -7,7 +7,6 @@
 """
 import os
 import hashlib
-import logging
 from io import BytesIO
 from dataclasses import dataclass
 from PIL import Image, ImageStat, ImageFilter
@@ -15,7 +14,7 @@ import numpy as np
 
 from config import IMAGE_RETRY_MAX, IMAGE_DEFAULT_CANDIDATES
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 WECHAT_COVER_WIDTH = 900
 WECHAT_COVER_HEIGHT = 383
@@ -264,7 +263,7 @@ def evaluate_image(image_path, purpose="body"):
                 # EasyOCR 结果修正密度值
                 text_density = max(text_density, ocr_text_count / 10.0)
             except Exception:
-                logger.debug("OCR failed for %s", image_path)
+                logger.debug("OCR failed for {}", image_path)
 
         if purpose == "cover":
             if text_density < 0.05:
@@ -358,7 +357,7 @@ def pick_best_image(image_paths, purpose="body"):
     candidates.sort(key=lambda x: x.score, reverse=True)
     best = candidates[0]
     logger.info(
-        "  智能图选(%s): 从 %d 候选选中 %s (%.0f分 %dx%d)",
+        "  智能图选({}): 从 {} 候选选中 {} ({:.0f}分 {}x{})",
         purpose, len(image_paths),
         os.path.basename(best.path), best.score, best.width, best.height
     )

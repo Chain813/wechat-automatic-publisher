@@ -8,12 +8,11 @@
 import os
 import re
 import time
-import logging
 from PIL import Image
 
 from config import IMAGE_DEFAULT_CANDIDATES, IMAGE_RETRY_MAX
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 # ---- 微信图片规格 ----
 WECHAT_COVER_SIZE = (900, 383)     # 封面推荐尺寸
@@ -115,11 +114,11 @@ def resize_for_wechat(img_path, purpose="body"):
             file_size_mb = os.path.getsize(out_path) / (1024 * 1024)
             quality -= 15
 
-        logger.debug("  resize_for_wechat: %s -> %dx%d, %.1fMB",
+        logger.debug("  resize_for_wechat: {} -> {}x{}, {:.1f}MB",
                      os.path.basename(img_path), tw, th, file_size_mb)
         return out_path
     except Exception as e:
-        logger.warning("  resize_for_wechat failed: %s", e)
+        logger.warning("  resize_for_wechat failed: {}", e)
         return img_path
 
 
@@ -164,7 +163,7 @@ def download_image(keyword, save_dir="assets"):
     if not os.path.exists(specific_dir):
         os.makedirs(specific_dir)
 
-    logger.info("正在为 '%s' 启动智能采样筛选...", keyword)
+    logger.info("正在为 '{}' 启动智能采样筛选...", keyword)
 
     max_num = IMAGE_DEFAULT_CANDIDATES
 
@@ -196,7 +195,7 @@ def download_cover_image(keyword, save_dir="assets"):
     if not os.path.exists(specific_dir):
         os.makedirs(specific_dir)
 
-    logger.info("正在为封面 '%s' 搜索宽屏素材...", keyword)
+    logger.info("正在为封面 '{}' 搜索宽屏素材...", keyword)
 
     max_num = IMAGE_DEFAULT_CANDIDATES + 3  # 封面需要更多候选
 
@@ -227,7 +226,7 @@ def download_images(keyword, save_dir="assets", max_num=None):
     if not os.path.exists(specific_dir):
         os.makedirs(specific_dir)
 
-    logger.info("正在批量搜索 '%s' (%d 张)...", keyword, max_num)
+    logger.info("正在批量搜索 '{}' ({} 张)...", keyword, max_num)
     results = []
 
     for source in ["bing", "baidu"]:
@@ -274,7 +273,7 @@ def _try_crawl(engine, keyword, directory, max_num, scene="auto"):
                 if best:
                     return best
         except Exception as e:
-            logger.warning("  %s 第 %d/%d 次抓取失败: %s", engine, attempt, IMAGE_RETRY_MAX, e)
+            logger.warning("  {} 第 {}/{} 次抓取失败: {}", engine, attempt, IMAGE_RETRY_MAX, e)
             if attempt < IMAGE_RETRY_MAX:
                 time.sleep(1)
     return None
@@ -293,7 +292,7 @@ def _try_crawl_to_dir(engine, keyword, directory, max_num, scene="auto"):
             crawler = BaiduImageCrawler(storage={'root_dir': directory}, log_level=50)
             crawler.crawl(keyword=query, max_num=max_num, overwrite=True)
     except Exception as e:
-        logger.warning("  批量抓取 %s 失败: %s", engine, e)
+        logger.warning("  批量抓取 {} 失败: {}", engine, e)
 
 
 def _finalize_image(img_path, purpose):
@@ -301,7 +300,7 @@ def _finalize_image(img_path, purpose):
     from image_filter import compute_perceptual_hash
     phash = compute_perceptual_hash(img_path)
     if _is_too_similar_to_existing(phash):
-        logger.debug("  跳过相似图片: %s", os.path.basename(img_path))
+        logger.debug("  跳过相似图片: {}", os.path.basename(img_path))
         return None
 
     result = resize_for_wechat(img_path, purpose)
@@ -326,7 +325,7 @@ def _get_fallback_image(directory):
             img.save(fpath, 'JPEG', quality=92)
             return os.path.abspath(fpath)
         except Exception as e:
-            logger.warning("  本地默认图读取失败: %s", e)
+            logger.warning("  本地默认图读取失败: {}", e)
 
     # 其次在线随机图
     try:
@@ -340,7 +339,7 @@ def _get_fallback_image(directory):
             f.write(res.content)
         return os.path.abspath(fpath)
     except Exception as e:
-        logger.warning("  在线兜底图获取失败: %s", e)
+        logger.warning("  在线兜底图获取失败: {}", e)
         return None
 
 

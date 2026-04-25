@@ -1,16 +1,18 @@
 """
 ============================================================
-  全自动微信公众号推文系统 v4.0 (智界洞察社 终极版)
+  全自动微信公众号推文系统 v6.0 (智界洞察社 终极版)
   集成：全网聚合 + AI深度科普 + 智能图选 + 草稿查重
+  优化：Loguru 日志 + 并行图片下载
 ============================================================
 """
 import re
 import os
 import sys
 import time
-import logging
 import markdown
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from loguru import logger
 
 from news_collector import fetch_all_hotspots, get_source_health_report
 from llm_processor import (filter_tech_hotspots, generate_article, simplify_keyword,
@@ -24,16 +26,34 @@ from config import (WECHAT_APP_ID, WECHAT_APP_SECRET, QYWECHAT_WEBHOOK,
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    datefmt='%H:%M:%S'
+# Loguru 配置：移除默认 handler，添加自定义格式
+logger.remove()
+logger.add(
+    sys.stderr,
+    format="<green>{time:HH:mm:ss}</green> | <level>{level: <7}</level> | <level>{message}</level>",
+    level="INFO",
+    colorize=True
 )
-logger = logging.getLogger(__name__)
+
+
+def _download_single_image(kw):
+    """下载单张配图（供并行调用）"""
+    kw = kw.strip()
+    if not kw:
+        return kw, None
+
+    logger.info("正在为段落关键词 '{}' 搜寻最佳配图...", kw)
+    img_path = download_image(kw)
+
+    if not img_path:
+        sk = simplify_keyword(kw)
+        img_path = download_image(sk)
+
+    return kw, img_path
 
 
 def process_article_content(article_text, publisher):
-    """处理文章内容：转换 HTML 并进行智能配图替换"""
+    """处理文章内容：转换 HTML 并进行智能配图替换（并行下载版）"""
     if not article_text:
         return "", {"word_count": 0, "image_count": 0, "sensitive_words": []}
 
@@ -45,7 +65,7 @@ def process_article_content(article_text, publisher):
     # 2. 敏感词过滤
     cleaned, hit_words = filter_sensitive(cleaned)
     if hit_words:
-        logger.warning("  检测到敏感词: %s", hit_words)
+        logger.warning("  检测到敏感词: {}", hit_words)
 
     # 3. 提取配图占位符关键词
     placeholders = re.findall(r'【此处插入配图[：:](.*?)】', cleaned)
@@ -53,19 +73,27 @@ def process_article_content(article_text, publisher):
     # 4. Markdown 转 HTML (启用 nl2br 确保空行生效)
     html_body = markdown.markdown(cleaned, extensions=['extra', 'nl2br', 'sane_lists'])
 
-    # 5. 逐一进行智能搜图与替换
+    # 5. 并行下载所有配图（核心性能优化）
+    image_results = {}
+    if placeholders:
+        logger.info("启动并行图片下载引擎 ({} 张)...", len(placeholders))
+        with ThreadPoolExecutor(max_workers=min(3, len(placeholders))) as executor:
+            futures = {executor.submit(_download_single_image, kw): kw for kw in placeholders}
+            for future in as_completed(futures):
+                try:
+                    kw, img_path = future.result()
+                    image_results[kw] = img_path
+                except Exception as e:
+                    logger.warning("  并行下载异常: {}", e)
+
+    # 6. 逐一替换占位符
     image_count = 0
     for kw in placeholders:
         kw = kw.strip()
-        if not kw: continue
+        if not kw:
+            continue
 
-        logger.info("正在为段落关键词 '%s' 搜寻最佳配图...", kw)
-        img_path = download_image(kw)
-
-        if not img_path:
-            sk = simplify_keyword(kw)
-            img_path = download_image(sk)
-
+        img_path = image_results.get(kw)
         placeholder_text = f"【此处插入配图：{kw}】"
         placeholder_text_en = f"【此处插入配图:{kw}】"
 
@@ -156,13 +184,13 @@ def cleanup_old_assets(base_dir="assets", max_age_days=5):
             except OSError:
                 pass
     if removed_count > 0:
-        logger.info("🧹 自动清理：已删除 %d 个过期文件和 %d 个空目录 (>%d天)",
+        logger.info("🧹 自动清理：已删除 {} 个过期文件和 {} 个空目录 (>{}天)",
                     removed_count, removed_dirs, max_age_days)
 
 
 def run_main():
     print("\n" + "=" * 60)
-    print(f"  🚀 「{BRAND_NAME}」全自动 AI 内容工厂 v5.0")
+    print(f"  🚀 「{BRAND_NAME}」全自动 AI 内容工厂 v6.0")
     print("=" * 60 + "\n")
 
     # 0. 自动清理超过 5 天的本地缓存文件
@@ -211,8 +239,8 @@ def run_main():
                 print("❌ AI 创作失败，跳过。")
                 continue
 
-            # 3.2 内容排版与多图配准
-            print("\n🎨 正在执行排版优化与智能图选...")
+            # 3.2 内容排版与多图配准（并行优化）
+            print("\n🎨 正在执行排版优化与智能图选 (并行加速)...")
             final_html, review_data = process_article_content(article_text, pub)
 
             if not final_html:

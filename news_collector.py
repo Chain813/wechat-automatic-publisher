@@ -6,14 +6,13 @@
 ============================================================
 """
 import time
-import logging
 import requests
 import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from config import NEWS_SOURCES, NEWS_MAX_PER_SOURCE, FILTER_CATEGORIES
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 # ---- 模拟真实浏览器头 ----
 USER_AGENTS = [
@@ -39,7 +38,7 @@ def _mark_source_failure(name):
     h["failures"] += 1
     if h["failures"] >= 3:
         h["disabled"] = True
-        logger.warning("  %s 连续失败 3 次，已自动降级跳过", name)
+        logger.warning("  {} 连续失败 3 次，已自动降级跳过", name)
 
 
 def _mark_source_success(name):
@@ -81,7 +80,7 @@ def fetch_weibo_light():
                 topics.append(word)
         _mark_source_success("weibo")
     except Exception as e:
-        logger.warning("  微博轻量 API 失败: %s，降级至 Selenium", e)
+        logger.warning("  微博轻量 API 失败: {}，降级至 Selenium", e)
         _mark_source_failure("weibo")
         # 降级至 Selenium 版本
         return fetch_weibo()
@@ -112,7 +111,7 @@ def fetch_weibo():
                 topics.append(t)
         _mark_source_success("weibo")
     except Exception as e:
-        logger.warning("  微博 Selenium 抓取也失败: %s", e)
+        logger.warning("  微博 Selenium 抓取也失败: {}", e)
         _mark_source_failure("weibo")
     finally:
         if browser:
@@ -145,7 +144,7 @@ def fetch_ithome():
         topics = [item.get_text(strip=True) for item in items if len(item.get_text(strip=True)) > 3]
         _mark_source_success("ithome")
     except Exception as e:
-        logger.warning("  IT之家抓取失败: %s", e)
+        logger.warning("  IT之家抓取失败: {}", e)
         _mark_source_failure("ithome")
     return topics[:NEWS_MAX_PER_SOURCE]
 
@@ -174,7 +173,7 @@ def fetch_36kr():
         topics = [item.get_text(strip=True) for item in items if len(item.get_text(strip=True)) > 4]
         _mark_source_success("36kr")
     except Exception as e:
-        logger.warning("  36氪抓取失败: %s", e)
+        logger.warning("  36氪抓取失败: {}", e)
         _mark_source_failure("36kr")
     return topics[:NEWS_MAX_PER_SOURCE]
 
@@ -207,7 +206,7 @@ def fetch_baidu():
                 topics.append(text)
         _mark_source_success("baidu")
     except Exception as e:
-        logger.warning("  百度热搜抓取失败: %s", e)
+        logger.warning("  百度热搜抓取失败: {}", e)
         _mark_source_failure("baidu")
     return topics[:NEWS_MAX_PER_SOURCE]
 
@@ -301,7 +300,7 @@ def fetch_all_hotspots_parallel():
         logger.warning("  没有可用的采集源！")
         return ""
 
-    logger.info("正在启动全网热点并行扫描引擎 (%d 源)...", len(sources))
+    logger.info("正在启动全网热点并行扫描引擎 ({} 源)...", len(sources))
 
     results = {}
     with ThreadPoolExecutor(max_workers=len(sources)) as executor:
@@ -314,7 +313,7 @@ def fetch_all_hotspots_parallel():
             try:
                 results[name] = future.result()
             except Exception as e:
-                logger.warning("  %s 并行任务异常: %s", name, e)
+                logger.warning("  {} 并行任务异常: {}", name, e)
                 results[name] = []
 
     # 拼接输出
@@ -340,7 +339,7 @@ def fetch_all_hotspots_parallel():
         logger.warning("  所有源均未采集到数据，请检查网络连接。")
         return ""
 
-    logger.info("  并行扫描完成，共获取 %d 条资讯。", total)
+    logger.info("  并行扫描完成，共获取 {} 条资讯。", total)
     return "\n".join(all_summary)
 
 

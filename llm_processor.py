@@ -8,7 +8,6 @@
 """
 import re
 import time
-import logging
 import requests
 
 from config import (
@@ -18,7 +17,7 @@ from config import (
     WECHAT_TITLE_MAX_LEN, WECHAT_DIGEST_MAX_LEN, SENSITIVE_WORDS
 )
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 # ==========================================
 #  角色设定 (智界洞察社 · 深度科普定制)
@@ -116,18 +115,18 @@ def call_deepseek_with_retry(prompt, system_content=SYSTEM_PROMPT,
             return result['choices'][0]['message']['content']
 
         except requests.exceptions.Timeout:
-            logger.warning("AI 调用超时 (第 %d/%d 次)", attempt, max_retries)
+            logger.warning("AI 调用超时 (第 {}/{} 次)", attempt, max_retries)
             if attempt < max_retries:
                 time.sleep(backoff_base * (2 ** (attempt - 1)))
         except requests.exceptions.HTTPError as e:
-            logger.error("AI 返回 HTTP 错误: %s (第 %d/%d 次)", e, attempt, max_retries)
+            logger.error("AI 返回 HTTP 错误: {} (第 {}/{} 次)", e, attempt, max_retries)
             if attempt < max_retries and getattr(e.response, 'status_code', 500) >= 500:
                 time.sleep(backoff_base * (2 ** (attempt - 1)))
         except (KeyError, IndexError) as e:
-            logger.error("AI 响应格式异常: %s", e)
+            logger.error("AI 响应格式异常: {}", e)
             return ""
         except Exception as e:
-            logger.error("AI 调用失败: %s (第 %d/%d 次)", e, attempt, max_retries)
+            logger.error("AI 调用失败: {} (第 {}/{} 次)", e, attempt, max_retries)
             if attempt < max_retries:
                 time.sleep(backoff_base * (2 ** (attempt - 1)))
 
@@ -221,7 +220,7 @@ def generate_digest(topic: str):
     """
     AI 生成微信规范的摘要 (≤120 字)。
     """
-    logger.info("  正在为 '%s' 生成微信摘要...", topic)
+    logger.info("  正在为 '{}' 生成微信摘要...", topic)
     prompt = (
         f"请为以下科技话题生成一段微信文章摘要（预告式风格），"
         f"字数严格控制在 {WECHAT_DIGEST_MAX_LEN} 字以内，"
@@ -263,7 +262,7 @@ def filter_tech_hotspots(topics):
         return []
 
     result = parse_topic_list(res)
-    logger.info("  筛选结果: %s", result)
+    logger.info("  筛选结果: {}", result)
     return result
 
 
@@ -272,7 +271,7 @@ def filter_tech_hotspots(topics):
 # ==========================================
 def generate_article(topic):
     """针对话题创作符合品牌调性的深度科普长文"""
-    logger.info("DeepSeek 正在以「%s」视角创作深度长文...", BRAND_NAME)
+    logger.info("DeepSeek 正在以「{}」视角创作深度长文...", BRAND_NAME)
     prompt = (
         f"当前话题：{topic}\n\n"
         "请严格按照系统设定的'五幕深度叙事'结构创作全文。\n"
@@ -288,7 +287,7 @@ def generate_article(topic):
     if article:
         # 校验字数
         word_count, ok, msg = validate_article_length(article)
-        logger.info("  深度长文生成完毕，%s", msg)
+        logger.info("  深度长文生成完毕，{}", msg)
     else:
         logger.error("  文稿生成失败")
     return article
@@ -299,7 +298,7 @@ def generate_article(topic):
 # ==========================================
 def simplify_keyword(complex_kw):
     """将复杂短语转化为具备场景感的视觉关键词"""
-    logger.info("  正在根据内容深度提炼视觉方向 '%s'...", complex_kw)
+    logger.info("  正在根据内容深度提炼视觉方向 '{}'...", complex_kw)
     prompt = (
         "你是一个顶尖的摄影指导。请根据以下内容，提炼一个最适合配图的视觉关键词。\n"
         "逻辑规则：\n"
@@ -312,5 +311,5 @@ def simplify_keyword(complex_kw):
     )
     result = call_deepseek(prompt, system_content="你是一个视觉审美极高的图片策划。").strip()
     result = re.sub(r'["\'""]', '', result)
-    logger.info("  视觉导向：'%s'", result)
+    logger.info("  视觉导向：'{}'", result)
     return result
