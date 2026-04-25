@@ -1,0 +1,11 @@
+# 全自动微信公众号推文系统 - 依赖清单
+requests
+beautifulsoup4
+selenium
+webdriver-manager
+markdown
+icrawler
+pandas
+Pillow
+easyocr
+python-dotenv
