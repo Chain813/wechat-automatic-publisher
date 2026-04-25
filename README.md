@@ -12,12 +12,16 @@
 
 - **🌍 全网热点聚合**：并行抓取微博、IT之家、36氪、百度等主流平台的实时热搜，确保选题永不落后。
 - **🧠 AI 深度创作**：基于 DeepSeek 模型，模拟“智界洞察社”特有的科技科普人格，生成 2500-3500 字的深度叙事长文。
+- **⚡ 性能至上**：
+    - **并行下载**：文章配图采用并行 `ThreadPoolExecutor` 引擎，搜图提速 **300%**。
+    - **极速扫描**：多源热点并行扫描，秒级锁定全网爆款。
 - **🎨 智能视觉引擎**：
     - 多源搜图：自动为文章段落匹配高清素材。
     - 智能评分：基于分辨率、色彩、文字密度等维度择优录取。
     - 尺寸适配：自动裁剪为微信封面 (2.35:1) 和正文插图规格。
     - 感知哈希：通过 pHash 去重，确保文章配图的独特性。
 - **🛡️ 安全合规**：内置敏感词过滤、标题党校验、草稿箱内容审计（防重）。
+- **📊 实时监控**：集成 **Loguru** 专业日志系统，全流程彩色高亮显示，任务状态一目了然。
 - **🚀 一键发布/草稿**：直接对接微信公众号素材接口，一键同步至云端草稿箱。
 - **📢 企业微信集成**：发布成功后自动推送通知至指定的企业微信群机器人。
 
@@ -26,6 +30,7 @@
 ## 🛠️ 技术栈
 
 - **语言**: Python 3.8+
+- **日志**: Loguru (Professional Logging)
 - **模型**: DeepSeek Chat (V3)
 - **爬虫**: Requests, BeautifulSoup4, Selenium (Stealth Mode)
 - **图像**: Pillow, icrawler, EasyOCR
@@ -33,11 +38,33 @@
 
 ---
 
+## 📂 项目结构 (分层架构)
+
+```text
+wechat_auto_publish/
+├── core/                # 业务逻辑核心层
+│   ├── collector.py     # 热点新闻采集引擎
+│   ├── processor.py     # AI 内容生成引擎 (DeepSeek)
+│   └── publisher.py     # 微信 API 封装与发布逻辑
+├── utils/               # 工具函数层
+│   ├── image_handler.py # 图片搜索与尺寸适配
+│   ├── image_filter.py  # 智能评分与 OCR 过滤
+│   └── spider.py        # 底层反检测爬虫引擎
+├── config.py            # 全局核心配置中心
+├── main.py              # 系统入口：协调各模块运行
+├── requirements.txt     # 依赖清单
+├── run.bat              # Windows 一键自动化部署脚本
+├── .env                 # 环境变量（私密密钥，自动生成）
+└── assets/              # 自动下载的图像素材目录
+```
+
+---
+
 ## 📥 快速开始
 
 ### 1. 克隆项目
 ```bash
-git clone https://github.com/your-username/wechat_auto_publish.git
+git clone https://github.com/Chain813/wechat-automatic-publisher.git
 cd wechat_auto_publish
 ```
 
@@ -59,26 +86,6 @@ QYWECHAT_WEBHOOK="（可选）企业微信机器人Webhook"
 
 ### 4. 运行
 再次双击 `run.bat`，系统将启动全自动扫描与生成流程。
-
----
-
-## 📂 项目结构
-
-```text
-wechat_auto_publish/
-├── main.py             # 系统入口：协调各模块运行
-├── config.py           # 核心配置中心
-├── news_collector.py   # 全网热点聚合引擎
-├── llm_processor.py    # AI 内容处理引擎 (DeepSeek)
-├── image_handler.py    # 图像检索引擎
-├── image_filter.py     # 智能图片评分与过滤系统
-├── wechat_api.py       # 微信 API 封装
-├── spider_engine.py    # 底层反检测爬虫引擎
-├── requirements.txt    # 依赖清单
-├── run.bat             # Windows 一键自动化部署脚本
-├── .env.example        # 环境变量模板
-└── assets/             # 自动下载的图像素材目录
-```
 
 ---
 
