@@ -52,7 +52,7 @@ def _is_too_similar_to_existing(phash):
     """检查感知哈希是否与已下载图片相似"""
     if not phash:
         return False
-    from image_filter import is_too_similar
+    from .image_filter import is_too_similar
     for existing in _downloaded_hashes:
         if is_too_similar(phash, existing):
             return True
@@ -233,7 +233,7 @@ def download_images(keyword, save_dir="assets", max_num=None):
         n = max_num if source == "bing" else max(2, max_num // 2)
         _try_crawl_to_dir(source, keyword, specific_dir, n)
         candidates = _get_all_candidates(specific_dir)
-        from image_filter import evaluate_image, ImageScore
+        from .image_filter import evaluate_image, ImageScore
         for c in candidates:
             score = evaluate_image(c, "body")
             if score.score >= 50 and not _is_too_similar_to_existing(score.phash):
@@ -268,7 +268,7 @@ def _try_crawl(engine, keyword, directory, max_num, scene="auto"):
 
             candidates = _get_all_candidates(directory)
             if candidates:
-                from image_filter import pick_best_image
+                from .image_filter import pick_best_image
                 best = pick_best_image(candidates, "body")
                 if best:
                     return best
@@ -297,7 +297,7 @@ def _try_crawl_to_dir(engine, keyword, directory, max_num, scene="auto"):
 
 def _finalize_image(img_path, purpose):
     """后处理：尺寸适配 + 去重检查 + 哈希登记"""
-    from image_filter import compute_perceptual_hash
+    from .image_filter import compute_perceptual_hash
     phash = compute_perceptual_hash(img_path)
     if _is_too_similar_to_existing(phash):
         logger.debug("  跳过相似图片: {}", os.path.basename(img_path))

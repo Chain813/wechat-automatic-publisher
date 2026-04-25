@@ -14,11 +14,11 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from loguru import logger
 
-from news_collector import fetch_all_hotspots, get_source_health_report
-from llm_processor import (filter_tech_hotspots, generate_article, simplify_keyword,
+from core.collector import fetch_all_hotspots, get_source_health_report
+from core.processor import (filter_tech_hotspots, generate_article, simplify_keyword,
                            validate_title, filter_sensitive, generate_digest)
-from image_handler import download_image, download_cover_image, reset_image_cache
-from wechat_api import WeChatPublisher, send_to_qywechat
+from utils.image_handler import download_image, download_cover_image, reset_image_cache
+from core.publisher import WeChatPublisher, send_to_qywechat
 from config import (WECHAT_APP_ID, WECHAT_APP_SECRET, QYWECHAT_WEBHOOK,
                     BRAND_NAME, WECHAT_TITLE_MAX_LEN)
 

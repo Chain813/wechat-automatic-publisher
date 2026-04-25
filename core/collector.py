@@ -99,7 +99,7 @@ def fetch_weibo():
     browser = None
     topics = []
     try:
-        from spider_engine import build_stealth_browser
+        from utils.spider import build_stealth_browser
         browser = build_stealth_browser(headless=True)
         browser.get("https://s.weibo.com/top/summary")
         time.sleep(4)
