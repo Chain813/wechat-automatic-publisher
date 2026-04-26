@@ -22,6 +22,8 @@
     - 感知哈希：通过 pHash 去重，确保文章配图的独特性。
 - **🛡️ 安全合规**：内置敏感词过滤、标题党校验、草稿箱内容审计（防重）。
 - **📊 实时监控**：集成 **Loguru** 专业日志系统，全流程彩色高亮显示，任务状态一目了然。
+- **⚡ 网络韧性增强**：接入开源库 **requests-cache**，热点抓取默认启用本地缓存与自动重试，减少重复抓取和临时网络抖动导致的失败。
+- **🔎 标题查重升级**：接入开源库 **RapidFuzz**，对微信草稿标题做模糊匹配，比简单子串判断更稳健。
 - **🚀 一键发布/草稿**：直接对接微信公众号素材接口，一键同步至云端草稿箱。
 - **📢 企业微信集成**：发布成功后自动推送通知至指定的企业微信群机器人。
 
@@ -31,6 +33,7 @@
 
 - **语言**: Python 3.8+
 - **日志**: Loguru (Professional Logging)
+- **缓存/模糊匹配**: requests-cache, RapidFuzz
 - **模型**: DeepSeek Chat (V3)
 - **爬虫**: Requests, BeautifulSoup4, Selenium (Stealth Mode)
 - **图像**: Pillow, icrawler, EasyOCR
@@ -46,12 +49,15 @@ wechat_auto_publish/
 │   ├── collector.py     # 热点新闻采集引擎
 │   ├── processor.py     # AI 内容生成引擎 (DeepSeek)
 │   └── publisher.py     # 微信 API 封装与发布逻辑
+│   ├── runtime.py       # 控制台编码与日志初始化
+│   └── workflow.py      # 发布流水线编排
 ├── utils/               # 工具函数层
 │   ├── image_handler.py # 图片搜索与尺寸适配
 │   ├── image_filter.py  # 智能评分与 OCR 过滤
-│   └── spider.py        # 底层反检测爬虫引擎
+│   ├── http_client.py   # HTTP 会话、缓存与重试封装
+│   └── spider.py        # Selenium 浏览器启动器（微博降级抓取）
 ├── config.py            # 全局核心配置中心
-├── main.py              # 系统入口：协调各模块运行
+├── main.py              # 薄入口：启动运行时并调用工作流
 ├── requirements.txt     # 依赖清单
 ├── run.bat              # Windows 一键自动化部署脚本
 ├── .env                 # 环境变量（私密密钥，自动生成）

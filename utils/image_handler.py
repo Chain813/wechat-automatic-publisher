@@ -168,14 +168,14 @@ def download_image(keyword, save_dir="assets"):
     max_num = IMAGE_DEFAULT_CANDIDATES
 
     # ---- 策略 1：Bing 采样 ----
-    best = _try_crawl("bing", keyword, specific_dir, max_num)
+    best = _try_crawl("bing", keyword, specific_dir, max_num, purpose="body")
     if best:
         best = _finalize_image(best, "body")
         if best:
             return best
 
     # ---- 策略 2：百度采样 ----
-    best = _try_crawl("baidu", keyword, specific_dir, max(3, max_num // 2))
+    best = _try_crawl("baidu", keyword, specific_dir, max(3, max_num // 2), purpose="body")
     if best:
         best = _finalize_image(best, "body")
         if best:
@@ -199,13 +199,13 @@ def download_cover_image(keyword, save_dir="assets"):
 
     max_num = IMAGE_DEFAULT_CANDIDATES + 3  # 封面需要更多候选
 
-    best = _try_crawl("bing", keyword, specific_dir, max_num, scene="趋势")
+    best = _try_crawl("bing", keyword, specific_dir, max_num, scene="趋势", purpose="cover")
     if best:
         best = _finalize_image(best, "cover")
         if best:
             return best
 
-    best = _try_crawl("baidu", keyword, specific_dir, max(3, max_num // 2), scene="趋势")
+    best = _try_crawl("baidu", keyword, specific_dir, max(3, max_num // 2), scene="趋势", purpose="cover")
     if best:
         best = _finalize_image(best, "cover")
         if best:
@@ -251,7 +251,7 @@ def download_images(keyword, save_dir="assets", max_num=None):
 # ==========================================
 #  内部辅助
 # ==========================================
-def _try_crawl(engine, keyword, directory, max_num, scene="auto"):
+def _try_crawl(engine, keyword, directory, max_num, scene="auto", purpose="body"):
     """尝试从指定引擎抓取，返回最优图片路径"""
     _clean_dir(directory)
     query = _build_search_query(keyword, scene)
@@ -269,7 +269,7 @@ def _try_crawl(engine, keyword, directory, max_num, scene="auto"):
             candidates = _get_all_candidates(directory)
             if candidates:
                 from .image_filter import pick_best_image
-                best = pick_best_image(candidates, "body")
+                best = pick_best_image(candidates, purpose)
                 if best:
                     return best
         except Exception as e:

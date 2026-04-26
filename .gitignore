@@ -15,6 +15,7 @@ __pycache__/
 # Data & Assets
 assets/
 data/
+hotspot_cache.sqlite*
 4.18（测试）.txt
 
 # IDEs

@@ -18,6 +18,9 @@ from config import (
 )
 
 from loguru import logger
+from utils.http_client import build_api_session
+
+API_SESSION = build_api_session()
 
 # ==========================================
 #  角色设定 (智界洞察社 · 深度科普定制)
@@ -104,7 +107,7 @@ def call_deepseek_with_retry(prompt, system_content=SYSTEM_PROMPT,
                 "temperature": LLM_TEMPERATURE,
                 "max_tokens": LLM_MAX_TOKENS
             }
-            response = requests.post(
+            response = API_SESSION.post(
                 f"{LLM_BASE_URL}/chat/completions",
                 headers=headers,
                 json=data,
@@ -114,18 +117,20 @@ def call_deepseek_with_retry(prompt, system_content=SYSTEM_PROMPT,
             result = response.json()
             return result['choices'][0]['message']['content']
 
-        except requests.exceptions.Timeout:
-            logger.warning("AI 调用超时 (第 {}/{} 次)", attempt, max_retries)
-            if attempt < max_retries:
-                time.sleep(backoff_base * (2 ** (attempt - 1)))
-        except requests.exceptions.HTTPError as e:
-            logger.error("AI 返回 HTTP 错误: {} (第 {}/{} 次)", e, attempt, max_retries)
-            if attempt < max_retries and getattr(e.response, 'status_code', 500) >= 500:
-                time.sleep(backoff_base * (2 ** (attempt - 1)))
-        except (KeyError, IndexError) as e:
-            logger.error("AI 响应格式异常: {}", e)
-            return ""
         except Exception as e:
+            if isinstance(e, requests.exceptions.Timeout):
+                logger.warning("AI 调用超时 (第 {}/{} 次)", attempt, max_retries)
+                if attempt < max_retries:
+                    time.sleep(backoff_base * (2 ** (attempt - 1)))
+                continue
+            if isinstance(e, requests.exceptions.HTTPError):
+                logger.error("AI 返回 HTTP 错误: {} (第 {}/{} 次)", e, attempt, max_retries)
+                if attempt < max_retries and getattr(e.response, 'status_code', 500) >= 500:
+                    time.sleep(backoff_base * (2 ** (attempt - 1)))
+                continue
+            if isinstance(e, (KeyError, IndexError)):
+                logger.error("AI 响应格式异常: {}", e)
+                return ""
             logger.error("AI 调用失败: {} (第 {}/{} 次)", e, attempt, max_retries)
             if attempt < max_retries:
                 time.sleep(backoff_base * (2 ** (attempt - 1)))

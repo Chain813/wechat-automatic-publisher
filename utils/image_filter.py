@@ -6,13 +6,9 @@
 ============================================================
 """
 import os
-import hashlib
-from io import BytesIO
 from dataclasses import dataclass
-from PIL import Image, ImageStat, ImageFilter
+from PIL import Image
 import numpy as np
-
-from config import IMAGE_RETRY_MAX, IMAGE_DEFAULT_CANDIDATES
 
 from loguru import logger
 
@@ -54,28 +50,24 @@ def get_ocr_reader():
 # ==========================================
 def text_density_light(image_path):
     """
-    用 Pillow 像素方差法估算文字密度，零额外依赖。
-    原理：文字区域边缘丰富 → 局部方差高 → 文字密度大。
+    用向量化局部方差估算文字密度，避免逐像素 Python 循环。
     返回 0.0-1.0 的密度值。
     """
     try:
         img = Image.open(image_path).convert('L')
-        # 缩放到统一尺寸加速计算
-        img = img.resize((256, 256))
+        img = img.resize((192, 192))
         arr = np.array(img, dtype=np.float32)
 
-        # 局部方差：用 3x3 窗口计算标准差
-        h, w = arr.shape
-        var_map = np.zeros_like(arr)
-        padded = np.pad(arr, 1, mode='edge')
-        for i in range(h):
-            for j in range(w):
-                patch = padded[i:i+3, j:j+3]
-                var_map[i, j] = np.std(patch)
+        try:
+            windows = np.lib.stride_tricks.sliding_window_view(arr, (3, 3))
+            local_std = windows.std(axis=(-2, -1))
+            high_var_ratio = float(np.mean(local_std > 18))
+        except AttributeError:
+            gx = np.abs(np.diff(arr, axis=1))
+            gy = np.abs(np.diff(arr, axis=0))
+            high_var_ratio = float(np.mean(gx > 18) + np.mean(gy > 18)) / 2
 
-        # 高方差区域比例越大 = 文字越多
-        high_var_ratio = np.sum(var_map > 15) / var_map.size
-        return min(high_var_ratio * 3.0, 1.0)  # 放大并 clamp 到 [0,1]
+        return min(high_var_ratio * 2.5, 1.0)
     except Exception:
         return 0.0
 

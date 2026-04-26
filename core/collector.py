@@ -6,13 +6,13 @@
 ============================================================
 """
 import time
-import requests
 import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from config import NEWS_SOURCES, NEWS_MAX_PER_SOURCE, FILTER_CATEGORIES
+from config import NEWS_SOURCES, NEWS_MAX_PER_SOURCE, FILTER_CATEGORIES, HOTSPOT_CACHE_TTL_SECONDS
 
 from loguru import logger
+from utils.http_client import build_cached_session
 
 # ---- 模拟真实浏览器头 ----
 USER_AGENTS = [
@@ -23,6 +23,7 @@ USER_AGENTS = [
 
 # ---- 源健康状态 ----
 _source_health = {}
+HTTP_SESSION = build_cached_session("hotspot_cache", HOTSPOT_CACHE_TTL_SECONDS)
 
 
 def _get_source_health(name):
@@ -72,7 +73,8 @@ def fetch_weibo_light():
     url = "https://weibo.com/ajax/side/hotSearch"
     topics = []
     try:
-        res = requests.get(url, headers=get_headers(), timeout=10)
+        res = HTTP_SESSION.get(url, headers=get_headers(), timeout=10)
+        res.raise_for_status()
         data = res.json()
         for item in data.get("data", {}).get("realtime", []):
             word = item.get("word", "").strip()
@@ -131,7 +133,8 @@ def fetch_ithome():
     url = "https://www.ithome.com/"
     topics = []
     try:
-        res = requests.get(url, headers=get_headers(), timeout=10)
+        res = HTTP_SESSION.get(url, headers=get_headers(), timeout=10)
+        res.raise_for_status()
         res.encoding = 'utf-8'
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(res.text, "html.parser")
@@ -161,7 +164,8 @@ def fetch_36kr():
     url = "https://36kr.com/newsflashes"
     topics = []
     try:
-        res = requests.get(url, headers=get_headers(), timeout=10)
+        res = HTTP_SESSION.get(url, headers=get_headers(), timeout=10)
+        res.raise_for_status()
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(res.text, "html.parser")
         # 多选择器兼容
@@ -190,7 +194,8 @@ def fetch_baidu():
     url = "https://top.baidu.com/board?tab=realtime"
     topics = []
     try:
-        res = requests.get(url, headers=get_headers(), timeout=10)
+        res = HTTP_SESSION.get(url, headers=get_headers(), timeout=10)
+        res.raise_for_status()
         res.encoding = 'utf-8'
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(res.text, "html.parser")

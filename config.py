@@ -29,6 +29,9 @@ ARTICLE_AUTHOR = "智界洞察社"
 LLM_TIMEOUT = 60
 IMAGE_TIMEOUT = 15
 WECHAT_API_TIMEOUT = 30
+HOTSPOT_CACHE_TTL_SECONDS = int(os.getenv("HOTSPOT_CACHE_TTL_SECONDS", "600"))
+HTTP_RETRY_TOTAL = int(os.getenv("HTTP_RETRY_TOTAL", "3"))
+HTTP_RETRY_BACKOFF = float(os.getenv("HTTP_RETRY_BACKOFF", "0.8"))
 
 # 6. LLM 模型参数 (可配置)
 LLM_MODEL = "deepseek-chat"
@@ -39,6 +42,8 @@ LLM_MAX_RETRIES = 3          # API 调用最大重试次数
 # 7. 微信发布规范限制
 WECHAT_TITLE_MAX_LEN = 64    # 标题最大字数
 WECHAT_DIGEST_MAX_LEN = 120  # 摘要最大字数 (微信限制 120 字)
+WECHAT_DRAFT_SCAN_COUNT = int(os.getenv("WECHAT_DRAFT_SCAN_COUNT", "50"))
+TITLE_DUPLICATE_RATIO = int(os.getenv("TITLE_DUPLICATE_RATIO", "88"))
 
 # 8. 新闻采集源配置
 NEWS_SOURCES = ["weibo", "ithome", "36kr", "baidu"]  # 启用的采集源

@@ -5,8 +5,9 @@ selenium
 webdriver-manager
 markdown
 icrawler
-pandas
 Pillow
 easyocr
 python-dotenv
 loguru
+requests-cache
+rapidfuzz

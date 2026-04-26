@@ -5,22 +5,40 @@
 ============================================================
 """
 import os
-import requests
 import json
-import time
-from config import WECHAT_API_TIMEOUT, ARTICLE_AUTHOR
+from difflib import SequenceMatcher
+
+from loguru import logger
+
+from config import (
+    WECHAT_API_TIMEOUT,
+    ARTICLE_AUTHOR,
+    WECHAT_DRAFT_SCAN_COUNT,
+    TITLE_DUPLICATE_RATIO,
+)
+from utils.http_client import build_api_session
+
+try:
+    from rapidfuzz import fuzz
+except ImportError:
+    fuzz = None
+
+
+def _normalize_title(title):
+    return ''.join(c.lower() for c in title if c.isalnum())
 
 class WeChatPublisher:
     def __init__(self, app_id, app_secret):
         self.app_id = app_id
         self.app_secret = app_secret
+        self.session = build_api_session()
         self.access_token = self._get_access_token()
 
     def _get_access_token(self):
         """获取并验证微信调用凭证"""
         url = f"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={self.app_id}&secret={self.app_secret}"
         try:
-            res = requests.get(url, timeout=WECHAT_API_TIMEOUT).json()
+            res = self.session.get(url, timeout=WECHAT_API_TIMEOUT).json()
             if "access_token" in res:
                 return res["access_token"]
             else:
@@ -37,7 +55,7 @@ class WeChatPublisher:
         try:
             with open(image_path, 'rb') as f:
                 files = {'media': (os.path.basename(image_path), f, 'image/jpeg')}
-                res = requests.post(url, files=files, timeout=WECHAT_API_TIMEOUT).json()
+                res = self.session.post(url, files=files, timeout=WECHAT_API_TIMEOUT).json()
             return res.get("media_id")
         except Exception:
             return None
@@ -50,34 +68,49 @@ class WeChatPublisher:
         try:
             with open(image_path, 'rb') as f:
                 files = {'media': (os.path.basename(image_path), f, 'image/jpeg')}
-                res = requests.post(url, files=files, timeout=WECHAT_API_TIMEOUT).json()
+                res = self.session.post(url, files=files, timeout=WECHAT_API_TIMEOUT).json()
             return res.get("url")
         except Exception:
             return None
 
-    def get_draft_titles(self, count=20):
+    def get_draft_titles(self, count=WECHAT_DRAFT_SCAN_COUNT):
         """获取最近草稿标题列表（查重用）"""
-        if not self.access_token: return []
+        if not self.access_token:
+            return []
         url = f"https://api.weixin.qq.com/cgi-bin/draft/batchget?access_token={self.access_token}"
         data = {"offset": 0, "count": count, "no_content": 1}
         titles = []
         try:
-            res = requests.post(url, data=json.dumps(data), timeout=WECHAT_API_TIMEOUT).json()
+            res = self.session.post(url, json=data, timeout=WECHAT_API_TIMEOUT).json()
             for item in res.get("item", []):
                 for news in item.get("content", {}).get("news_item", []):
                     titles.append(news.get("title", ""))
-        except:
-            pass
+        except Exception as exc:
+            logger.warning("获取草稿标题失败: {}", exc)
         return titles
+
+    def _title_similarity(self, title_a, title_b):
+        normalized_a = _normalize_title(title_a)
+        normalized_b = _normalize_title(title_b)
+        if not normalized_a or not normalized_b:
+            return 0
+        if fuzz is not None:
+            return max(
+                fuzz.ratio(normalized_a, normalized_b),
+                fuzz.partial_ratio(normalized_a, normalized_b),
+                fuzz.token_sort_ratio(normalized_a, normalized_b),
+            )
+        return int(SequenceMatcher(None, normalized_a, normalized_b).ratio() * 100)
 
     def is_title_duplicate(self, new_title):
         """模糊查重逻辑"""
         existing = self.get_draft_titles()
-        clean_new = ''.join(c for c in new_title if c.isalnum())
         for old in existing:
-            if new_title == old: return True, old
-            clean_old = ''.join(c for c in old if c.isalnum())
-            if len(clean_new) > 4 and (clean_new in clean_old or clean_old in clean_new):
+            if new_title == old:
+                return True, old
+            similarity = self._title_similarity(new_title, old)
+            if similarity >= TITLE_DUPLICATE_RATIO:
+                logger.info("命中相似标题: {} ({}%)", old, similarity)
                 return True, old
         return False, None
 
@@ -113,8 +146,8 @@ class WeChatPublisher:
             }]
         }
         try:
-            return requests.post(
-                url, 
+            return self.session.post(
+                url,
                 data=json.dumps(data, ensure_ascii=False).encode('utf-8'),
                 timeout=WECHAT_API_TIMEOUT
             ).json()
@@ -122,8 +155,10 @@ class WeChatPublisher:
             return {"errcode": -1, "errmsg": str(e)}
 
 def send_to_qywechat(webhook_url, text):
-    if not webhook_url: return
+    if not webhook_url:
+        return
+    session = build_api_session()
     try:
-        requests.post(webhook_url, json={"msgtype": "text", "text": {"content": text}}, timeout=5)
-    except:
-        pass
+        session.post(webhook_url, json={"msgtype": "text", "text": {"content": text}}, timeout=5)
+    except Exception as exc:
+        logger.warning("企业微信通知失败: {}", exc)
