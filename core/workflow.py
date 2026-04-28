@@ -83,6 +83,13 @@ def process_article_content(article_text, publisher):
     placeholders = _extract_image_placeholders(cleaned)
     html_body = markdown.markdown(cleaned, extensions=["extra", "nl2br", "sane_lists"])
 
+    # 移除占位符外层的 <p>，避免后续生成嵌套 <p>
+    html_body = re.sub(
+        r'<p>\s*(【此处插入配图\s*[：:].*?】)\s*</p>',
+        r'\1',
+        html_body
+    )
+
     image_results = {}
     if placeholders:
         logger.info("启动并行图片下载引擎 ({} 张)...", len(placeholders))
@@ -118,6 +125,29 @@ def process_article_content(article_text, publisher):
 
         html_body = _replace_placeholder(html_body, keyword, "")
         logger.info("  最终未匹配到合适配图，已移除占位符")
+
+    # ==========================
+    # 微信图文排版后处理 (CSS 注入)
+    # ==========================
+    # 1. 普通段落：首行缩进两个字符，段落之间留白
+    html_body = html_body.replace(
+        '<p>', 
+        '<p style="text-indent: 2em; margin-bottom: 15px; line-height: 1.8; text-align: justify;">'
+    )
+    
+    # 2. 重点句 (单独成段的加粗文本)：上下增加空格间隔 (margin: 30px)
+    html_body = re.sub(
+        r'<p style="[^"]*">\s*(<strong>.*?</strong>)\s*</p>',
+        r'<p style="margin: 30px 0; text-indent: 2em; line-height: 1.8; text-align: justify;">\1</p>',
+        html_body,
+        flags=re.DOTALL
+    )
+    
+    # 3. 金句引用块：上下增加空格间隔 (margin: 30px)
+    html_body = html_body.replace(
+        '<blockquote>', 
+        '<blockquote style="margin: 30px 0; padding: 15px 20px; border-left: 4px solid #005A9E; background-color: #f8f9fa; color: #555; border-radius: 4px;">'
+    )
 
     word_count = len(cleaned.replace("\n", "").replace(" ", ""))
     return html_body, {

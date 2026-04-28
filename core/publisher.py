@@ -126,9 +126,6 @@ class WeChatPublisher:
             'line-height: 1.8; color: #222; font-size: 17px; word-wrap: break-word;">'
             f'{html_content}'
             '</section>'
-            '<section style="margin-top: 50px; text-align: center; color: #888; font-size: 14px;">'
-            '<p>--- 本文由 AI 内容工厂自动生成 ---</p>'
-            '</section>'
         )
 
         # 摘要默认为标题截断

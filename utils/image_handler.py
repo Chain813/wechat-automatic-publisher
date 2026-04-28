@@ -131,7 +131,7 @@ def _build_search_query(keyword, scene="auto"):
     scene 分类：人物/产品/趋势/科普/auto
     """
     base = f"{keyword}"
-    negative = " -封面 -海报 -PPT -二维码 -logo -图标"
+    negative = " -封面 -海报 -PPT -二维码 -logo -图标 -水印 -素材 -版权 -图库"
 
     if scene == "人物":
         return f"{base} 高清照片 特写{negative}"
@@ -260,7 +260,10 @@ def _try_crawl(engine, keyword, directory, max_num, scene="auto", purpose="body"
             if engine == "bing":
                 from icrawler.builtin import BingImageCrawler
                 crawler = BingImageCrawler(storage={'root_dir': directory}, log_level=50)
-                crawler.crawl(keyword=query, max_num=max_num, overwrite=True)
+                bing_filters = {'size': 'large'}
+                if purpose == "cover":
+                    bing_filters['layout'] = 'wide'
+                crawler.crawl(keyword=query, max_num=max_num, overwrite=True, filters=bing_filters)
             else:
                 from icrawler.builtin import BaiduImageCrawler
                 crawler = BaiduImageCrawler(storage={'root_dir': directory}, log_level=50)
@@ -286,7 +289,8 @@ def _try_crawl_to_dir(engine, keyword, directory, max_num, scene="auto"):
         if engine == "bing":
             from icrawler.builtin import BingImageCrawler
             crawler = BingImageCrawler(storage={'root_dir': directory}, log_level=50)
-            crawler.crawl(keyword=query, max_num=max_num, overwrite=True)
+            bing_filters = {'size': 'large'}
+            crawler.crawl(keyword=query, max_num=max_num, overwrite=True, filters=bing_filters)
         else:
             from icrawler.builtin import BaiduImageCrawler
             crawler = BaiduImageCrawler(storage={'root_dir': directory}, log_level=50)

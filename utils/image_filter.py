@@ -250,6 +250,24 @@ def evaluate_image(image_path, purpose="body"):
             try:
                 results = reader.readtext(image_path)
                 ocr_text_count = len(results)
+                
+                # ---- 水印与来源不明校验 ----
+                watermark_keywords = [
+                    "版权", "水印", "图库", "视觉中国", "站长素材", "昵图网", "千图网", "包图网",
+                    "摄图网", "全景网", "汇图网", "shutterstock", "getty", "alamy", "123rf", 
+                    "istock", "depositphotos", "素材", "未经允许", "盗图"
+                ]
+                has_watermark = False
+                for bbox, text, prob in results:
+                    text_lower = text.lower()
+                    if any(kw in text_lower for kw in watermark_keywords):
+                        has_watermark = True
+                        break
+                        
+                if has_watermark:
+                    logger.info(f"  检测到水印/不明来源图片: {os.path.basename(image_path)}")
+                    return ImageScore(image_path, 0, w, h, aspect_ratio, file_size_kb, 1.0, sharpness, 0, "")
+                
                 if ocr_text_count > 8:
                     return ImageScore(image_path, 0, w, h, aspect_ratio, file_size_kb, 1.0, sharpness, 0, "")
                 # EasyOCR 结果修正密度值
