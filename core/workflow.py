@@ -3,11 +3,13 @@ Publishing workflow orchestration.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta
 
 import markdown
 from loguru import logger
@@ -32,7 +34,8 @@ from core.publisher import WeChatPublisher, send_to_qywechat
 from utils.image_handler import download_cover_image, download_image, reset_image_cache
 
 ASSET_RETENTION_DAYS = 5
-MAX_TOPICS_PER_RUN = 1
+MAX_TOPICS_PER_RUN = 3  # 每次运行发布 3 篇到草稿箱
+MAX_TOPIC_CANDIDATES = 5  # AI 筛选候选数
 PLACEHOLDER_PATTERN = re.compile(r"【此处插入配图\s*[：:]\s*(.*?)】")
 
 
@@ -242,7 +245,92 @@ def cleanup_old_assets(base_dir="assets", max_age_days=5):
         )
 
 
-def _fetch_selected_topics():
+HISTORY_FILE = "hotspots_history.json"
+_history_cache = None  # 启动时加载一次，结束时写回
+
+
+def _load_history():
+    """启动时加载历史记录到内存"""
+    global _history_cache
+    if _history_cache is not None:
+        return _history_cache
+    _history_cache = {}
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                _history_cache = json.load(f)
+        except Exception:
+            pass
+    return _history_cache
+
+
+def _flush_history():
+    """结束时将内存中的历史记录写回磁盘"""
+    global _history_cache
+    if _history_cache is None:
+        return
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(_history_cache, f, ensure_ascii=False, indent=2)
+
+
+def _ensure_today(history):
+    today = datetime.now().strftime("%Y-%m-%d")
+    old_val = history.get(today)
+    if isinstance(old_val, list):
+        history[today] = {"topics": old_val, "results": []}
+    elif not isinstance(old_val, dict):
+        history[today] = {"topics": [], "results": []}
+    return today
+
+
+def _save_history(topics):
+    history = _load_history()
+    today = _ensure_today(history)
+    history[today]["topics"] = topics
+    # 不立即写盘，由 _flush_history 统一写回
+
+
+def _save_publish_result(topic, success, draft_id=None, error=None):
+    """记录单次发布结果，便于追溯（仅写内存）"""
+    history = _load_history()
+    today = _ensure_today(history)
+    result_entry = {
+        "topic": topic,
+        "success": success,
+        "time": datetime.now().strftime("%H:%M:%S"),
+    }
+    if draft_id:
+        result_entry["draft_id"] = draft_id
+    if error:
+        result_entry["error"] = str(error)
+    history[today]["results"].append(result_entry)
+
+
+def _get_past_topics(days=7):
+    history = _load_history()
+    past_topics = []
+    for i in range(1, days + 1):
+        past_date = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+        entry = history.get(past_date, [])
+        if isinstance(entry, dict):
+            past_topics.extend(entry.get("topics", []))
+        elif isinstance(entry, list):
+            past_topics.extend(entry)
+    return past_topics
+
+def _parse_raw_topics(raw_data):
+    """从原始热点文本中解析出话题列表"""
+    topics = []
+    for line in raw_data.split('\n'):
+        line = line.strip()
+        if line.startswith('- '):
+            topic = line[2:].strip()
+            if topic and len(topic) > 2:
+                topics.append(topic)
+    return topics
+
+
+def _fetch_selected_topics(publisher):
     raw_data = fetch_all_hotspots()
     if not raw_data:
         print("❌ 数据源扫描失败，请检查网络连接")
@@ -250,11 +338,37 @@ def _fetch_selected_topics():
         return []
 
     selected_topics = filter_tech_hotspots(raw_data)
-    if not selected_topics:
-        print("📭 今日暂无符合品牌调性的重磅 AI/科技话题，任务结束。")
-        return []
+    if selected_topics:
+        _save_history(selected_topics)
 
-    return selected_topics[:MAX_TOPICS_PER_RUN]
+    if not selected_topics:
+        print("📭 今日暂无符合品牌调性的重磅 AI/科技话题，尝试从前几天最新的未发送热点中挑选...")
+        past_topics = _get_past_topics(days=7)
+        unsent_topics = []
+        for topic in past_topics:
+            is_dup, _ = publisher.is_title_duplicate(topic)
+            if not is_dup:
+                unsent_topics.append(topic)
+
+        if unsent_topics:
+            selected_topic = unsent_topics[0]
+            print(f"✅ 成功找到前几天未发送的优质热点：{selected_topic}")
+            return [selected_topic]
+        else:
+            print("📭 前几天也无符合条件的未发送热点，任务结束。")
+            return []
+
+    # AI 筛选的话题作为高优先级候选
+    candidates = selected_topics[:MAX_TOPIC_CANDIDATES]
+
+    # 从原始热点中补充后备候选（排除已选中的）
+    raw_topics = _parse_raw_topics(raw_data)
+    selected_set = set(candidates)
+    for t in raw_topics:
+        if t not in selected_set and len(candidates) < MAX_TOPIC_CANDIDATES + 10:
+            candidates.append(t)
+
+    return candidates
 
 
 def _generate_article_assets(topic, publisher):
@@ -273,10 +387,23 @@ def _generate_article_assets(topic, publisher):
 
     print("\n📸 正在为文章生成门面封面图...")
     cover_path = download_cover_image(topic)
-    thumb_id = publisher.upload_image(cover_path)
-    if not thumb_id and cover_path:
-        print("⚠️ 封面图上传失败，尝试站内图兜底...")
+    thumb_id = None
+    if cover_path:
         thumb_id = publisher.upload_image(cover_path)
+        if not thumb_id:
+            # 首次上传失败：压缩图片后重试
+            print("⚠️ 封面上传失败，尝试压缩后重试...")
+            try:
+                from PIL import Image as PILImage
+                with PILImage.open(cover_path) as img:
+                    if img.mode != 'RGB':
+                        img = img.convert('RGB')
+                    img.save(cover_path, 'JPEG', quality=60, optimize=True)
+                thumb_id = publisher.upload_image(cover_path)
+            except Exception as e:
+                logger.warning("  封面压缩重试失败: {}", e)
+    else:
+        print("⚠️ 封面图下载失败，将使用无封面模式发布。")
 
     return final_html, review_data, thumb_id
 
@@ -306,17 +433,21 @@ def _publish_draft(publisher, title, html_content, thumb_id, digest_text):
     result = publisher.add_draft(title, html_content, thumb_id, digest_text)
     if "media_id" not in result:
         print(f"❌ 同步草稿箱失败：{result}")
+        _save_publish_result(title, success=False, error=result.get("errmsg", "未知错误"))
         return
 
+    draft_id = result['media_id']
     print(f"\n{'⭐' * 30}")
     print("  🎉 恭喜！发布成功")
     print(f"  📄 标题：{title}")
-    print(f"  🆔 草稿：{result['media_id']}")
+    print(f"  🆔 草稿：{draft_id}")
     print(f"{'⭐' * 30}")
+    _save_publish_result(title, success=True, draft_id=draft_id)
     send_to_qywechat(QYWECHAT_WEBHOOK, f"【{BRAND_NAME}】《{title}》已就绪，请审核发布。")
 
 
 def _process_topic(topic, publisher):
+    """处理单个选题。返回 True 表示发布成功，False 表示跳过/失败。"""
     print(f"\n{'━' * 50}")
     print(f"🎯 正在处理核心选题：{topic}")
     print(f"{'━' * 50}")
@@ -325,38 +456,126 @@ def _process_topic(topic, publisher):
     is_duplicate, old_title = publisher.is_title_duplicate(topic)
     if is_duplicate:
         print(f"  ⚠️ 命中重复！已有相似文章：「{old_title}」")
-        print("  ⏭️ 已自动跳过，确保内容独特性。")
-        return
+        print("  ⏭️ 已自动跳过，尝试下一条...")
+        return False
 
     generated = _generate_article_assets(topic, publisher)
     if not generated:
-        return
+        return False
 
     final_html, review_data, thumb_id = generated
     clean_title, digest_text = _build_publish_payload(topic, review_data, thumb_id)
     _publish_draft(publisher, clean_title, final_html, thumb_id, digest_text)
+    return True
+
+
+def _publish_single_topic(topic):
+    """
+    并行发布单个选题（独立 publisher 实例，线程安全）。
+    返回 (topic, success, error_msg)
+    """
+    try:
+        pub = WeChatPublisher(WECHAT_APP_ID, WECHAT_APP_SECRET)
+        if not pub.access_token:
+            return topic, False, "Token 获取失败"
+
+        print(f"\n{'━' * 50}")
+        print(f"🎯 [并行] 正在处理：{topic}")
+        print(f"{'━' * 50}")
+
+        generated = _generate_article_assets(topic, pub)
+        if not generated:
+            return topic, False, "文章生成失败"
+
+        final_html, review_data, thumb_id = generated
+        clean_title, title_warnings = validate_title(topic)
+        digest = generate_digest(topic)
+        digest_text = digest[:120] if digest else ""
+
+        _print_review_report(
+            title=clean_title,
+            word_count=review_data["word_count"],
+            image_count=review_data["image_count"],
+            sensitive_words=review_data["sensitive_words"],
+            cover_ok=thumb_id is not None,
+            digest=digest,
+        )
+
+        result = pub.add_draft(clean_title, final_html, thumb_id, digest_text)
+        if "media_id" in result:
+            draft_id = result["media_id"]
+            print(f"\n✅ 「{clean_title}」发布成功 → {draft_id}")
+            _save_publish_result(clean_title, success=True, draft_id=draft_id)
+            send_to_qywechat(QYWECHAT_WEBHOOK, f"【{BRAND_NAME}】《{clean_title}》已就绪，请审核发布。")
+            return topic, True, None
+        else:
+            err = result.get("errmsg", "未知错误")
+            print(f"❌ 「{clean_title}」发布失败：{err}")
+            _save_publish_result(clean_title, success=False, error=err)
+            return topic, False, err
+
+    except Exception as exc:
+        logger.warning("  并行发布异常: {}", exc)
+        return topic, False, str(exc)
 
 
 def run_main():
     _print_banner()
     cleanup_old_assets("assets", max_age_days=ASSET_RETENTION_DAYS)
+    _load_history()  # 启动时一次性加载历史记录
 
     try:
-        selected_topics = _fetch_selected_topics()
-        if not selected_topics:
-            return
-
         publisher = WeChatPublisher(WECHAT_APP_ID, WECHAT_APP_SECRET)
         if not publisher.access_token:
             print("❌ 微信发布组件初始化失败，请检查公众号凭证配置。")
             return
 
+        selected_topics = _fetch_selected_topics(publisher)
+        if not selected_topics:
+            return
+
+        # 第一步：顺序去重（快速，仅 API 调用）
+        print(f"\n📋 共 {len(selected_topics)} 个候选话题，正在去重...")
+        valid_topics = []
         for topic in selected_topics:
-            _process_topic(topic, publisher)
+            if len(valid_topics) >= MAX_TOPICS_PER_RUN:
+                break
+            is_dup, old_title = publisher.is_title_duplicate(topic)
+            if is_dup:
+                print(f"  ⚠️ 跳过重复：「{topic}」≈「{old_title}」")
+            else:
+                valid_topics.append(topic)
+
+        if not valid_topics:
+            print("\n📭 所有候选话题均已存在，本次无新内容发布。")
+            return
+
+        print(f"\n🚀 准备并行发布 {len(valid_topics)} 篇文章...")
+        print(f"   候选：{valid_topics}")
+
+        # 第二步：并行生成 + 发布
+        published_count = 0
+        with ThreadPoolExecutor(max_workers=len(valid_topics)) as executor:
+            futures = {
+                executor.submit(_publish_single_topic, topic): topic
+                for topic in valid_topics
+            }
+            for future in as_completed(futures):
+                topic, success, error = future.result()
+                if success:
+                    published_count += 1
+                elif error:
+                    logger.warning("  「{}」发布失败: {}", topic, error)
+
+        print(f"\n{'⭐' * 30}")
+        print(f"  本次运行完成：成功发布 {published_count}/{len(valid_topics)} 篇")
+        print(f"{'⭐' * 30}")
 
     except Exception as exc:
         print(f"\n💥 系统核心崩溃：{exc}")
         traceback.print_exc()
+    finally:
+        _flush_history()  # 结束时统一写回磁盘
 
 
 __all__ = ["run_main", "process_article_content", "cleanup_old_assets"]

@@ -15,6 +15,23 @@ def _reconfigure_stdio():
             stream.reconfigure(encoding="utf-8")
 
 
+def _validate_config():
+    """启动时校验必要配置项，缺失则立即报错退出"""
+    from config import LLM_API_KEY, WECHAT_APP_ID, WECHAT_APP_SECRET
+
+    missing = []
+    if not LLM_API_KEY:
+        missing.append("LLM_API_KEY")
+    if not WECHAT_APP_ID:
+        missing.append("WECHAT_APP_ID")
+    if not WECHAT_APP_SECRET:
+        missing.append("WECHAT_APP_SECRET")
+
+    if missing:
+        logger.error("以下必要配置项缺失，请在 .env 文件中设置: {}", ", ".join(missing))
+        sys.exit(1)
+
+
 def configure_runtime():
     """Prepare stdio encoding and a consistent Loguru console sink."""
     _reconfigure_stdio()
@@ -26,6 +43,8 @@ def configure_runtime():
         level="INFO",
         colorize=True,
     )
+
+    _validate_config()
 
 
 __all__ = ["configure_runtime"]

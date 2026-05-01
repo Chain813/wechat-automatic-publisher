@@ -6,8 +6,10 @@ webdriver-manager
 markdown
 icrawler
 Pillow
+numpy
 easyocr
 python-dotenv
 loguru
 requests-cache
 rapidfuzz
+feedparser

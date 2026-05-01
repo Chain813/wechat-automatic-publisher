@@ -23,3 +23,5 @@ hotspot_cache.sqlite*
 .vscode/
 *.swp
 *.swo
+hotspots_history.json
+scratch/

@@ -54,9 +54,9 @@ def text_density_light(image_path):
     返回 0.0-1.0 的密度值。
     """
     try:
-        img = Image.open(image_path).convert('L')
-        img = img.resize((192, 192))
-        arr = np.array(img, dtype=np.float32)
+        with Image.open(image_path) as raw:
+            img = raw.convert('L').resize((192, 192))
+            arr = np.array(img, dtype=np.float32)
 
         try:
             windows = np.lib.stride_tricks.sliding_window_view(arr, (3, 3))
@@ -78,14 +78,12 @@ def text_density_light(image_path):
 def compute_perceptual_hash(image_path):
     """计算图片的感知哈希 (pHash)，用于相似度去重"""
     try:
-        img = Image.open(image_path).convert('L')
-        img = img.resize((32, 32), Image.LANCZOS)
-        arr = np.array(img, dtype=np.float32)
-        # DCT 简化版：用均值哈希
+        with Image.open(image_path) as raw:
+            img = raw.convert('L').resize((32, 32), Image.LANCZOS)
+            arr = np.array(img, dtype=np.float32)
         avg = arr.mean()
         hash_bits = (arr > avg).flatten()
         hash_str = ''.join(['1' if b else '0' for b in hash_bits])
-        # 转十六进制缩短
         hash_hex = hex(int(hash_str, 2))[2:].zfill(256 // 4)
         return hash_hex
     except Exception:
@@ -175,105 +173,101 @@ def evaluate_image(image_path, purpose="body"):
         if not os.path.exists(image_path):
             return ImageScore(image_path, 0, 0, 0, 0, 0, 0, 0, 0, "")
 
-        img = Image.open(image_path)
-        w, h = img.size
-        aspect_ratio = w / h if h > 0 else 0
-        file_size_kb = os.path.getsize(image_path) / 1024
+        with Image.open(image_path) as img:
+            w, h = img.size
+            aspect_ratio = w / h if h > 0 else 0
+            file_size_kb = os.path.getsize(image_path) / 1024
 
-        # ---- 1. 硬性门槛 ----
-        if purpose == "cover":
-            # 封面必须够宽
-            if w < 600 or h < 200:
-                return ImageScore(image_path, 0, w, h, aspect_ratio, file_size_kb, 0, 0, 0, "")
-            # 封面文件不能超过 10MB
-            if file_size_kb > WECHAT_MATERIAL_MAX_MB * 1024:
-                return ImageScore(image_path, 0, w, h, aspect_ratio, file_size_kb, 0, 0, 0, "")
-        else:
-            if w < 400 or h < 300:
-                return ImageScore(image_path, 0, w, h, aspect_ratio, file_size_kb, 0, 0, 0, "")
-            if aspect_ratio > 3.0 or aspect_ratio < 0.33:
-                return ImageScore(image_path, 0, w, h, aspect_ratio, file_size_kb, 0, 0, 0, "")
-            if file_size_kb > WECHAT_BODY_MAX_MB * 1024:
-                return ImageScore(image_path, 0, w, h, aspect_ratio, file_size_kb, 0, 0, 0, "")
-
-        # ---- 2. 计算各维度得分 (百分制) ----
-        # 分辨率分
-        if w >= 1200:
-            res_score = 100
-        elif w >= 900:
-            res_score = 80
-        elif w >= 800:
-            res_score = 60
-        elif w >= 600:
-            res_score = 40
-        else:
-            res_score = 20
-
-        # 宽高比分
-        if purpose == "cover":
-            ratio_diff = abs(aspect_ratio - WECHAT_COVER_RATIO) / WECHAT_COVER_RATIO
-            if ratio_diff < 0.05:
-                ratio_score = 100
-            elif ratio_diff < 0.15:
-                ratio_score = 80
-            elif ratio_diff < 0.30:
-                ratio_score = 50
+            # ---- 1. 硬性门槛 ----
+            if purpose == "cover":
+                if w < 600 or h < 200:
+                    return ImageScore(image_path, 0, w, h, aspect_ratio, file_size_kb, 0, 0, 0, "")
+                if file_size_kb > WECHAT_MATERIAL_MAX_MB * 1024:
+                    return ImageScore(image_path, 0, w, h, aspect_ratio, file_size_kb, 0, 0, 0, "")
             else:
-                ratio_score = 20
-        else:
-            if 1.5 <= aspect_ratio <= 1.8:
-                ratio_score = 100
-            elif 1.2 <= aspect_ratio <= 2.0:
-                ratio_score = 80
-            elif 0.8 <= aspect_ratio <= 2.5:
-                ratio_score = 50
-            else:
-                ratio_score = 20
+                if w < 400 or h < 300:
+                    return ImageScore(image_path, 0, w, h, aspect_ratio, file_size_kb, 0, 0, 0, "")
+                if aspect_ratio > 3.0 or aspect_ratio < 0.33:
+                    return ImageScore(image_path, 0, w, h, aspect_ratio, file_size_kb, 0, 0, 0, "")
+                if file_size_kb > WECHAT_BODY_MAX_MB * 1024:
+                    return ImageScore(image_path, 0, w, h, aspect_ratio, file_size_kb, 0, 0, 0, "")
 
-        # 清晰度分
-        sharpness = _compute_sharpness(img)
-        if sharpness > 200:
-            clarity_score = 100
-        elif sharpness > 100:
-            clarity_score = 80
-        elif sharpness > 50:
-            clarity_score = 50
-        else:
-            clarity_score = 20
+            # ---- 2. 计算各维度得分 (百分制) ----
+            # 分辨率分
+            if w >= 1200:
+                res_score = 100
+            elif w >= 900:
+                res_score = 80
+            elif w >= 800:
+                res_score = 60
+            elif w >= 600:
+                res_score = 40
+            else:
+                res_score = 20
+
+            # 宽高比分
+            if purpose == "cover":
+                ratio_diff = abs(aspect_ratio - WECHAT_COVER_RATIO) / WECHAT_COVER_RATIO
+                if ratio_diff < 0.05:
+                    ratio_score = 100
+                elif ratio_diff < 0.15:
+                    ratio_score = 80
+                elif ratio_diff < 0.30:
+                    ratio_score = 50
+                else:
+                    ratio_score = 20
+            else:
+                if 1.5 <= aspect_ratio <= 1.8:
+                    ratio_score = 100
+                elif 1.2 <= aspect_ratio <= 2.0:
+                    ratio_score = 80
+                elif 0.8 <= aspect_ratio <= 2.5:
+                    ratio_score = 50
+                else:
+                    ratio_score = 20
+
+            # 清晰度分
+            sharpness = _compute_sharpness(img)
+            if sharpness > 200:
+                clarity_score = 100
+            elif sharpness > 100:
+                clarity_score = 80
+            elif sharpness > 50:
+                clarity_score = 50
+            else:
+                clarity_score = 20
+
+            # 色彩丰富度分
+            color_richness = _compute_color_richness(img)
 
         # 文字密度分 (文字越少分越高)
         text_density = text_density_light(image_path)
-        # 再用 EasyOCR 做更精确检测 (如果可用)
-        reader = get_ocr_reader()
+
+        # B4: EasyOCR 智能门控 — 只在边界区间 (0.05-0.30) 才调用 OCR
         ocr_text_count = 0
-        if reader:
-            try:
-                results = reader.readtext(image_path)
-                ocr_text_count = len(results)
-                
-                # ---- 水印与来源不明校验 ----
-                watermark_keywords = [
-                    "版权", "水印", "图库", "视觉中国", "站长素材", "昵图网", "千图网", "包图网",
-                    "摄图网", "全景网", "汇图网", "shutterstock", "getty", "alamy", "123rf", 
-                    "istock", "depositphotos", "素材", "未经允许", "盗图"
-                ]
-                has_watermark = False
-                for bbox, text, prob in results:
-                    text_lower = text.lower()
-                    if any(kw in text_lower for kw in watermark_keywords):
-                        has_watermark = True
-                        break
-                        
-                if has_watermark:
-                    logger.info(f"  检测到水印/不明来源图片: {os.path.basename(image_path)}")
-                    return ImageScore(image_path, 0, w, h, aspect_ratio, file_size_kb, 1.0, sharpness, 0, "")
-                
-                if ocr_text_count > 8:
-                    return ImageScore(image_path, 0, w, h, aspect_ratio, file_size_kb, 1.0, sharpness, 0, "")
-                # EasyOCR 结果修正密度值
-                text_density = max(text_density, ocr_text_count / 10.0)
-            except Exception:
-                logger.debug("OCR failed for {}", image_path)
+        if 0.05 <= text_density <= 0.30:
+            reader = get_ocr_reader()
+            if reader:
+                try:
+                    results = reader.readtext(image_path)
+                    ocr_text_count = len(results)
+
+                    # 水印与来源不明校验
+                    watermark_keywords = [
+                        "版权", "水印", "图库", "视觉中国", "站长素材", "昵图网", "千图网", "包图网",
+                        "摄图网", "全景网", "汇图网", "shutterstock", "getty", "alamy", "123rf",
+                        "istock", "depositphotos", "素材", "未经允许", "盗图"
+                    ]
+                    for bbox, text, prob in results:
+                        if any(kw in text.lower() for kw in watermark_keywords):
+                            logger.info("  检测到水印图片: {}", os.path.basename(image_path))
+                            return ImageScore(image_path, 0, w, h, aspect_ratio, file_size_kb, 1.0, sharpness, 0, "")
+
+                    if ocr_text_count > 8:
+                        return ImageScore(image_path, 0, w, h, aspect_ratio, file_size_kb, 1.0, sharpness, 0, "")
+                    text_density = max(text_density, ocr_text_count / 10.0)
+                except Exception:
+                    logger.debug("OCR failed for {}", image_path)
 
         if purpose == "cover":
             if text_density < 0.05:
@@ -295,7 +289,6 @@ def evaluate_image(image_path, purpose="body"):
                 text_score = 10
 
         # 色彩丰富度分
-        color_richness = _compute_color_richness(img)
         if color_richness > 0.5:
             color_score = 100
         elif color_richness > 0.3:

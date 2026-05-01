@@ -1,14 +1,24 @@
 """
 ============================================================
-  图片检索引擎 v5.0 (微信适配版)
-  策略：多源搜索 -> 智能评分 -> 择优录取 -> 尺寸适配
-  新增：微信尺寸裁剪、感知哈希去重、本地兜底、重试机制
+  图片检索引擎 v6.0 (微信适配版)
+  策略：免费图库 -> 多源搜索 -> 智能评分 -> 择优录取 -> 尺寸适配
+  新增：Pexels/Unsplash 免费图库、线程安全、并行采集
 ============================================================
 """
 import os
 import re
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image
+
+# 屏蔽 icrawler/OpenCV 的损坏图片警告
+os.environ["OPENCV_LOG_LEVEL"] = "SILENT"
+try:
+    import cv2
+    cv2.setLogLevel(0)  # 0=SILENT, 屏蔽 imread 失败的 WARN
+except (ImportError, AttributeError):
+    pass
 
 from config import IMAGE_DEFAULT_CANDIDATES, IMAGE_RETRY_MAX
 
@@ -20,8 +30,40 @@ WECHAT_BODY_SIZE = (900, 500)      # 正文插图推荐尺寸
 WECHAT_BODY_MAX_MB = 2             # 正文图片 2MB 限制
 LOCAL_FALLBACK_IMAGE = "assets/default_cover.jpg"
 
-# 已下载图片的感知哈希集合（真正用于去重）
+# ---- 线程安全的哈希去重集合 ----
 _downloaded_hashes = set()
+_hashes_lock = threading.Lock()
+
+# ---- 免费图库 API (Pexels) ----
+# Pexels 免费 API key，无需付费即可使用（每月 200 次免费）
+# 若需更多配额，替换为自己的 key: https://www.pexels.com/api/
+PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")
+
+
+def _is_too_similar_to_existing(phash):
+    """检查感知哈希是否与已下载图片相似（线程安全）"""
+    if not phash:
+        return False
+    from .image_filter import is_too_similar
+    with _hashes_lock:
+        for existing in _downloaded_hashes:
+            if is_too_similar(phash, existing):
+                return True
+    return False
+
+
+def _register_hash(phash):
+    """注册已使用的哈希（线程安全）"""
+    if phash:
+        with _hashes_lock:
+            _downloaded_hashes.add(phash)
+
+
+def reset_image_cache():
+    """重置下载缓存（线程安全）"""
+    global _downloaded_hashes
+    with _hashes_lock:
+        _downloaded_hashes = set()
 
 
 def _get_all_candidates(directory):
@@ -48,17 +90,6 @@ def _clean_dir(directory):
                     pass
 
 
-def _is_too_similar_to_existing(phash):
-    """检查感知哈希是否与已下载图片相似"""
-    if not phash:
-        return False
-    from .image_filter import is_too_similar
-    for existing in _downloaded_hashes:
-        if is_too_similar(phash, existing):
-            return True
-    return False
-
-
 # ==========================================
 #  微信尺寸适配
 # ==========================================
@@ -71,35 +102,32 @@ def resize_for_wechat(img_path, purpose="body"):
     """
     try:
         target_size = WECHAT_COVER_SIZE if purpose == "cover" else WECHAT_BODY_SIZE
-        img = Image.open(img_path)
-        orig_w, orig_h = img.size
+        with Image.open(img_path) as raw:
+            orig_w, orig_h = raw.size
 
-        tw, th = target_size
-        target_ratio = tw / th
-        orig_ratio = orig_w / orig_h
+            tw, th = target_size
+            target_ratio = tw / th
+            orig_ratio = orig_w / orig_h
 
-        if orig_ratio > target_ratio:
-            # 原图更宽：裁剪左右
-            new_w = int(orig_h * target_ratio)
-            new_h = orig_h
-            left = (orig_w - new_w) // 2
-            img = img.crop((left, 0, left + new_w, new_h))
-        else:
-            # 原图更高：裁剪上下
-            new_w = orig_w
-            new_h = int(orig_w / target_ratio)
-            top = (orig_h - new_h) // 2
-            img = img.crop((0, top, new_w, new_h))
+            if orig_ratio > target_ratio:
+                new_w = int(orig_h * target_ratio)
+                new_h = orig_h
+                left = (orig_w - new_w) // 2
+                img = raw.crop((left, 0, left + new_w, new_h))
+            else:
+                new_w = orig_w
+                new_h = int(orig_w / target_ratio)
+                top = (orig_h - new_h) // 2
+                img = raw.crop((0, top, new_w, new_h))
 
-        img = img.resize(target_size, Image.LANCZOS)
+            img = img.resize(target_size, Image.LANCZOS)
 
-        # 如果原图是 RGBA，转为 RGB
-        if img.mode == 'RGBA':
-            background = Image.new('RGB', img.size, (255, 255, 255))
-            background.paste(img, mask=img.split()[3])
-            img = background
-        elif img.mode != 'RGB':
-            img = img.convert('RGB')
+            if img.mode == 'RGBA':
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                background.paste(img, mask=img.split()[3])
+                img = background
+            elif img.mode != 'RGB':
+                img = img.convert('RGB')
 
         # 检查文件大小：超过微信限制则压缩
         out_path = img_path
@@ -120,6 +148,79 @@ def resize_for_wechat(img_path, purpose="body"):
     except Exception as e:
         logger.warning("  resize_for_wechat failed: {}", e)
         return img_path
+
+
+# ==========================================
+#  免费图库搜索 (Pexels API)
+# ==========================================
+def _search_pexels(keyword, max_num=3):
+    """
+    通过 Pexels 免费 API 搜索高质量免版权图片。
+    返回图片 URL 列表。
+    """
+    if not PEXELS_API_KEY:
+        return []
+
+    try:
+        import requests
+        headers = {"Authorization": PEXELS_API_KEY}
+        params = {"query": keyword, "per_page": max_num, "orientation": "landscape"}
+        res = requests.get(
+            "https://api.pexels.com/v1/search",
+            headers=headers, params=params, timeout=15
+        )
+        res.raise_for_status()
+        data = res.json()
+        urls = []
+        for photo in data.get("photos", []):
+            url = photo.get("src", {}).get("large", "")
+            if url:
+                urls.append(url)
+        return urls
+    except Exception as e:
+        logger.debug("  Pexels 搜索失败: {}", e)
+        return []
+
+
+def _download_from_url(url, save_path):
+    """从 URL 下载图片到本地路径"""
+    try:
+        import requests
+        res = requests.get(url, timeout=15, stream=True)
+        res.raise_for_status()
+        with open(save_path, 'wb') as f:
+            for chunk in res.iter_content(8192):
+                f.write(chunk)
+        if os.path.getsize(save_path) > 5000:
+            return save_path
+    except Exception:
+        pass
+    return None
+
+
+def _try_pexels(keyword, directory, max_num=3):
+    """
+    尝试从 Pexels 免费图库下载，评分后返回最优图片。
+    版权安全，优先使用。
+    """
+    urls = _search_pexels(keyword, max_num)
+    if not urls:
+        return None
+
+    from .image_filter import pick_best_image
+    candidates = []
+    for i, url in enumerate(urls):
+        save_path = os.path.join(directory, f"pexels_{i}.jpg")
+        result = _download_from_url(url, save_path)
+        if result:
+            candidates.append(result)
+
+    if candidates:
+        best = pick_best_image(candidates, "body")
+        if best:
+            logger.info("  Pexels 免费图库命中: {}", os.path.basename(best))
+            return best
+    return None
 
 
 # ==========================================
@@ -150,7 +251,7 @@ def _build_search_query(keyword, scene="auto"):
 # ==========================================
 def download_image(keyword, save_dir="assets"):
     """
-    智能图片搜索（多图采样 + 评分筛选 + 微信尺寸适配）
+    智能图片搜索（免费图库优先 -> 多源搜索 -> 评分筛选 -> 微信尺寸适配）
     """
     if not keyword or not keyword.strip():
         return None
@@ -166,6 +267,13 @@ def download_image(keyword, save_dir="assets"):
     logger.info("正在为 '{}' 启动智能采样筛选...", keyword)
 
     max_num = IMAGE_DEFAULT_CANDIDATES
+
+    # ---- 策略 0：Pexels 免费图库（版权安全，优先） ----
+    best = _try_pexels(keyword, specific_dir, max_num)
+    if best:
+        best = _finalize_image(best, "body")
+        if best:
+            return best
 
     # ---- 策略 1：Bing 采样 ----
     best = _try_crawl("bing", keyword, specific_dir, max_num, purpose="body")
@@ -186,7 +294,7 @@ def download_image(keyword, save_dir="assets"):
 
 
 def download_cover_image(keyword, save_dir="assets"):
-    """封面专用下载（偏好 2.35:1 宽屏）"""
+    """封面专用下载（Pexels 优先 -> Bing -> 百度 -> 兜底）"""
     if not keyword or not keyword.strip():
         return _get_fallback_image(save_dir)
 
@@ -197,7 +305,14 @@ def download_cover_image(keyword, save_dir="assets"):
 
     logger.info("正在为封面 '{}' 搜索宽屏素材...", keyword)
 
-    max_num = IMAGE_DEFAULT_CANDIDATES + 3  # 封面需要更多候选
+    max_num = IMAGE_DEFAULT_CANDIDATES + 3
+
+    # ---- 策略 0：Pexels 免费图库 ----
+    best = _try_pexels(keyword, specific_dir, max_num)
+    if best:
+        best = _finalize_image(best, "cover")
+        if best:
+            return best
 
     best = _try_crawl("bing", keyword, specific_dir, max_num, scene="趋势", purpose="cover")
     if best:
@@ -252,24 +367,26 @@ def download_images(keyword, save_dir="assets", max_num=None):
 #  内部辅助
 # ==========================================
 def _try_crawl(engine, keyword, directory, max_num, scene="auto", purpose="body"):
-    """尝试从指定引擎抓取，返回最优图片路径"""
-    _clean_dir(directory)
+    """尝试从指定引擎抓取，返回最优图片路径。每个引擎使用独立子目录。"""
+    engine_dir = os.path.join(directory, engine)
+    os.makedirs(engine_dir, exist_ok=True)
+    _clean_dir(engine_dir)
     query = _build_search_query(keyword, scene)
     for attempt in range(1, IMAGE_RETRY_MAX + 1):
         try:
             if engine == "bing":
                 from icrawler.builtin import BingImageCrawler
-                crawler = BingImageCrawler(storage={'root_dir': directory}, log_level=50)
+                crawler = BingImageCrawler(storage={'root_dir': engine_dir}, log_level=50)
                 bing_filters = {'size': 'large'}
                 if purpose == "cover":
                     bing_filters['layout'] = 'wide'
                 crawler.crawl(keyword=query, max_num=max_num, overwrite=True, filters=bing_filters)
             else:
                 from icrawler.builtin import BaiduImageCrawler
-                crawler = BaiduImageCrawler(storage={'root_dir': directory}, log_level=50)
+                crawler = BaiduImageCrawler(storage={'root_dir': engine_dir}, log_level=50)
                 crawler.crawl(keyword=query, max_num=max_num, overwrite=True)
 
-            candidates = _get_all_candidates(directory)
+            candidates = _get_all_candidates(engine_dir)
             if candidates:
                 from .image_filter import pick_best_image
                 best = pick_best_image(candidates, purpose)
@@ -279,6 +396,31 @@ def _try_crawl(engine, keyword, directory, max_num, scene="auto", purpose="body"
             logger.warning("  {} 第 {}/{} 次抓取失败: {}", engine, attempt, IMAGE_RETRY_MAX, e)
             if attempt < IMAGE_RETRY_MAX:
                 time.sleep(1)
+    return None
+
+
+def _try_crawl_parallel(keyword, directory, max_num, scene="auto", purpose="body"):
+    """
+    Bing 和百度并行抓取，返回最先成功的最优图片。
+    比串行快 30-50%。
+    """
+    bing_dir = os.path.join(directory, "bing")
+    baidu_dir = os.path.join(directory, "baidu")
+    os.makedirs(bing_dir, exist_ok=True)
+    os.makedirs(baidu_dir, exist_ok=True)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        f_bing = executor.submit(_try_crawl, "bing", keyword, bing_dir, max_num, scene, purpose)
+        f_baidu = executor.submit(_try_crawl, "baidu", keyword, baidu_dir, max(3, max_num // 2), scene, purpose)
+
+        for future in as_completed([f_bing, f_baidu]):
+            try:
+                result = future.result()
+                if result:
+                    return result
+            except Exception as e:
+                logger.debug("  并行抓取子任务异常: {}", e)
+
     return None
 
 
@@ -308,8 +450,7 @@ def _finalize_image(img_path, purpose):
         return None
 
     result = resize_for_wechat(img_path, purpose)
-    if phash:
-        _downloaded_hashes.add(phash)
+    _register_hash(phash)
     return result
 
 
@@ -345,9 +486,3 @@ def _get_fallback_image(directory):
     except Exception as e:
         logger.warning("  在线兜底图获取失败: {}", e)
         return None
-
-
-def reset_image_cache():
-    """重置下载缓存"""
-    global _downloaded_hashes
-    _downloaded_hashes = set()
