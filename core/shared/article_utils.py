@@ -54,6 +54,9 @@ def process_article_content(article_text, publisher):
     cleaned = re.sub(r"```\s*markdown\s*\n?", "", article_text)
     cleaned = re.sub(r"```\s*\n?", "", cleaned).strip()
 
+    # 重点分级：**{红色加粗}** → 临时标记，防止 markdown 转换时丢失花括号
+    cleaned = re.sub(r'\*\*\{(.*?)\}\*\*', r'<redbold>\1</redbold>', cleaned)
+
     cleaned, hit_words = filter_sensitive(cleaned)
     if hit_words:
         logger.warning("  检测到敏感词: {}", hit_words)
@@ -177,10 +180,15 @@ def process_article_content(article_text, publisher):
         '<ul style="margin-bottom: 20px; padding-left: 25px; line-height: 1.8; color: #333;">'
     )
 
-    # 优化加粗文本样式，使其更醒目
+    # 重点分级样式：红色加粗（最核心结论） → 黑色加粗（重要论点）
+    html_body = html_body.replace(
+        '<redbold>', '<strong style="color: #d73a49; font-weight: bold;">'
+    ).replace(
+        '</redbold>', '</strong>'
+    )
     html_body = re.sub(
         r'<strong>(.*?)</strong>',
-        r'<strong style="color: #d73a49; font-weight: bold;">\1</strong>',
+        r'<strong style="color: #1a1a1a; font-weight: bold;">\1</strong>',
         html_body
     )
 
