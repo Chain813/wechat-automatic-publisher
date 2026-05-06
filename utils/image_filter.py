@@ -65,8 +65,8 @@ def _detect_ollama_vision_model():
         import requests
         resp = requests.get("http://localhost:11434/api/tags", timeout=3)
         models = [m["name"].lower() for m in resp.json().get("models", [])]
-        # 优先级：轻量优先（moondream > minicpm-v > llava > gemma4）
-        for preferred in ["moondream", "minicpm-v", "llava", "gemma4"]:
+        # 优先级：轻量优先（moondream > minicpm-v > gemma3:4b > llava > gemma4）
+        for preferred in ["moondream", "minicpm-v", "gemma3:4b", "gemma3", "llava", "gemma4"]:
             for m in models:
                 if preferred in m:
                     _OLLAMA_MODEL = m
