@@ -48,7 +48,102 @@ def get_ocr_reader():
 
 
 # ==========================================
-#  Gemini Vision 智能评分
+#  Ollama 本地视觉模型评分 (优先)
+# ==========================================
+_OLLAMA_STATUS = "PENDING"
+_OLLAMA_MODEL = None
+
+
+def _detect_ollama_vision_model():
+    """自动检测 Ollama 中可用的视觉模型，优先选轻量模型"""
+    global _OLLAMA_MODEL, _OLLAMA_STATUS
+    if _OLLAMA_STATUS in ("DISABLED", "NO_MODEL"):
+        return _OLLAMA_STATUS
+    if _OLLAMA_MODEL is not None:
+        return "READY"
+    try:
+        import requests
+        resp = requests.get("http://localhost:11434/api/tags", timeout=3)
+        models = [m["name"].lower() for m in resp.json().get("models", [])]
+        # 优先级：轻量优先（moondream > minicpm-v > llava > gemma4）
+        for preferred in ["moondream", "minicpm-v", "llava", "gemma4"]:
+            for m in models:
+                if preferred in m:
+                    _OLLAMA_MODEL = m
+                    _OLLAMA_STATUS = "READY"
+                    logger.info("  Ollama 视觉模型: {}", m)
+                    return "READY"
+        _OLLAMA_STATUS = "NO_MODEL"
+        return "NO_MODEL"
+    except Exception:
+        _OLLAMA_STATUS = "DISABLED"
+        return "DISABLED"
+
+
+def evaluate_image_with_ollama(image_path, purpose="body"):
+    """
+    用本地 Ollama 视觉模型评估图片。
+    返回 (score: 0-100, reason: str) 或 None。
+    """
+    if _detect_ollama_vision_model() != "READY":
+        return None
+
+    try:
+        import base64, requests
+
+        if purpose == "cover":
+            context = "微信公众号文章封面图（推荐宽屏2.35:1）"
+        else:
+            context = "微信公众号正文配图（推荐横版16:9或4:3）"
+
+        prompt = f"""你是一个图片编辑，为时政科技公众号挑选配图。
+这张图用作：{context}
+
+评估这张图，只返回JSON：
+{{"watermark":0,"relevance":80,"quality":85,"text_amount":10,"overall":80,"reason":"理由"}}
+
+字段说明：
+- watermark: 0或1，是否有水印/版权标记
+- relevance: 0-100，与科技时政的相关度
+- quality: 0-100，画面清晰度和构图
+- text_amount: 0-100，图中文字占比
+- overall: 0-100，综合适配度
+- reason: 15字内理由
+只返回JSON，不要其他文字。"""
+
+        with open(image_path, "rb") as f:
+            image_b64 = base64.b64encode(f.read()).decode()
+
+        resp = requests.post("http://localhost:11434/api/chat", json={
+            "model": _OLLAMA_MODEL,
+            "messages": [{"role": "user", "content": prompt, "images": [image_b64]}],
+            "stream": False,
+            "options": {"temperature": 0.1, "num_predict": 200}
+        }, timeout=30)
+
+        text = resp.json().get("message", {}).get("content", "")
+        json_match = re.search(r'\{[^}]+\}', text)
+        if json_match:
+            data = json.loads(json_match.group())
+
+            if data.get("watermark", 0) == 1:
+                logger.info("  Ollama Vision: 检测到水印 → 0分")
+                return 0, "水印图片"
+
+            text_penalty = max(0, (data.get("text_amount", 0) - 30) * 0.5)
+            score = max(0, min(100, data.get("overall", 50) - text_penalty))
+            reason = data.get("reason", "")
+            logger.info("  Ollama Vision({}): {}分 - {}", _OLLAMA_MODEL, score, reason)
+            return score, reason
+
+    except Exception as e:
+        logger.debug("  Ollama Vision 评估失败: {}", e)
+
+    return None
+
+
+# ==========================================
+#  Gemini Vision 智能评分 (备用)
 # ==========================================
 _GEMINI_MODEL = None
 _GEMINI_STATUS = "PENDING"
@@ -451,8 +546,26 @@ def evaluate_image(image_path, purpose="body"):
 # ==========================================
 #  批量选择
 # ==========================================
+def _vision_score_candidates(candidates, purpose, top_n=3):
+    """用视觉模型对 top N 候选做二次评分（Gemini 优先 → Ollama 降级）"""
+    for c in candidates[:top_n]:
+        result = evaluate_image_with_gemini(c.path, purpose)
+        if result is None:
+            result = evaluate_image_with_ollama(c.path, purpose)
+        if result is not None:
+            vision_score, reason = result
+            if vision_score == 0:
+                logger.info("  视觉否决 {}: {}", os.path.basename(c.path), reason)
+                c.score = 0
+            else:
+                cv_score = c.score
+                c.score = round(cv_score * 0.4 + vision_score * 0.6, 1)
+                logger.info("  视觉融合 {}: CV={:.0f} → {:.0f}",
+                            os.path.basename(c.path), cv_score, c.score)
+
+
 def pick_best_image(image_paths, purpose="body"):
-    """从候选列表中按用途择优录取（CV 评分 + Gemini Vision 辅助决策）"""
+    """从候选列表中按用途择优录取（CV 评分 + 视觉模型辅助决策）"""
     if not image_paths:
         return None
 
@@ -461,7 +574,6 @@ def pick_best_image(image_paths, purpose="body"):
     for path in image_paths:
         score = evaluate_image(path, purpose)
         if score.score > 0:
-            # 感知哈希去重
             if score.phash and score.phash in seen_hashes:
                 continue
             if score.phash:
@@ -472,25 +584,9 @@ def pick_best_image(image_paths, purpose="body"):
         return image_paths[0] if image_paths else None
 
     candidates.sort(key=lambda x: x.score, reverse=True)
-
-    # ---- Gemini Vision 辅助评分：对 top 3 候选做二次校验 ----
-    gemini_top_n = 3
-    for c in candidates[:gemini_top_n]:
-        result = evaluate_image_with_gemini(c.path, purpose)
-        if result is not None:
-            gemini_score, reason = result
-            if gemini_score == 0:
-                # Gemini 一票否决（水印等）
-                logger.info("  Gemini 否决 {}: {}", os.path.basename(c.path), reason)
-                c.score = 0
-            else:
-                # 加权融合：CV 40% + Gemini 60%
-                cv_score = c.score
-                c.score = round(cv_score * 0.4 + gemini_score * 0.6, 1)
-                logger.info("  Gemini 融合 {}: CV={:.0f} Gemini={} → {:.0f}",
-                            os.path.basename(c.path), cv_score, gemini_score, c.score)
-
+    _vision_score_candidates(candidates, purpose)
     candidates.sort(key=lambda x: x.score, reverse=True)
+
     best = candidates[0]
     logger.info(
         "  智能图选({}): 从 {} 候选选中 {} ({:.0f}分 {}x{})",
