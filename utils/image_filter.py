@@ -53,67 +53,39 @@ def get_ocr_reader():
 _OLLAMA_STATUS = "PENDING"
 _OLLAMA_MODEL = None
 _OLLAMA_DEFAULT_MODEL = "gemma4:e2b-it-q4_K_M"   # 用户日常使用的模型
-_OLLAMA_VISION_MODEL = "gemma3:4b"                 # 项目运行时切换到的视觉模型
-
-
-def switch_ollama_model(target_model, action="load"):
-    """切换 Ollama 驻留模型：load=加载目标模型，unload=卸载目标模型"""
-    try:
-        import requests
-        if action == "load":
-            # 发送最小请求让模型加载到显存
-            requests.post("http://localhost:11434/api/generate", json={
-                "model": target_model, "prompt": "hi", "stream": False,
-                "options": {"num_predict": 1}
-            }, timeout=120)
-            logger.info("  Ollama 已加载: {}", target_model)
-        else:
-            # keep_alive=0 立即卸载模型释放显存
-            requests.post("http://localhost:11434/api/generate", json={
-                "model": target_model, "prompt": "hi", "stream": False,
-                "keep_alive": 0, "options": {"num_predict": 1}
-            }, timeout=30)
-            logger.info("  Ollama 已卸载: {}", target_model)
-    except Exception as e:
-        logger.debug("  Ollama 模型切换失败: {}", e)
+_OLLAMA_VISION_MODEL = "gemma3:4b"                 # 项目运行时使用的视觉模型
 
 
 def ollama_startup():
-    """项目启动：卸载默认模型，加载视觉模型"""
-    switch_ollama_model(_OLLAMA_DEFAULT_MODEL, action="unload")
-    switch_ollama_model(_OLLAMA_VISION_MODEL, action="load")
-
-
-def ollama_shutdown():
-    """项目结束：卸载视觉模型，恢复默认模型"""
-    switch_ollama_model(_OLLAMA_VISION_MODEL, action="unload")
-    switch_ollama_model(_OLLAMA_DEFAULT_MODEL, action="load")
-
-
-def _detect_ollama_vision_model():
-    """检测视觉模型是否可用（项目启动后调用 ollama_startup 已加载）"""
+    """项目启动：切换到视觉模型"""
     global _OLLAMA_MODEL, _OLLAMA_STATUS
-    if _OLLAMA_STATUS in ("DISABLED", "NO_MODEL"):
-        return _OLLAMA_STATUS
-    if _OLLAMA_MODEL is not None:
-        return "READY"
     try:
         import requests
         resp = requests.get("http://localhost:11434/api/tags", timeout=3)
         models = [m["name"].lower() for m in resp.json().get("models", [])]
-        # 优先使用预设的视觉模型，其次按优先级匹配
-        for preferred in [_OLLAMA_VISION_MODEL, "moondream", "minicpm-v", "llava", _OLLAMA_DEFAULT_MODEL]:
-            for m in models:
-                if preferred.lower() in m:
-                    _OLLAMA_MODEL = m
-                    _OLLAMA_STATUS = "READY"
-                    logger.info("  Ollama 视觉模型: {}", m)
-                    return "READY"
-        _OLLAMA_STATUS = "NO_MODEL"
-        return "NO_MODEL"
+        if any(_OLLAMA_VISION_MODEL in m for m in models):
+            _OLLAMA_MODEL = _OLLAMA_VISION_MODEL
+            _OLLAMA_STATUS = "READY"
+            logger.info("  Ollama 视觉模型已切换: {}", _OLLAMA_VISION_MODEL)
+        else:
+            logger.warning("  未找到 {}，请先运行: ollama pull {}", _OLLAMA_VISION_MODEL, _OLLAMA_VISION_MODEL)
+            _OLLAMA_STATUS = "NO_MODEL"
     except Exception:
         _OLLAMA_STATUS = "DISABLED"
-        return "DISABLED"
+
+
+def ollama_shutdown():
+    """项目结束：恢复默认模型"""
+    global _OLLAMA_MODEL
+    _OLLAMA_MODEL = _OLLAMA_DEFAULT_MODEL
+    logger.info("  Ollama 已恢复默认: {}", _OLLAMA_DEFAULT_MODEL)
+
+
+def _detect_ollama_vision_model():
+    """返回当前视觉模型状态（由 ollama_startup 设置）"""
+    if _OLLAMA_MODEL is not None:
+        return "READY"
+    return _OLLAMA_STATUS
 
 
 def evaluate_image_with_ollama(image_path, purpose="body"):
