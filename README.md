@@ -1,91 +1,93 @@
-# AutoWeChat: AI 内容工厂
+# AutoWeChat: AI Content Factory
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python: 3.8+](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![DeepSeek: Powered](https://img.shields.io/badge/LLM-DeepSeek-green.svg)](https://api.deepseek.com)
+[![Gemini Vision](https://img.shields.io/badge/Vision-Gemini%20Flash-orange.svg)](https://ai.google.dev/)
 
-微信公众号全自动化 AI 内容生产与发布系统。集成全网热点监控、AI 选题、深度长文创作、智能配图、一键发布等全流程能力。
-
----
-
-## 核心特性
-
-**全网热点聚合** — 并行抓取微博、IT之家、36氪、百度、知乎、CSDN、澎湃、虎嗅、抖音等 12 个平台的实时热搜，源级健康监控 + 自动降级。
-
-**AI 深度创作** — 基于 DeepSeek 模型生成 2500-3500 字的深度分析文章，内置敏感词过滤、标题党校验、结构化质检。
-
-**智能配图引擎** — 多源图片获取（Pollinations AI 生图 → Pexels 免费图库 → Bing/百度爬虫），分辨率/色彩/文字密度多维评分，感知哈希去重，微信尺寸自动适配。
-
-**高效并行架构** — 图片下载+上传合并为并行 pipeline，文章资产生成与摘要生成并行执行，多源热点并发扫描。
-
-**安全合规** — 4 策略标题查重（精确/模糊/关键词/AI 语义），topic 间内部去重，草稿箱审计防重。
-
-**Web 管理界面** — Flask 驱动的暗色主题 Dashboard，支持一键启动任务、实时日志流、在线配置。
-
-**企业微信集成** — 发布成功后自动推送通知至企业微信群机器人。
+Fully automated WeChat public account content production and publishing system. Integrates real-time hotspot monitoring, AI topic selection, deep article creation, intelligent image selection, and one-click publishing.
 
 ---
 
-## 技术栈
+## Features
 
-- **语言**: Python 3.8+
-- **LLM**: DeepSeek Chat
-- **爬虫**: Requests, BeautifulSoup4, Selenium (Stealth Mode), icrawler
-- **图像**: Pillow, numpy, Pollinations.ai API, Pexels API
-- **缓存/匹配**: requests-cache, RapidFuzz
-- **日志**: Loguru
+**Multi-Source Hotspot Aggregation** — Parallel scraping from 12 platforms (Weibo, IT Home, 36Kr, Baidu, Zhihu, CSDN, RSS, Politics, Toutiao, The Paper, Huxiu, Douyin). Source-level health monitoring with automatic degradation.
+
+**AI Deep Creation** — DeepSeek-powered 2500-3500 word analysis articles. Built-in sensitive word filtering, title dedup (4 strategies), structural quality checks.
+
+**Intelligent Image Selection** — Multi-source image retrieval (Pollinations AI generation -> Pexels free stock -> Bing/Baidu crawling). 6-dimension scoring (resolution, aspect ratio, sharpness, text density, color richness, file size). Perceptual hash dedup. WeChat cover/body dual-mode scoring. **Gemini Vision + Ollama local vision model** for AI-powered image evaluation with automatic fallback.
+
+**Efficient Parallel Architecture** — Image download+upload merged into parallel pipeline. Article asset generation parallelized with digest generation. Multi-source hotspot concurrent scanning.
+
+**Safety & Compliance** — 4-strategy title dedup (exact/fuzzy/keyword/AI semantic). Cross-topic internal dedup. Draft box audit to prevent duplicates.
+
+**Web Management UI** — Flask dark-theme dashboard with one-click task start/stop, real-time log streaming, article history, source health monitoring, online configuration.
+
+**WeChat Integration** — Auto-push notifications to WeChat group bots after publishing.
+
+---
+
+## Tech Stack
+
+- **Language**: Python 3.8+
+- **LLM**: DeepSeek Chat / Reasoner
+- **Vision AI**: Gemini Flash 2.0 (cloud) + Gemma 3 4B via Ollama (local)
+- **Crawling**: Requests, BeautifulSoup4, Selenium (Stealth Mode), icrawler
+- **Image**: Pillow, numpy, Pollinations.ai API, Pexels API
+- **Cache/Match**: requests-cache, RapidFuzz
+- **Logging**: Loguru
 - **Web**: Flask
-- **API**: 微信公众号官方接口 (Draft API)
+- **API**: WeChat Official Account Draft API
 
 ---
 
-## 项目结构
+## Project Structure
 
 ```
 wechat_auto_publish/
-├── main.py                    # CLI 入口
-├── webui.py                   # Flask Web 管理界面
-├── config.py                  # 全局配置中心
-├── requirements.txt           # 依赖清单
-├── run.bat                    # CLI 启动脚本
-├── run_gui.bat                # Web UI 启动脚本
+├── main.py                    # CLI entry (supports --task hotspots/github)
+├── webui.py                   # Flask Web management UI (v3.0)
+├── config.py                  # Global configuration center
+├── requirements.txt           # Dependencies
+├── run.bat                    # CLI launch script
+├── run_gui.bat                # Web UI launch script
 ├── core/
-│   ├── engine.py              # 工作流调度器
+│   ├── engine.py              # Workflow dispatcher
 │   ├── hotspots/
-│   │   ├── collector.py       # 12 源热点采集引擎
-│   │   ├── processor.py       # AI 文章生成引擎
-│   │   └── workflow.py        # 热点发布流水线
+│   │   ├── collector.py       # 12-source hotspot engine
+│   │   ├── processor.py       # AI article generation engine
+│   │   └── workflow.py        # Hotspot publishing pipeline
 │   ├── github/
-│   │   ├── collector.py       # GitHub Trending 采集
-│   │   ├── processor.py       # GitHub 文章生成
-│   │   └── workflow.py        # GitHub 发布流水线
+│   │   ├── collector.py       # GitHub Trending scraping
+│   │   ├── processor.py       # GitHub article generation
+│   │   └── workflow.py        # GitHub publishing pipeline
 │   └── shared/
-│       ├── llm.py             # DeepSeek API 封装
-│       ├── publisher.py       # 微信 API + 标题查重
-│       ├── article_utils.py   # Markdown→HTML + 配图嵌入
-│       └── runtime.py         # 日志初始化
+│       ├── llm.py             # DeepSeek API wrapper
+│       ├── publisher.py       # WeChat API + title dedup
+│       ├── article_utils.py   # Markdown->HTML + image embedding
+│       └── runtime.py         # Log initialization
 ├── utils/
-│   ├── image_handler.py       # 多源图片检索 + AI 生图
-│   ├── image_filter.py        # 图片评分/OCR/pHash 去重
-│   ├── http_client.py         # HTTP 会话 + 缓存 + 重试
-│   └── spider.py              # Selenium 浏览器启动器
-├── static/                    # Web UI 前端资源
-├── templates/                 # Web UI 页面模板
-└── assets/                    # 自动下载的图片素材
+│   ├── image_handler.py       # Multi-source image retrieval + AI generation
+│   ├── image_filter.py        # Image scoring / OCR / pHash dedup / Vision AI
+│   ├── http_client.py         # HTTP session + cache + retry
+│   └── spider.py              # Selenium browser launcher
+├── static/                    # Web UI frontend assets
+├── templates/                 # Web UI templates
+└── assets/                    # Auto-downloaded image assets
 ```
 
 ---
 
-## 快速开始
+## Quick Start
 
-### 1. 克隆项目
+### 1. Clone
 
 ```bash
 git clone https://github.com/Chain813/wechat-automatic-publisher.git
 cd wechat-automatic-publisher
 ```
 
-### 2. 安装依赖
+### 2. Install Dependencies
 
 ```bash
 python -m venv venv
@@ -93,62 +95,115 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-或直接双击 `run.bat` 自动完成环境搭建。
+Or double-click `run.bat` for automatic setup.
 
-### 3. 配置密钥
+### 3. Configure
 
-复制 `.env.example` 为 `.env`，填入：
+Copy `.env.example` to `.env` and fill in:
 
 ```env
-WECHAT_APP_ID="你的微信AppID"
-WECHAT_APP_SECRET="你的微信AppSecret"
-LLM_API_KEY="你的DeepSeek_API_Key"
-QYWECHAT_WEBHOOK="（可选）企业微信机器人Webhook"
+WECHAT_APP_ID="your-wechat-appid"
+WECHAT_APP_SECRET="your-wechat-appsecret"
+LLM_API_KEY="your-deepseek-api-key"
+
+# Optional: Gemini Vision (cloud image evaluation)
+GEMINI_API_KEY="your-gemini-api-key"
+
+# Optional: WeChat group bot notification
+QYWECHAT_WEBHOOK=""
+
+# Optional: Ollama local vision model
+OLLAMA_DEFAULT_MODEL="gemma4:e2b-it-q4_K_M"
+OLLAMA_VISION_MODEL="gemma3:4b"
+
+# Optional: Pexels free stock images
+PEXELS_API_KEY=""
 ```
 
-### 4. 运行
+### 4. Run
 
-- **CLI 模式**: `python main.py` 或双击 `run.bat`
-- **Web 模式**: `python webui.py` 或双击 `run_gui.bat`，访问 http://127.0.0.1:5000
+**CLI mode:**
+```bash
+python main.py                    # Hotspot publishing (default)
+python main.py --task github      # GitHub Trending publishing
+```
 
----
-
-## 核心配置
-
-在 `config.py` 中可调整：
-
-| 配置项 | 说明 | 默认值 |
-|--------|------|--------|
-| `BRAND_NAME` | 品牌名称 | 智界洞察社 |
-| `NEWS_SOURCES` | 启用的采集源 | 12 个平台 |
-| `FILTER_CATEGORIES` | AI 优先筛选关键词 | 79 个时政科技词 |
-| `LLM_MODEL` | LLM 模型 | deepseek-chat |
-| `LLM_TEMPERATURE` | 创作随机度 | 0.75 |
-| `MAX_TOPICS_PER_RUN` | 每次最大发布数 | 3 |
-| `IMAGE_DEFAULT_CANDIDATES` | 图片候选数 | 5 |
+**Web mode:**
+```bash
+python webui.py
+```
+Visit http://127.0.0.1:5000
 
 ---
 
-## 配图策略
+## Web UI (v3.0)
 
-系统按优先级依次尝试：
+The dark-themed dashboard provides:
 
-1. **Pexels 免费图库** — 高质量免版权图片
-2. **Pollinations.ai AI 生图** — 根据文章关键词生成匹配图片，免费无需 API Key
-3. **Bing 图片搜索** — 大图+横版筛选
-4. **百度图片搜索** — 国内源兜底
-5. **本地默认图** — 最终兜底
-
-每张图片经过分辨率、宽高比、清晰度、文字密度、色彩丰富度、文件大小 6 维评分，择优录取。
-
----
-
-## 开源协议
-
-本项目采用 [MIT License](LICENSE) 开源协议。
+| Page | Features |
+|------|----------|
+| **Console** | One-click start/stop, real-time log streaming, task type selection |
+| **History** | Published articles grouped by date |
+| **Sources** | 12-source health status (green/yellow/red cards) |
+| **Settings** | API key configuration with secret masking |
 
 ---
 
-## 免责声明
+## Image Selection Strategy
 
-本工具仅用于技术研究与内容创作辅助，请务必遵守微信公众号官方运营规范及相关法律法规。使用本系统生成的 AI 内容建议经过人工最终审核后发布。
+The system tries sources in priority order:
+
+1. **Pexels Free Stock** — High-quality copyright-free images
+2. **Pollinations.ai AI Generation** — Keyword-based image generation, free, no API key needed
+3. **Bing Image Search** — Large landscape images filtered
+4. **Baidu Image Search** — Domestic fallback
+5. **Local Default** — Final fallback
+
+Each image is evaluated on 6 dimensions, then optionally re-evaluated by vision AI:
+
+```
+CV 6-dim scoring -> Top 3 candidates -> Vision AI re-evaluation
+                         |
+                   Gemini available? -> Gemini Flash 2.0 (60% weight)
+                         | No
+                   Ollama available? -> Gemma 3 4B local (60% weight)
+                         | No
+                   Pure CV scoring fallback
+```
+
+---
+
+## Core Configuration
+
+Adjustable in `config.py` or `.env`:
+
+| Config | Description | Default |
+|--------|-------------|---------|
+| `BRAND_NAME` | Brand name | AutoWeChat |
+| `NEWS_SOURCES` | Enabled sources | 12 platforms |
+| `FILTER_CATEGORIES` | Priority filter keywords | 79 terms |
+| `LLM_MODEL` | LLM model | deepseek-chat |
+| `LLM_TEMPERATURE` | Generation randomness | 0.75 |
+| `IMAGE_DEFAULT_CANDIDATES` | Image candidates per search | 5 |
+| `OLLAMA_VISION_MODEL` | Local vision model | gemma3:4b |
+
+---
+
+## Requirements
+
+- Python 3.8+
+- Chrome browser (for Selenium fallback scraping)
+- Optional: [Ollama](https://ollama.com) for local vision AI
+- Optional: EasyOCR for text detection (requires PyTorch ~2GB)
+
+---
+
+## License
+
+[MIT License](LICENSE)
+
+---
+
+## Disclaimer
+
+This tool is for technical research and content creation assistance only. Please comply with WeChat official account operating guidelines and relevant laws. AI-generated content should be reviewed by a human before publishing.
