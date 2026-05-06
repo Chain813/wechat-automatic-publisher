@@ -54,8 +54,8 @@ _GEMINI_MODEL = None
 _GEMINI_STATUS = "PENDING"
 
 
-def _get_gemini_model():
-    """延迟加载 Gemini Vision 模型"""
+def _get_gemini_client():
+    """延迟加载 Gemini 客户端"""
     global _GEMINI_MODEL, _GEMINI_STATUS
     if _GEMINI_STATUS == "DISABLED":
         return None
@@ -66,9 +66,8 @@ def _get_gemini_model():
         if not GEMINI_API_KEY:
             _GEMINI_STATUS = "NO_KEY"
             return None
-        import google.generativeai as genai
-        genai.configure(api_key=GEMINI_API_KEY)
-        _GEMINI_MODEL = genai.GenerativeModel("gemini-2.0-flash")
+        from google import genai
+        _GEMINI_MODEL = genai.Client(api_key=GEMINI_API_KEY)
         _GEMINI_STATUS = "READY"
         return _GEMINI_MODEL
     except Exception as e:
@@ -82,12 +81,13 @@ def evaluate_image_with_gemini(image_path, purpose="body"):
     用 Gemini Vision 评估图片是否适合做微信公众号配图。
     返回 (score: 0-100, reason: str) 或 None（不可用时）。
     """
-    model = _get_gemini_model()
-    if not model:
+    client = _get_gemini_client()
+    if not client:
         return None
 
     try:
-        import google.generativeai as genai
+        from google import genai
+        from google.genai import types
 
         if purpose == "cover":
             context = "微信公众号文章封面图（推荐宽屏 2.35:1 比例）"
@@ -110,26 +110,35 @@ def evaluate_image_with_gemini(image_path, purpose="body"):
 只返回 JSON，不要其他文字。示例：
 {{"watermark":0,"relevance":85,"quality":90,"text_amount":10,"overall":85,"reason":"高清科技场景图，构图优秀"}}"""
 
-        response = model.generate_content([
-            prompt,
-            genai.types.Part.from_image(genai.types.Image.load(image_path))
-        ])
+        with open(image_path, "rb") as f:
+            image_bytes = f.read()
+
+        # 根据扩展名判断 mime_type
+        ext = os.path.splitext(image_path)[1].lower()
+        mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+        mime_type = mime_map.get(ext, "image/jpeg")
+
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[
+                types.Content(parts=[
+                    types.Part.from_text(text=prompt),
+                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                ])
+            ],
+        )
 
         # 解析 JSON 响应
         text = response.text.strip()
-        # 提取 JSON 部分（兼容 markdown 代码块包裹）
         json_match = re.search(r'\{[^}]+\}', text)
         if json_match:
             data = json.loads(json_match.group())
 
-            # 水印直接一票否决
             if data.get("watermark", 0) == 1:
                 logger.info("  Gemini Vision: 检测到水印 → 0分")
                 return 0, "水印图片"
 
-            # 文字太多扣分
             text_penalty = max(0, (data.get("text_amount", 0) - 30) * 0.5)
-
             score = max(0, min(100, data.get("overall", 50) - text_penalty))
             reason = data.get("reason", "")
             logger.info("  Gemini Vision: {}分 - {}", score, reason)
