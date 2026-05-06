@@ -6,6 +6,7 @@
 ============================================================
 """
 import re
+import json
 import time
 import random
 from datetime import datetime, timezone, timedelta
@@ -328,10 +329,8 @@ def fetch_baidu():
         res.raise_for_status()
         res.encoding = 'utf-8'
         # 百度热搜页面内嵌 JSON 数据
-        import re as _re
         match = re.search(r'<!--s-data:(.*?)-->', res.text)
         if match:
-            import json
             data = json.loads(match.group(1))
             cards = data.get("data", {}).get("cards", [])
             for card in cards:
@@ -530,7 +529,6 @@ def fetch_rss():
 # ==========================================
 def _ngram_set(text: str, n: int = 2) -> set:
     """生成文本的 n-gram 集合（中文按字，英文按词）"""
-    import re as _re
     # 英文单词按词级 n-gram，中文按字级 n-gram
     tokens = []
     for m in re.finditer(r'[a-zA-Z0-9]+|[一-鿿]', text):

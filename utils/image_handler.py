@@ -527,7 +527,6 @@ def _finalize_image(img_path, purpose):
 
 def _get_fallback_image(directory):
     """获取兜底图片（优先本地默认图，其次随机在线图）"""
-    import random
     if not os.path.exists(directory):
         os.makedirs(directory)
 

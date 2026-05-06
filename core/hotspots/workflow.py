@@ -5,6 +5,7 @@ from loguru import logger
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from config import BRAND_NAME, QYWECHAT_WEBHOOK, WECHAT_APP_ID, WECHAT_APP_SECRET
+from core.shared.publisher import _normalize_title
 from core.hotspots.collector import fetch_all_hotspots, get_source_health_report
 from core.hotspots.processor import filter_tech_hotspots, generate_article, generate_digest
 from core.shared.article_utils import process_article_content, _print_review_report
@@ -22,13 +23,6 @@ MAX_TOPICS_PER_RUN = 3
 MAX_TOPIC_CANDIDATES = 5
 HISTORY_FILE = "hotspots_history.json"
 _history_cache = None
-
-
-def _normalize_title(title):
-    """标准化标题用于比较"""
-    import re
-    title = re.sub(r'[^\w一-鿿]', '', title)
-    return title.lower().strip()
 
 
 def _dedup_topics_against_each_other(topics, threshold=70):

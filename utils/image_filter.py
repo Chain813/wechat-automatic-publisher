@@ -52,13 +52,16 @@ def get_ocr_reader():
 # ==========================================
 _OLLAMA_STATUS = "PENDING"
 _OLLAMA_MODEL = None
-_OLLAMA_DEFAULT_MODEL = "gemma4:e2b-it-q4_K_M"   # 用户日常使用的模型
-_OLLAMA_VISION_MODEL = "gemma3:4b"                 # 项目运行时使用的视觉模型
+_OLLAMA_DEFAULT_MODEL = None  # 从 config 读取
+_OLLAMA_VISION_MODEL = None
 
 
 def ollama_startup():
     """项目启动：切换到视觉模型"""
-    global _OLLAMA_MODEL, _OLLAMA_STATUS
+    global _OLLAMA_MODEL, _OLLAMA_STATUS, _OLLAMA_DEFAULT_MODEL, _OLLAMA_VISION_MODEL
+    from config import OLLAMA_DEFAULT_MODEL, OLLAMA_VISION_MODEL
+    _OLLAMA_DEFAULT_MODEL = OLLAMA_DEFAULT_MODEL
+    _OLLAMA_VISION_MODEL = OLLAMA_VISION_MODEL
     try:
         import requests
         resp = requests.get("http://localhost:11434/api/tags", timeout=3)
