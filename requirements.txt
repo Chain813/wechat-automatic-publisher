@@ -1,15 +1,18 @@
 # 全自动微信公众号推文系统 - 依赖清单
-requests
-beautifulsoup4
-selenium
-webdriver-manager
-markdown
-icrawler
-Pillow
-numpy
-easyocr
-python-dotenv
-loguru
-requests-cache
-rapidfuzz
-feedparser
+requests>=2.31,<3
+beautifulsoup4>=4.12,<5
+selenium>=4.15,<5
+webdriver-manager>=4.0,<5
+markdown>=3.5,<4
+icrawler>=0.6,<1
+Pillow>=10.0,<11
+numpy>=1.26,<2
+python-dotenv>=1.0,<2
+loguru>=0.7,<1
+requests-cache>=1.1,<2
+rapidfuzz>=3.5,<4
+feedparser>=6.0,<7
+flask>=3.0,<4
+
+# 可选：图片文字检测（需要 PyTorch ~2GB，不装也能用）
+# easyocr>=1.7,<2

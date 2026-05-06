@@ -48,15 +48,19 @@ def get_ocr_reader():
 # ==========================================
 #  轻量文字密度检测 (Pillow 像素方差法)
 # ==========================================
-def text_density_light(image_path):
+def text_density_light(image_or_path):
     """
     用向量化局部方差估算文字密度，避免逐像素 Python 循环。
+    接受文件路径或已打开的 PIL Image 对象。
     返回 0.0-1.0 的密度值。
     """
     try:
-        with Image.open(image_path) as raw:
-            img = raw.convert('L').resize((192, 192))
-            arr = np.array(img, dtype=np.float32)
+        if isinstance(image_or_path, Image.Image):
+            img = image_or_path.convert('L').resize((192, 192))
+        else:
+            with Image.open(image_or_path) as raw:
+                img = raw.convert('L').resize((192, 192))
+        arr = np.array(img, dtype=np.float32)
 
         try:
             windows = np.lib.stride_tricks.sliding_window_view(arr, (3, 3))
@@ -75,12 +79,15 @@ def text_density_light(image_path):
 # ==========================================
 #  感知哈希 (Perceptual Hash)
 # ==========================================
-def compute_perceptual_hash(image_path):
-    """计算图片的感知哈希 (pHash)，用于相似度去重"""
+def compute_perceptual_hash(image_or_path):
+    """计算图片的感知哈希 (pHash)，用于相似度去重。接受路径或 PIL Image。"""
     try:
-        with Image.open(image_path) as raw:
-            img = raw.convert('L').resize((32, 32), Image.LANCZOS)
-            arr = np.array(img, dtype=np.float32)
+        if isinstance(image_or_path, Image.Image):
+            img = image_or_path.convert('L').resize((32, 32), Image.LANCZOS)
+        else:
+            with Image.open(image_or_path) as raw:
+                img = raw.convert('L').resize((32, 32), Image.LANCZOS)
+        arr = np.array(img, dtype=np.float32)
         avg = arr.mean()
         hash_bits = (arr > avg).flatten()
         hash_str = ''.join(['1' if b else '0' for b in hash_bits])
@@ -173,7 +180,8 @@ def evaluate_image(image_path, purpose="body"):
         if not os.path.exists(image_path):
             return ImageScore(image_path, 0, 0, 0, 0, 0, 0, 0, 0, "")
 
-        with Image.open(image_path) as img:
+        img = Image.open(image_path)
+        try:
             w, h = img.size
             aspect_ratio = w / h if h > 0 else 0
             file_size_kb = os.path.getsize(image_path) / 1024
@@ -240,96 +248,97 @@ def evaluate_image(image_path, purpose="body"):
             # 色彩丰富度分
             color_richness = _compute_color_richness(img)
 
-        # 文字密度分 (文字越少分越高)
-        text_density = text_density_light(image_path)
+            # 文字密度分 (文字越少分越高) — 直接传 img 避免重复打开文件
+            text_density = text_density_light(img)
 
-        # B4: EasyOCR 智能门控 — 只在边界区间 (0.05-0.30) 才调用 OCR
-        ocr_text_count = 0
-        if 0.05 <= text_density <= 0.30:
-            reader = get_ocr_reader()
-            if reader:
-                try:
-                    results = reader.readtext(image_path)
-                    ocr_text_count = len(results)
+            # B4: EasyOCR 智能门控 — 只在边界区间 (0.05-0.30) 才调用 OCR
+            ocr_text_count = 0
+            if 0.05 <= text_density <= 0.30:
+                reader = get_ocr_reader()
+                if reader:
+                    try:
+                        results = reader.readtext(image_path)
+                        ocr_text_count = len(results)
 
-                    # 水印与来源不明校验
-                    watermark_keywords = [
-                        "版权", "水印", "图库", "视觉中国", "站长素材", "昵图网", "千图网", "包图网",
-                        "摄图网", "全景网", "汇图网", "shutterstock", "getty", "alamy", "123rf",
-                        "istock", "depositphotos", "素材", "未经允许", "盗图"
-                    ]
-                    for bbox, text, prob in results:
-                        if any(kw in text.lower() for kw in watermark_keywords):
-                            logger.info("  检测到水印图片: {}", os.path.basename(image_path))
+                        watermark_keywords = [
+                            "版权", "水印", "图库", "视觉中国", "站长素材", "昵图网", "千图网", "包图网",
+                            "摄图网", "全景网", "汇图网", "shutterstock", "getty", "alamy", "123rf",
+                            "istock", "depositphotos", "素材", "未经允许", "盗图"
+                        ]
+                        for bbox, text, prob in results:
+                            if any(kw in text.lower() for kw in watermark_keywords):
+                                logger.info("  检测到水印图片: {}", os.path.basename(image_path))
+                                return ImageScore(image_path, 0, w, h, aspect_ratio, file_size_kb, 1.0, sharpness, 0, "")
+
+                        if ocr_text_count > 8:
                             return ImageScore(image_path, 0, w, h, aspect_ratio, file_size_kb, 1.0, sharpness, 0, "")
+                        text_density = max(text_density, ocr_text_count / 10.0)
+                    except Exception:
+                        logger.debug("OCR failed for {}", image_path)
 
-                    if ocr_text_count > 8:
-                        return ImageScore(image_path, 0, w, h, aspect_ratio, file_size_kb, 1.0, sharpness, 0, "")
-                    text_density = max(text_density, ocr_text_count / 10.0)
-                except Exception:
-                    logger.debug("OCR failed for {}", image_path)
-
-        if purpose == "cover":
-            if text_density < 0.05:
-                text_score = 100
-            elif text_density < 0.15:
-                text_score = 60
-            elif text_density < 0.30:
-                text_score = 30
+            if purpose == "cover":
+                if text_density < 0.05:
+                    text_score = 100
+                elif text_density < 0.15:
+                    text_score = 60
+                elif text_density < 0.30:
+                    text_score = 30
+                else:
+                    text_score = 0
             else:
-                text_score = 0
-        else:
-            if text_density < 0.10:
-                text_score = 100
-            elif text_density < 0.25:
-                text_score = 70
-            elif text_density < 0.40:
-                text_score = 40
+                if text_density < 0.10:
+                    text_score = 100
+                elif text_density < 0.25:
+                    text_score = 70
+                elif text_density < 0.40:
+                    text_score = 40
+                else:
+                    text_score = 10
+
+            # 色彩丰富度分
+            if color_richness > 0.5:
+                color_score = 100
+            elif color_richness > 0.3:
+                color_score = 80
+            elif color_richness > 0.15:
+                color_score = 50
             else:
-                text_score = 10
+                color_score = 30
 
-        # 色彩丰富度分
-        if color_richness > 0.5:
-            color_score = 100
-        elif color_richness > 0.3:
-            color_score = 80
-        elif color_richness > 0.15:
-            color_score = 50
-        else:
-            color_score = 30
-
-        # 文件大小分 (太小可能质量差，太大浪费流量)
-        if purpose == "cover":
-            if 100 < file_size_kb < 5000:
-                size_score = 100
-            elif 50 < file_size_kb < 8000:
-                size_score = 70
+            # 文件大小分
+            if purpose == "cover":
+                if 100 < file_size_kb < 5000:
+                    size_score = 100
+                elif 50 < file_size_kb < 8000:
+                    size_score = 70
+                else:
+                    size_score = 40
             else:
-                size_score = 40
-        else:
-            if 80 < file_size_kb < 1500:
-                size_score = 100
-            elif 50 < file_size_kb < 2000:
-                size_score = 70
-            else:
-                size_score = 40
+                if 80 < file_size_kb < 1500:
+                    size_score = 100
+                elif 50 < file_size_kb < 2000:
+                    size_score = 70
+                else:
+                    size_score = 40
 
-        # ---- 3. 加权合成 ----
-        weights = COVER_WEIGHTS if purpose == "cover" else BODY_WEIGHTS
-        dims = [res_score, ratio_score, clarity_score, text_score, color_score, size_score]
-        score = sum(w * d for w, d in zip(weights, dims))
+            # ---- 3. 加权合成 ----
+            weights = COVER_WEIGHTS if purpose == "cover" else BODY_WEIGHTS
+            dims = [res_score, ratio_score, clarity_score, text_score, color_score, size_score]
+            score = sum(w * d for w, d in zip(weights, dims))
 
-        phash = compute_perceptual_hash(image_path)
+            phash = compute_perceptual_hash(img)
 
-        return ImageScore(
-            path=image_path, score=round(score, 1),
-            width=w, height=h, aspect_ratio=round(aspect_ratio, 2),
-            file_size_kb=round(file_size_kb, 1),
-            text_density=round(text_density, 2),
-            sharpness=round(sharpness, 1),
-            color_richness=round(color_richness, 2),
-            phash=phash
-        )
+            return ImageScore(
+                path=image_path, score=round(score, 1),
+                width=w, height=h, aspect_ratio=round(aspect_ratio, 2),
+                file_size_kb=round(file_size_kb, 1),
+                text_density=round(text_density, 2),
+                sharpness=round(sharpness, 1),
+                color_richness=round(color_richness, 2),
+                phash=phash
+            )
+        finally:
+            img.close()
     except Exception:
         return ImageScore(image_path, 0, 0, 0, 0, 0, 0, 0, 0, "")
 

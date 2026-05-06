@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoWeChat - AI 控制台</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar glass-panel">
+            <div class="brand">
+                <div class="brand-logo">🚀</div>
+                <h1>AutoWeChat</h1>
+                <span class="badge">v2.0 UI</span>
+            </div>
+            
+            <nav class="nav-menu">
+                <a href="#" class="nav-item active" data-target="dashboard">
+                    <span class="icon">📊</span> 控制台
+                </a>
+                <a href="#" class="nav-item" data-target="settings">
+                    <span class="icon">⚙️</span> 系统设置
+                </a>
+            </nav>
+            
+            <div class="system-status">
+                <div class="status-indicator">
+                    <div class="dot idle" id="status-dot"></div>
+                    <span id="status-text">系统就绪 (Idle)</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Dashboard View -->
+            <section id="dashboard" class="view-section active">
+                <header class="view-header">
+                    <h2>流程控制台</h2>
+                    <p>全自动抓取、创作与微信发布流水线</p>
+                </header>
+
+                <div class="action-panel glass-panel">
+                    <div class="panel-info">
+                        <h3>一键执行工作流</h3>
+                        <p>将自动扫描热点、调用 DeepSeek 创作、搜图排版并同步至微信草稿箱。</p>
+                        <div class="task-selector mt-3" style="display: flex; gap: 20px; margin-top: 15px;">
+                            <label style="cursor: pointer; display: flex; align-items: center; gap: 5px;">
+                                <input type="radio" name="task_type" value="hotspots" checked>
+                                🌍 科技时政热点
+                            </label>
+                            <label style="cursor: pointer; display: flex; align-items: center; gap: 5px;">
+                                <input type="radio" name="task_type" value="github">
+                                💻 GitHub 热门趋势
+                            </label>
+                        </div>
+                    </div>
+                    <button id="btn-start" class="btn btn-primary glow-effect">
+                        <span class="btn-icon">▶</span> 开始执行任务
+                    </button>
+                </div>
+
+                <div class="terminal-container glass-panel mt-4">
+                    <div class="terminal-header">
+                        <div class="mac-btns">
+                            <span class="mac-btn close"></span>
+                            <span class="mac-btn minimize"></span>
+                            <span class="mac-btn maximize"></span>
+                        </div>
+                        <div class="terminal-title">实时执行日志 (stdout)</div>
+                        <button id="btn-clear-logs" class="btn-text">清空</button>
+                    </div>
+                    <div class="terminal-body" id="log-console">
+                        <div class="log-line system">AutoWeChat 控制台初始化完毕，等待指令...</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Settings View -->
+            <section id="settings" class="view-section">
+                <header class="view-header">
+                    <h2>系统设置</h2>
+                    <p>核心密钥与环境变量配置</p>
+                </header>
+
+                <form id="config-form" class="settings-form glass-panel">
+                    <div class="form-group">
+                        <label for="wechat-appid">微信公众号 AppID</label>
+                        <input type="text" id="wechat-appid" name="WECHAT_APP_ID" class="form-control" placeholder="wxxxxxxxxxxxxxxxx">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="wechat-secret">微信公众号 AppSecret</label>
+                        <input type="password" id="wechat-secret" name="WECHAT_APP_SECRET" class="form-control" placeholder="微信平台获取的 Secret">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="llm-apikey">DeepSeek API Key</label>
+                        <input type="password" id="llm-apikey" name="LLM_API_KEY" class="form-control" placeholder="sk-xxxxxxxxxxxxxxxx">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="llm-model">模型选择</label>
+                        <select id="llm-model" name="LLM_MODEL" class="form-control">
+                            <option value="deepseek-chat">DeepSeek Chat (V3)</option>
+                            <option value="deepseek-reasoner">DeepSeek Reasoner (R1)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="qywechat-webhook">企业微信机器人 Webhook (选填)</label>
+                        <input type="text" id="qywechat-webhook" name="QYWECHAT_WEBHOOK" class="form-control" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...">
+                    </div>
+
+                    <div class="form-actions mt-4">
+                        <button type="submit" class="btn btn-primary glow-effect">保存配置</button>
+                        <span id="save-msg" class="save-message"></span>
+                    </div>
+                </form>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

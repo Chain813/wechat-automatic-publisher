@@ -1,7 +1,7 @@
 """Thin entrypoint for the publishing workflow."""
 
-from core.runtime import configure_runtime
-from core.workflow import run_main
+from core.shared.runtime import configure_runtime
+from core.engine import run_main
 
 
 if __name__ == "__main__":

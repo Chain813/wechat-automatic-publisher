@@ -5,6 +5,7 @@
   强化：时效性强制过滤、时政类源、n-gram 去重、源健康监控
 ============================================================
 """
+import re
 import time
 import random
 from datetime import datetime, timezone, timedelta
@@ -110,11 +111,9 @@ def _is_title_fresh(title):
     增强版标题级时效性过滤：剔除包含明显旧时间标记的话题。
     例如 "2024年回顾"、"去年总结" 等。
     """
-    import re as _re
-
     # 匹配过旧年份（非当年）
     current_year = datetime.now().year
-    old_year_match = _re.findall(r'(20[12]\d)年', title)
+    old_year_match = re.findall(r'(20[12]\d)年', title)
     for y in old_year_match:
         if int(y) < current_year:
             return False
@@ -330,7 +329,7 @@ def fetch_baidu():
         res.encoding = 'utf-8'
         # 百度热搜页面内嵌 JSON 数据
         import re as _re
-        match = _re.search(r'<!--s-data:(.*?)-->', res.text)
+        match = re.search(r'<!--s-data:(.*?)-->', res.text)
         if match:
             import json
             data = json.loads(match.group(1))
@@ -534,7 +533,7 @@ def _ngram_set(text: str, n: int = 2) -> set:
     import re as _re
     # 英文单词按词级 n-gram，中文按字级 n-gram
     tokens = []
-    for m in _re.finditer(r'[a-zA-Z0-9]+|[一-鿿]', text):
+    for m in re.finditer(r'[a-zA-Z0-9]+|[一-鿿]', text):
         tokens.append(m.group().lower())
     if len(tokens) < n:
         return set(tokens) if tokens else set()
@@ -583,12 +582,16 @@ def filter_by_category(topics, categories=None):
     if not categories:
         return topics[:30]
 
+    # 预计算小写类别，避免重复 .lower() 调用
+    cats_lower = [c.lower() for c in categories if c]
+
     prioritized = []
     rest = []
     for t in topics:
+        t_lower = t.lower()
         matched = False
-        for cat in categories:
-            if cat and cat.lower() in t.lower():
+        for cat in cats_lower:
+            if cat in t_lower:
                 prioritized.append(t)
                 matched = True
                 break
@@ -613,9 +616,8 @@ def fetch_politics():
     topics = []
     has_success = False
 
-    # ---- 策略1: 直接抓取网站首页 ----
+    # ---- 策略1: 直接抓取网站首页（澎湃由 fetch_thepaper 专门处理，避免重复抓取） ----
     politics_sites = [
-        ("https://www.thepaper.cn/", "澎湃"),
         ("https://www.guancha.cn/", "观察者网"),
     ]
 
@@ -760,7 +762,7 @@ def fetch_huxiu():
         res.raise_for_status()
         res.encoding = 'utf-8'
         soup = BeautifulSoup(res.text, "html.parser")
-        links = soup.select("a[href*='/article/'], a[href*='/article/']")
+        links = soup.select("a[href*='/article/']")
         for link in links:
             title = link.get_text(strip=True)
             if title and 8 < len(title) < 80 and _is_title_fresh(title):
@@ -874,11 +876,9 @@ def fetch_all_hotspots_parallel():
     }
 
     all_summary = []
-    all_flat = []
     for src in sources:
         topics = results.get(src, [])
         if topics:
-            # 标题级时效性过滤：剔除旧时间标记的话题
             original_count = len(topics)
             topics = [t for t in topics if _is_title_fresh(t)]
             filtered_count = original_count - len(topics)
@@ -888,54 +888,12 @@ def fetch_all_hotspots_parallel():
             all_summary.append(f"【{label}】")
             all_summary.extend([f"- {t}" for t in deduplicate_topics(topics)[:NEWS_MAX_PER_SOURCE]])
 
-    # 基础校验
     total = sum(len(results.get(s, [])) for s in sources)
     if total == 0:
         logger.warning("  所有源均未采集到数据，请检查网络连接。")
         return ""
 
     logger.info("  并行扫描完成，共获取 {} 条资讯。", total)
-    return "\n".join(all_summary)
-
-
-def fetch_all_hotspots_sequential():
-    """
-    串行聚合入口 (向后兼容，供需要严格顺序的场景使用)。
-    """
-    logger.info("正在启动全网热点串行扫描引擎...")
-
-    all_flat = []
-    source_labels = {
-        "weibo": ("微博实时热搜", fetch_weibo_light),
-        "ithome": ("IT之家科技热点", fetch_ithome),
-        "36kr": ("36氪商业与AI动态", fetch_36kr),
-        "baidu": ("百度实时热搜", fetch_baidu),
-        "zhihu": ("知乎热榜", fetch_zhihu),
-        "csdn": ("CSDN 全站热榜", fetch_csdn),
-        "rss": ("RSS 聚合精选", fetch_rss),
-        "politics": ("时政科技交叉", fetch_politics),
-        "toutiao": ("今日头条热榜", fetch_toutiao),
-        "thepaper": ("澎湃新闻", fetch_thepaper),
-        "huxiu": ("虎嗅网深度", fetch_huxiu),
-        "douyin": ("抖音热搜", fetch_douyin),
-    }
-
-    all_summary = []
-    for src in NEWS_SOURCES:
-        if src not in source_labels:
-            continue
-        label, fetcher = source_labels[src]
-        topics = fetcher()
-        topics = [t for t in topics if _is_title_fresh(t)]
-        all_flat.extend(topics)
-        if topics:
-            all_summary.append(f"【{label}】")
-            all_summary.extend([f"- {t}" for t in deduplicate_topics(topics)])
-
-    if not all_flat:
-        logger.warning("  采集到的数据量过少，请检查源网站连接。")
-        return ""
-
     return "\n".join(all_summary)
 
 

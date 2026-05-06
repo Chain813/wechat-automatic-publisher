@@ -82,7 +82,7 @@ def _ai_semantic_check(new_title, existing_titles):
     if not existing_titles:
         return False, None
     try:
-        from core.processor import call_deepseek_with_retry
+        from core.shared.llm import call_deepseek_with_retry
     except ImportError:
         return False, None
 
@@ -167,7 +167,8 @@ class WeChatPublisher:
                 files = {'media': (os.path.basename(image_path), f, 'image/jpeg')}
                 res = self.session.post(url, files=files, timeout=WECHAT_API_TIMEOUT).json()
             return res.get("media_id")
-        except Exception:
+        except Exception as e:
+            logger.warning("  upload_image 失败: {} - {}", image_path, e)
             return None
 
     def upload_news_image(self, image_path):
@@ -181,7 +182,8 @@ class WeChatPublisher:
                 files = {'media': (os.path.basename(image_path), f, 'image/jpeg')}
                 res = self.session.post(url, files=files, timeout=WECHAT_API_TIMEOUT).json()
             return res.get("url")
-        except Exception:
+        except Exception as e:
+            logger.warning("  upload_news_image 失败: {} - {}", image_path, e)
             return None
 
     def get_draft_titles(self, count=WECHAT_DRAFT_SCAN_COUNT):
@@ -220,7 +222,7 @@ class WeChatPublisher:
             )
         return int(SequenceMatcher(None, normalized_a, normalized_b).ratio() * 100)
 
-    def is_title_duplicate(self, new_title):
+    def is_title_duplicate(self, new_title, extra_existing=None):
         """
         多策略查重逻辑（由快到慢）：
         1. 精确匹配
@@ -229,6 +231,9 @@ class WeChatPublisher:
         4. AI 语义查重 (DeepSeek，~300 tokens，兜底)
         """
         existing = self.get_draft_titles()
+        if extra_existing:
+            existing = existing + extra_existing
+            
         if not existing:
             return False, None
 

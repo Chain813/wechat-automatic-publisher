@@ -4,8 +4,18 @@ Runtime bootstrap helpers for console encoding and logging.
 from __future__ import annotations
 
 import sys
+import queue
 
 from loguru import logger
+
+# Global queue to store logs for the Web UI
+log_queue = queue.Queue()
+
+def _queue_sink(message):
+    try:
+        log_queue.put_nowait(message)
+    except queue.Full:
+        pass
 
 
 def _reconfigure_stdio():
@@ -43,8 +53,16 @@ def configure_runtime():
         level="INFO",
         colorize=True,
     )
+    
+    # Add memory queue sink for Web UI
+    logger.add(
+        _queue_sink,
+        format="{time:HH:mm:ss} | {level: <7} | {message}",
+        level="INFO",
+        colorize=False,
+    )
 
     _validate_config()
 
 
-__all__ = ["configure_runtime"]
+__all__ = ["configure_runtime", "log_queue"]

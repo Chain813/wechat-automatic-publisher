@@ -1,14 +1,16 @@
 """
 ============================================================
-  图片检索引擎 v6.0 (微信适配版)
-  策略：免费图库 -> 多源搜索 -> 智能评分 -> 择优录取 -> 尺寸适配
-  新增：Pexels/Unsplash 免费图库、线程安全、并行采集
+  图片检索引擎 v7.0 (微信适配版)
+  策略：免费图库 -> AI 生图 -> 多源搜索 -> 智能评分 -> 择优录取 -> 尺寸适配
+  新增：Pollinations.ai 免费 AI 生图（无需 API Key）
 ============================================================
 """
 import os
 import re
 import time
+import random
 import threading
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image
 
@@ -193,8 +195,8 @@ def _download_from_url(url, save_path):
                 f.write(chunk)
         if os.path.getsize(save_path) > 5000:
             return save_path
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("  下载失败 {}: {}", url[:80], e)
     return None
 
 
@@ -220,6 +222,82 @@ def _try_pexels(keyword, directory, max_num=3):
         if best:
             logger.info("  Pexels 免费图库命中: {}", os.path.basename(best))
             return best
+    return None
+
+
+# ==========================================
+#  Pollinations.ai 免费 AI 生图
+# ==========================================
+def _build_pollinations_prompt(keyword):
+    """将中文关键词转为适合 AI 生图的英文 prompt"""
+    # 常见时政科技关键词 -> 英文 prompt 映射
+    prompt_map = {
+        "AI": "artificial intelligence, futuristic digital brain, neon blue circuits",
+        "人工智能": "artificial intelligence, futuristic digital brain, neon blue circuits",
+        "大模型": "large language model, neural network visualization, data streams",
+        "芯片": "microchip, semiconductor wafer, closeup technology photography",
+        "半导体": "semiconductor manufacturing, clean room, chip fabrication",
+        "华为": "modern Chinese tech headquarters, sleek glass architecture, night",
+        "机器人": "humanoid robot, advanced robotics, futuristic design",
+        "量子": "quantum computing, quantum bits, abstract physics visualization",
+        "航天": "space exploration, rocket launch, cosmic landscape",
+        "网络安全": "cybersecurity, digital shield, encrypted data, dark theme",
+        "数字经济": "digital economy, holographic charts, smart city",
+        "中美": "US-China technology competition, global trade, digital globe",
+        "芯片封锁": "semiconductor supply chain, chip sanctions, technology barrier",
+        "科技制裁": "technology sanctions, global tech war, digital blockade",
+        "数据安全": "data protection, digital lock, encrypted storage",
+        "自动驾驶": "autonomous driving, self-car, lidar sensors, smart road",
+        "5G": "5G network tower, connected city, fast data transmission",
+        "区块链": "blockchain technology, distributed ledger, digital chain",
+        "新能源": "renewable energy, solar panels, wind turbines, green tech",
+        "元宇宙": "metaverse, virtual reality, immersive digital world",
+        "脑机接口": "brain computer interface, neural link, futuristic neuroscience",
+    }
+
+    # 尝试最长匹配
+    for key in sorted(prompt_map.keys(), key=len, reverse=True):
+        if key in keyword:
+            return prompt_map[key]
+
+    # 默认：直接用关键词 + 质量修饰词
+    return f"{keyword}, technology, professional, cinematic lighting, detailed"
+
+
+def _try_pollinations(keyword, directory, width=1024, height=576):
+    """
+    尝试使用 Pollinations.ai 免费 API 生成图片。
+    无需 API Key，直接 URL 调用。
+    """
+    try:
+        import requests
+
+        prompt = _build_pollinations_prompt(keyword)
+        encoded = urllib.parse.quote(prompt)
+        seed = random.randint(1, 99999)
+
+        url = f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&seed={seed}&nologo=true"
+        logger.info("  Pollinations AI 生图中: {}", prompt[:60])
+
+        res = requests.get(url, timeout=20)
+        if res.status_code == 200 and len(res.content) > 5000:
+            save_path = os.path.join(directory, f"pollinations_{seed}.jpg")
+            with open(save_path, "wb") as f:
+                f.write(res.content)
+
+            # 基础校验：确认是有效图片
+            try:
+                with Image.open(save_path) as img:
+                    img.verify()
+                logger.info("  Pollinations 生图成功: {}x{}", width, height)
+                return save_path
+            except Exception:
+                os.remove(save_path)
+                logger.debug("  Pollinations 返回的不是有效图片")
+        else:
+            logger.debug("  Pollinations 请求失败: status={}", res.status_code)
+    except Exception as e:
+        logger.debug("  Pollinations 生图异常: {}", e)
     return None
 
 
@@ -275,6 +353,13 @@ def download_image(keyword, save_dir="assets"):
         if best:
             return best
 
+    # ---- 策略 0.5：Pollinations.ai AI 生图（免费，无需 Key） ----
+    best = _try_pollinations(keyword, specific_dir, width=1024, height=576)
+    if best:
+        best = _finalize_image(best, "body")
+        if best:
+            return best
+
     # ---- 策略 1：Bing 采样 ----
     best = _try_crawl("bing", keyword, specific_dir, max_num, purpose="body")
     if best:
@@ -309,6 +394,13 @@ def download_cover_image(keyword, save_dir="assets"):
 
     # ---- 策略 0：Pexels 免费图库 ----
     best = _try_pexels(keyword, specific_dir, max_num)
+    if best:
+        best = _finalize_image(best, "cover")
+        if best:
+            return best
+
+    # ---- 策略 0.5：Pollinations.ai AI 生图（封面尺寸） ----
+    best = _try_pollinations(keyword, specific_dir, width=1280, height=545)
     if best:
         best = _finalize_image(best, "cover")
         if best:
@@ -392,36 +484,15 @@ def _try_crawl(engine, keyword, directory, max_num, scene="auto", purpose="body"
                 best = pick_best_image(candidates, purpose)
                 if best:
                     return best
+        except ImportError:
+            logger.debug("  icrawler 未安装，跳过 {} 爬虫", engine)
+            return None
         except Exception as e:
             logger.warning("  {} 第 {}/{} 次抓取失败: {}", engine, attempt, IMAGE_RETRY_MAX, e)
             if attempt < IMAGE_RETRY_MAX:
                 time.sleep(1)
     return None
 
-
-def _try_crawl_parallel(keyword, directory, max_num, scene="auto", purpose="body"):
-    """
-    Bing 和百度并行抓取，返回最先成功的最优图片。
-    比串行快 30-50%。
-    """
-    bing_dir = os.path.join(directory, "bing")
-    baidu_dir = os.path.join(directory, "baidu")
-    os.makedirs(bing_dir, exist_ok=True)
-    os.makedirs(baidu_dir, exist_ok=True)
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        f_bing = executor.submit(_try_crawl, "bing", keyword, bing_dir, max_num, scene, purpose)
-        f_baidu = executor.submit(_try_crawl, "baidu", keyword, baidu_dir, max(3, max_num // 2), scene, purpose)
-
-        for future in as_completed([f_bing, f_baidu]):
-            try:
-                result = future.result()
-                if result:
-                    return result
-            except Exception as e:
-                logger.debug("  并行抓取子任务异常: {}", e)
-
-    return None
 
 
 def _try_crawl_to_dir(engine, keyword, directory, max_num, scene="auto"):
