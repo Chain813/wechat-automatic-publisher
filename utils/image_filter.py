@@ -2,10 +2,12 @@
 ============================================================
   智能图片筛选引擎 v5.0 (微信适配版)
   支持：分辨率校验、宽高比审计、文字密度检测、多图评分
-  新增：感知哈希去重、微信封面/正文双模式评分、轻量文字检测
+  新增：Gemini Vision 智能评分、感知哈希去重、微信封面/正文双模式评分
 ============================================================
 """
 import os
+import re
+import json
 from dataclasses import dataclass
 from PIL import Image
 import numpy as np
@@ -43,6 +45,100 @@ def get_ocr_reader():
     except Exception:
         _OCR_STATUS = "DISABLED"
         return None
+
+
+# ==========================================
+#  Gemini Vision 智能评分
+# ==========================================
+_GEMINI_MODEL = None
+_GEMINI_STATUS = "PENDING"
+
+
+def _get_gemini_model():
+    """延迟加载 Gemini Vision 模型"""
+    global _GEMINI_MODEL, _GEMINI_STATUS
+    if _GEMINI_STATUS == "DISABLED":
+        return None
+    if _GEMINI_MODEL is not None:
+        return _GEMINI_MODEL
+    try:
+        from config import GEMINI_API_KEY
+        if not GEMINI_API_KEY:
+            _GEMINI_STATUS = "NO_KEY"
+            return None
+        import google.generativeai as genai
+        genai.configure(api_key=GEMINI_API_KEY)
+        _GEMINI_MODEL = genai.GenerativeModel("gemini-2.0-flash")
+        _GEMINI_STATUS = "READY"
+        return _GEMINI_MODEL
+    except Exception as e:
+        logger.debug("  Gemini Vision 初始化失败: {}", e)
+        _GEMINI_STATUS = "DISABLED"
+        return None
+
+
+def evaluate_image_with_gemini(image_path, purpose="body"):
+    """
+    用 Gemini Vision 评估图片是否适合做微信公众号配图。
+    返回 (score: 0-100, reason: str) 或 None（不可用时）。
+    """
+    model = _get_gemini_model()
+    if not model:
+        return None
+
+    try:
+        import google.generativeai as genai
+
+        if purpose == "cover":
+            context = "微信公众号文章封面图（推荐宽屏 2.35:1 比例）"
+        else:
+            context = "微信公众号正文配图（推荐横版 16:9 或 4:3）"
+
+        prompt = f"""你是一个专业的图片编辑，正在为一个时政科技类公众号「智界洞察社」挑选配图。
+
+这张图片将用作：{context}
+
+请从以下维度评估这张图片，返回 JSON 格式：
+
+1. watermark（0或1）：是否有水印、版权标记、图库logo？
+2. relevance（0-100）：与科技/时政/商业主题的相关度
+3. quality（0-100）：画面清晰度、构图质量、色彩表现
+4. text_amount（0-100）：图中文字/图表占比（0=纯画面，100=全是文字）
+5. overall（0-100）：综合适配度评分
+6. reason：一句话说明理由（20字内）
+
+只返回 JSON，不要其他文字。示例：
+{{"watermark":0,"relevance":85,"quality":90,"text_amount":10,"overall":85,"reason":"高清科技场景图，构图优秀"}}"""
+
+        response = model.generate_content([
+            prompt,
+            genai.types.Part.from_image(genai.types.Image.load(image_path))
+        ])
+
+        # 解析 JSON 响应
+        text = response.text.strip()
+        # 提取 JSON 部分（兼容 markdown 代码块包裹）
+        json_match = re.search(r'\{[^}]+\}', text)
+        if json_match:
+            data = json.loads(json_match.group())
+
+            # 水印直接一票否决
+            if data.get("watermark", 0) == 1:
+                logger.info("  Gemini Vision: 检测到水印 → 0分")
+                return 0, "水印图片"
+
+            # 文字太多扣分
+            text_penalty = max(0, (data.get("text_amount", 0) - 30) * 0.5)
+
+            score = max(0, min(100, data.get("overall", 50) - text_penalty))
+            reason = data.get("reason", "")
+            logger.info("  Gemini Vision: {}分 - {}", score, reason)
+            return score, reason
+
+    except Exception as e:
+        logger.debug("  Gemini Vision 评估失败: {}", e)
+
+    return None
 
 
 # ==========================================
@@ -347,7 +443,7 @@ def evaluate_image(image_path, purpose="body"):
 #  批量选择
 # ==========================================
 def pick_best_image(image_paths, purpose="body"):
-    """从候选列表中按用途择优录取"""
+    """从候选列表中按用途择优录取（CV 评分 + Gemini Vision 辅助决策）"""
     if not image_paths:
         return None
 
@@ -365,6 +461,25 @@ def pick_best_image(image_paths, purpose="body"):
 
     if not candidates:
         return image_paths[0] if image_paths else None
+
+    candidates.sort(key=lambda x: x.score, reverse=True)
+
+    # ---- Gemini Vision 辅助评分：对 top 3 候选做二次校验 ----
+    gemini_top_n = 3
+    for c in candidates[:gemini_top_n]:
+        result = evaluate_image_with_gemini(c.path, purpose)
+        if result is not None:
+            gemini_score, reason = result
+            if gemini_score == 0:
+                # Gemini 一票否决（水印等）
+                logger.info("  Gemini 否决 {}: {}", os.path.basename(c.path), reason)
+                c.score = 0
+            else:
+                # 加权融合：CV 40% + Gemini 60%
+                cv_score = c.score
+                c.score = round(cv_score * 0.4 + gemini_score * 0.6, 1)
+                logger.info("  Gemini 融合 {}: CV={:.0f} Gemini={} → {:.0f}",
+                            os.path.basename(c.path), cv_score, gemini_score, c.score)
 
     candidates.sort(key=lambda x: x.score, reverse=True)
     best = candidates[0]

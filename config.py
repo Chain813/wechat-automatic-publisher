@@ -16,10 +16,13 @@ WECHAT_APP_SECRET = os.getenv("WECHAT_APP_SECRET", "")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.deepseek.com")
 
-# 3. 企业微信机器人 (选填，留空则跳过通知)
+# 3. Gemini Vision (图片智能评分，选填)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+
+# 4. 企业微信机器人 (选填，留空则跳过通知)
 QYWECHAT_WEBHOOK = os.getenv("QYWECHAT_WEBHOOK", "")
 
-# 4. 品牌信息
+# 5. 品牌信息
 BRAND_NAME = "智界洞察社"
 BRAND_SLOGAN = "在政策与技术的交叉点，洞见未来格局"
 BRAND_DESC = "聚焦时政与科技的深度交汇——从大国博弈到技术封锁，从产业政策到 AI 监管，将复杂的科技政治局势转化为可感知的趋势洞见。"

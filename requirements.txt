@@ -13,6 +13,7 @@ requests-cache>=1.1,<2
 rapidfuzz>=3.5,<4
 feedparser>=6.0,<7
 flask>=3.0,<4
+google-generativeai>=0.8,<1
 
 # 可选：图片文字检测（需要 PyTorch ~2GB，不装也能用）
 # easyocr>=1.7,<2
