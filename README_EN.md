@@ -20,7 +20,7 @@ Fully automated WeChat public account content production and publishing system. 
 - [Web UI](#web-ui-v30)
 - [Image Selection Strategy](#image-selection-strategy)
 - [Core Configuration](#core-configuration)
-- [Glossary](#glossary)
+- [Glossary](GLOSSARY_EN.md)
 - [Requirements](#requirements)
 - [License](#license)
 - [Disclaimer](#disclaimer)
@@ -223,54 +223,9 @@ Adjustable in `config.py` or `.env`:
 
 ## Glossary
 
-### Technical Terms
+Detailed explanations of technical terms, tool names, and concepts used in this project: **[GLOSSARY_EN.md](GLOSSARY_EN.md)**
 
-| Term | Description |
-|------|-------------|
-| **LLM** | Large Language Model. This project uses DeepSeek for article generation, topic filtering, and digest creation |
-| **SYSTEM_PROMPT** | System prompt sent to the LLM defining the AI's writing style, article structure, and formatting rules |
-| **pHash** | Perceptual Hash. An image fingerprint algorithm that computes hash values based on visual perception. Similar images produce similar hashes, used for duplicate detection |
-| **RapidFuzz** | High-performance fuzzy string matching library. Calculates similarity (0-100%) between titles for deduplication |
-| **ThreadPoolExecutor** | Python thread pool for parallel task execution (e.g., downloading multiple images simultaneously) |
-| **Selenium Stealth Mode** | Browser configuration that disables automation flags and sets realistic User-Agent to bypass anti-scraping detection |
-| **icrawler** | Python image crawler framework wrapping Bing and Baidu image search engines |
-| **Webhook** | Callback notification mechanism. WeChat group bots receive messages via Webhook URLs |
-| **API Token** | Authentication key string for API access, e.g., GitHub Personal Access Token |
-
-### Image Terms
-
-| Term | Description |
-|------|-------------|
-| **Pollinations.ai** | Free AI image generation service. Generates images from English prompts via URL, no registration or API key needed |
-| **Pexels** | Free high-quality stock photo library with copyright-free images. 200 free API calls per month |
-| **Carbon** | Code screenshot beautification service. Renders code snippets with syntax highlighting and styled backgrounds |
-| **Aspect Ratio** | Width-to-height ratio. WeChat cover: 2.35:1 (900×383), body image: 16:9 (900×500) |
-| **Laplacian Variance** | Image sharpness metric. Calculates variance of second derivatives; higher values indicate sharper images |
-| **Color Histogram Entropy** | Image color richness metric. Information entropy of color distribution; higher entropy means more diverse colors |
-| **OCR** | Optical Character Recognition. Detects text in images; images with too much text are unsuitable as article illustrations |
-
-### GitHub Terms
-
-| Term | Description |
-|------|-------------|
-| **GitHub Trending** | GitHub's trending page showcasing repositories with the most stars recently |
-| **PyGithub** | Python wrapper for GitHub API providing type-safe access to repos, stars, README, etc. |
-| **rich** | Python rich text and formatting library. Used to render project directory trees as styled PNG images |
-| **diagrams** | Python architecture diagram library. Draws cloud architecture and system topology diagrams from code, outputs PNG/SVG |
-| **File Tree** | Hierarchical structure of project files and folders, showing the project's composition |
-| **Architecture Diagram** | System architecture illustration showing component relationships and data flow |
-| **Personal Access Token** | GitHub authentication token for API calls with higher rate limits (5000 vs 60 requests/hour) |
-| **Graphviz** | Open-source graph visualization software. Required by the diagrams library to render architecture diagrams |
-
-### WeChat Terms
-
-| Term | Description |
-|------|-------------|
-| **AppID / AppSecret** | WeChat official account application credentials for API authentication |
-| **Draft Box** | WeChat article draft storage. Articles are pushed here for review before formal publishing |
-| **thumb_media_id** | WeChat material ID. Unique identifier returned after uploading a cover image |
-| **access_token** | WeChat API access token with 2-hour validity, auto-refreshed by the system |
-| **Title Dedup** | Pre-publish check against existing drafts to prevent duplicate articles. Supports exact, fuzzy, keyword, and AI semantic matching |
+Covers: Technical Terms | Image Terms | GitHub Terms | WeChat Terms
 
 ---
 
