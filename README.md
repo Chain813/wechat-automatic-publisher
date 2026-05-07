@@ -11,36 +11,118 @@
 
 ---
 
+## 目录
+
+- [功能特性](#功能特性)
+- [技术栈](#技术栈)
+- [项目结构](#项目结构)
+- [快速开始](#快速开始)
+- [Web 管理界面](#web-管理界面)
+- [配图策略](#配图策略)
+- [核心配置](#核心配置)
+- [名词解释](#名词解释)
+- [环境要求](#环境要求)
+- [许可证](#许可证)
+- [免责声明](#免责声明)
+
+---
+
 ## 功能特性
 
-**多源热点聚合** — 12 平台并行采集（微博、IT之家、36氪、百度、知乎、CSDN、RSS、时政、头条、澎湃、虎嗅、抖音）。源级健康监控，自动降级。
+### 多源热点聚合
 
-**AI 深度创作** — DeepSeek 驱动 2500-3500 字深度分析文章。内置敏感词过滤、标题去重（4 策略）、结构质量检查。
+12 个平台并行采集实时热点资讯：
 
-**智能配图** — 多源图片检索（Pollinations AI 生图 → Pexels 免费图库 → Bing/百度爬取）。6 维评分（分辨率、宽高比、清晰度、文字密度、色彩丰富度、文件大小）。感知哈希去重。微信封面/正文双模式评分。**Gemini Vision + Ollama 本地视觉模型** AI 图片评估，自动降级。
+| 平台 | 类型 | 说明 |
+|------|------|------|
+| 微博热搜 | 社交媒体 | 实时热搜榜，覆盖全网热点 |
+| IT之家 | 科技资讯 | 国内头部科技媒体 |
+| 36氪 | 创投科技 | 创业投资与科技前沿 |
+| 百度热搜 | 搜索引擎 | 基于搜索量的热点排行 |
+| 知乎热榜 | 问答社区 | 深度讨论型热点 |
+| CSDN | 开发者社区 | 技术开发者聚集地 |
+| RSS 订阅 | 信息聚合 | 支持自定义 RSS 源 |
+| 时政新闻 | 新闻媒体 | 时政要闻聚合 |
+| 今日头条 | 资讯平台 | 算法推荐热点 |
+| 澎湃新闻 | 新闻媒体 | 深度新闻报道 |
+| 虎嗅 | 商业媒体 | 商业科技深度分析 |
+| 抖音热点 | 短视频 | 短视频平台热点趋势 |
 
-**高效并行架构** — 图片下载+上传合并为并行流水线。文章资产生成与摘要生成并行。多源热点并发扫描。
+每个数据源独立健康监控（绿/黄/红状态），故障时自动降级，不影响其他源。
 
-**安全合规** — 4 策略标题去重（精确/模糊/关键词/AI 语义）。跨话题内部去重。草稿箱审计防重。
+### AI 深度创作
 
-**Web 管理界面** — Flask 暗色主题仪表盘，一键启停任务、实时日志流、文章历史、源健康监控、在线配置。
+基于 DeepSeek 大语言模型生成 2500-3500 字深度分析文章：
 
-**企业微信集成** — 发布后自动推送通知到企微群机器人。
+- **5 段式结构**：开篇切入 → 多角度分析 → 技术与产业深挖 → 预判与观点 → 互动收尾
+- **敏感词过滤**：自动检测并过滤敏感词汇
+- **标题去重**：4 种策略防止重复发布（精确匹配/模糊匹配/关键词匹配/AI 语义匹配）
+- **结构质量检查**：验证标题数、引用数、配图数是否达标
+- **自动补全**：配图不足时自动插入占位符
+
+### 智能配图
+
+多源图片检索 + AI 生成，自动为文章匹配最佳配图：
+
+- **6 维评分体系**：从分辨率、宽高比、清晰度、文字密度、色彩丰富度、文件大小 6 个维度对候选图片打分
+- **感知哈希去重**：使用 pHash（感知哈希）算法检测相似图片，避免重复配图
+- **微信尺寸适配**：自动裁剪为微信推荐尺寸（封面 900×383，正文 900×500）
+- **视觉 AI 二次评估**：候选图片经 Gemini Vision（云端）或 Ollama（本地）AI 模型二次评估，选出最佳
+
+### 高效并行架构
+
+- 图片下载与上传合并为并行流水线（ThreadPoolExecutor）
+- 文章资产生成与摘要生成并行执行
+- 多源热点并发扫描
+- 多篇文章并行发布
+
+### 安全合规
+
+- **4 策略标题去重**：精确匹配 → 模糊匹配（RapidFuzz）→ 关键词匹配 → AI 语义匹配
+- **跨话题内部去重**：同一批次内的相似话题自动去重
+- **草稿箱审计**：发布前与微信草稿箱已有文章比对，防止重复
+
+### Web 管理界面
+
+Flask 暗色主题仪表盘（v3.0）：
+
+| 页面 | 功能说明 |
+|------|---------|
+| **控制台** | 一键启停任务、实时日志流、任务类型选择（热点/GitHub） |
+| **历史记录** | 按日期分组的已发布文章列表 |
+| **数据源** | 12 个数据源的健康状态卡片（绿=正常/黄=告警/红=故障） |
+| **设置** | API Key 在线配置，密钥脱敏显示 |
+
+### 企业微信集成
+
+发布成功后自动推送通知到企业微信群机器人，内容包含品牌名和文章标题。
 
 ---
 
 ## 技术栈
 
-- **语言**: Python 3.8+
-- **LLM**: DeepSeek Chat / Reasoner
-- **视觉 AI**: Gemini Flash 2.0（云端）+ Gemma 3 4B via Ollama（本地）
-- **GitHub 工具链**: PyGithub（API）、rich（目录树渲染）、diagrams（架构图生成）、carbon（代码截图）
-- **爬虫**: Requests, BeautifulSoup4, Selenium（隐身模式）, icrawler
-- **图片**: Pillow, numpy, Pollinations.ai API, Pexels API
-- **缓存/匹配**: requests-cache, RapidFuzz
-- **日志**: Loguru
-- **Web**: Flask
-- **API**: 微信公众号草稿箱 API
+| 类别 | 技术 | 用途 |
+|------|------|------|
+| **语言** | Python 3.8+ | 主开发语言 |
+| **LLM** | DeepSeek Chat / Reasoner | 文章生成、选题筛选、摘要生成 |
+| **视觉 AI** | Gemini Flash 2.0 + Gemma 3 4B | 图片质量 AI 评估（云端/本地双通道） |
+| **GitHub 工具链** | PyGithub | GitHub API 封装，获取 Trending 项目、仓库元数据 |
+| | rich | Python 富文本库，渲染项目目录树为高质量 PNG 图片 |
+| | diagrams | Python 架构图生成库，根据技术栈自动生成项目架构图 |
+| | carbon | 代码截图服务，将代码片段渲染为精美截图 |
+| **爬虫** | Requests | HTTP 请求库 |
+| | BeautifulSoup4 | HTML 解析库 |
+| | Selenium（隐身模式） | 浏览器自动化，用于反爬严格的网站 |
+| | icrawler | 图片爬虫框架（Bing/百度图片搜索） |
+| **图片处理** | Pillow | Python 图片处理库，裁剪/缩放/格式转换 |
+| | numpy | 数值计算，用于图片评分算法 |
+| | Pollinations.ai | 免费 AI 生图 API，无需 API Key |
+| | Pexels | 免费高质量图库 API |
+| **缓存/匹配** | requests-cache | HTTP 请求缓存，减少重复请求 |
+| | RapidFuzz | 高性能模糊字符串匹配库 |
+| **日志** | Loguru | Python 日志库 |
+| **Web** | Flask | 轻量级 Web 框架 |
+| **API** | 微信公众号草稿箱 API | 文章发布接口 |
 
 ---
 
@@ -48,42 +130,49 @@
 
 ```
 wechat_auto_publish/
-├── main.py                    # CLI 入口（支持 --task hotspots/github）
-├── webui.py                   # Flask Web 管理界面 (v3.0)
-├── config.py                  # 全局配置中心
-├── requirements.txt           # 依赖清单
-├── run.bat                    # CLI 启动脚本
-├── run_gui.bat                # Web UI 启动脚本
-├── core/
-│   ├── engine.py              # 工作流调度器
-│   ├── hotspots/
-│   │   ├── collector.py       # 12 源热点采集引擎
-│   │   ├── processor.py       # AI 文章生成引擎
-│   │   └── workflow.py        # 热点发布流水线
-│   ├── github/
-│   │   ├── collector.py       # GitHub Trending（PyGithub + rich 目录树 + diagrams 架构图 + carbon 代码截图）
-│   │   ├── processor.py       # GitHub 文章生成（微信排版优化）
-│   │   └── workflow.py        # GitHub 发布流水线
-│   └── shared/
-│       ├── llm.py             # DeepSeek API 封装
-│       ├── publisher.py       # 微信 API + 标题去重
-│       ├── article_utils.py   # Markdown→HTML + 配图嵌入
-│       └── runtime.py         # 日志初始化
-├── utils/
-│   ├── image_handler.py       # 多源图片检索 + AI 生图
-│   ├── image_filter.py        # 图片评分 / OCR / pHash 去重 / 视觉 AI
-│   ├── http_client.py         # HTTP 会话 + 缓存 + 重试
-│   └── spider.py              # Selenium 浏览器启动器
-├── static/                    # Web UI 前端资源
-├── templates/                 # Web UI 模板
-└── assets/                    # 自动下载的图片资源
+├── main.py                    # CLI 入口，支持 --task hotspots/github 参数
+├── webui.py                   # Flask Web 管理界面，提供暗色主题仪表盘
+├── config.py                  # 全局配置中心，集中管理所有可调参数
+├── .env.example               # 环境变量模板
+├── requirements.txt           # Python 依赖清单
+├── run.bat                    # Windows CLI 一键启动脚本
+├── run_gui.bat                # Windows Web UI 一键启动脚本
+│
+├── core/                      # 核心业务逻辑
+│   ├── engine.py              # 工作流调度器，根据任务类型分发到对应工作流
+│   │
+│   ├── hotspots/              # 热点文章模块
+│   │   ├── collector.py       # 12 源热点采集引擎，并行抓取各平台热点
+│   │   ├── processor.py       # AI 文章生成引擎，包含 SYSTEM_PROMPT 定义
+│   │   └── workflow.py        # 热点发布完整流水线（采集→筛选→创作→配图→发布）
+│   │
+│   ├── github/                # GitHub Trending 模块
+│   │   ├── collector.py       # GitHub 采集引擎（PyGithub API + 目录树 + 架构图 + 代码截图）
+│   │   ├── processor.py       # GitHub 文章生成（微信公众号排版优化）
+│   │   └── workflow.py        # GitHub 发布完整流水线
+│   │
+│   └── shared/                # 共享模块
+│       ├── llm.py             # DeepSeek API 封装，含重试机制和敏感词过滤
+│       ├── publisher.py       # 微信公众号 API 封装（token管理/草稿发布/标题去重）
+│       ├── article_utils.py   # Markdown→HTML 转换 + 样式注入 + 配图嵌入
+│       └── runtime.py         # 日志初始化和全局配置
+│
+├── utils/                     # 工具模块
+│   ├── image_handler.py       # 智能图片检索引擎（多源搜索 + AI 生图 + 评分筛选 + 尺寸适配）
+│   ├── image_filter.py        # 图片质量评估（6维评分 + OCR文字检测 + pHash去重 + 视觉AI）
+│   ├── http_client.py         # HTTP 会话管理（缓存 + 重试 + 超时控制）
+│   └── spider.py              # Selenium 浏览器启动器（隐身模式配置）
+│
+├── static/                    # Web UI 前端资源（CSS/JS/图标）
+├── templates/                 # Web UI HTML 模板
+└── assets/                    # 运行时自动下载的图片资源目录
 ```
 
 ---
 
 ## 快速开始
 
-### 1. 克隆
+### 1. 克隆仓库
 
 ```bash
 git clone https://github.com/Chain813/wechat-automatic-publisher.git
@@ -93,37 +182,49 @@ cd wechat-automatic-publisher
 ### 2. 安装依赖
 
 ```bash
+# 创建虚拟环境
 python -m venv venv
+
+# 激活虚拟环境（Windows）
 venv\Scripts\activate
+
+# 安装依赖
 pip install -r requirements.txt
 ```
 
-或双击 `run.bat` 自动安装。
+或直接双击 `run.bat` 自动完成以上步骤。
 
-### 3. 配置
+**额外依赖**：[Graphviz](https://graphviz.org/download/)（架构图生成需要，安装后需添加到系统 PATH）
 
-复制 `.env.example` 为 `.env`，填入：
+### 3. 配置环境变量
+
+复制 `.env.example` 为 `.env`，填入你的 API 密钥：
 
 ```env
-# 必填
-WECHAT_APP_ID="你的微信AppID"
-WECHAT_APP_SECRET="你的微信AppSecret"
+# ===== 必填 =====
+WECHAT_APP_ID="你的微信公众号AppID"
+WECHAT_APP_SECRET="你的微信公众号AppSecret"
 LLM_API_KEY="你的DeepSeek API Key"
 
-# 可选：GitHub API（获取 Trending 项目，提高速率限制）
-GITHUB_TOKEN="你的GitHub Personal Access Token"
+# ===== 可选 =====
 
-# 可选：Gemini Vision（云端图片评估）
-GEMINI_API_KEY="你的Gemini API Key"
+# GitHub API Token（可选，提高 API 速率限制，匿名60次/小时 → 认证5000次/小时）
+# 获取方式：GitHub Settings → Developer settings → Personal access tokens → Generate new token
+# 权限：只需勾选 public_repo
+GITHUB_TOKEN="ghp_xxxxxxxxxxxx"
 
-# 可选：企微群机器人通知
+# Gemini Vision API Key（可选，用于 AI 图片质量评估）
+GEMINI_API_KEY="AIzaSyxxxxxxxxxxx"
+
+# 企业微信群机器人 Webhook（可选，发布后自动推送通知）
 QYWECHAT_WEBHOOK=""
 
-# 可选：Ollama 本地视觉模型
+# Ollama 本地视觉模型（可选，本地 AI 图片评估，需先安装 Ollama）
 OLLAMA_DEFAULT_MODEL="gemma4:e2b-it-q4_K_M"
 OLLAMA_VISION_MODEL="gemma3:4b"
 
-# 可选：Pexels 免费图库
+# Pexels 免费图库 API Key（可选，高质量版权免费图片）
+# 获取方式：https://www.pexels.com/api/ 免费注册
 PEXELS_API_KEY=""
 ```
 
@@ -131,59 +232,98 @@ PEXELS_API_KEY=""
 
 **CLI 模式：**
 ```bash
-python main.py                    # 热点发布（默认）
-python main.py --task github      # GitHub Trending 发布
+python main.py                    # 热点文章发布（默认）
+python main.py --task github      # GitHub Trending 文章发布
 ```
 
 **Web 模式：**
 ```bash
 python webui.py
 ```
-访问 http://127.0.0.1:5000
+浏览器访问 http://127.0.0.1:5000
 
 ---
 
-## Web UI (v3.0)
+## Web 管理界面
 
-暗色主题仪表盘：
+### 控制台页面
 
-| 页面 | 功能 |
-|------|------|
-| **控制台** | 一键启停、实时日志流、任务类型选择 |
-| **历史记录** | 按日期分组的已发布文章 |
-| **数据源** | 12 源健康状态（绿/黄/红卡片） |
-| **设置** | API Key 配置，密钥脱敏显示 |
+- **任务类型选择**：热点发布 / GitHub Trending 发布
+- **一键启停**：点击按钮即可启动或停止任务
+- **实时日志**：WebSocket 推送的实时运行日志，滚动显示
+- **状态指示**：运行中/已停止/已完成 状态标识
+
+### 历史记录页面
+
+- 按日期分组展示已发布的文章
+- 显示标题、发布时间、状态
+- 支持按日期筛选
+
+### 数据源页面
+
+- 12 个数据源的健康状态卡片
+- 绿色 = 正常响应
+- 黄色 = 响应缓慢或部分失败
+- 红色 = 完全不可用
+- 显示最近一次采集时间和结果数
+
+### 设置页面
+
+- API Key 在线编辑
+- 密钥脱敏显示（仅显示前4位和后4位）
+- 保存后立即生效
 
 ---
 
 ## 配图策略
 
-### 热点文章（AI 生图优先）
+### 热点文章配图（AI 生图优先）
 
-1. **Pollinations.ai AI 生图** — 时政事件概念图（新闻照片无法匹配具体事件）
-2. **Pexels 免费图库** — 高质量版权免费图片
-3. **Bing 图片搜索** — 大尺寸横版图过滤
-4. **百度图片搜索** — 国内兜底
-5. **本地默认图** — 最终兜底
+时政科技热点事件往往没有现成的新闻照片（如"ASML停止对华光刻机维修"），因此优先使用 AI 生成概念性插图：
 
-### GitHub 文章（多层兜底）
+| 优先级 | 来源 | 说明 |
+|--------|------|------|
+| 1 | **Pollinations.ai AI 生图** | 根据关键词生成概念图，免费无需 API Key |
+| 2 | **Pexels 免费图库** | 高质量版权免费图片，适合通用场景 |
+| 3 | **Bing 图片搜索** | 大尺寸横版图过滤，覆盖面广 |
+| 4 | **百度图片搜索** | 国内图片源，作为兜底 |
+| 5 | **本地默认图** | 最终兜底方案 |
 
-1. **README 图片** — 架构图、演示截图（按相关性评分）
-2. **目录树截图** — rich 库渲染为样式化 PNG
-3. **架构图** — diagrams 库根据技术栈自动生成
-4. **代码截图** — carbon API 从项目入口文件生成
-5. **关键词搜索** — 网页图片搜索最终兜底
+### GitHub 文章配图（多层兜底）
 
-每张图片经过 6 维评分，可选视觉 AI 二次评估：
+为每个 GitHub 项目生成配图，优先使用项目自身的资源：
+
+| 优先级 | 来源 | 说明 |
+|--------|------|------|
+| 1 | **README 图片** | 从项目 README 中提取图片，按架构图/流程图优先级评分 |
+| 2 | **目录树截图** | 使用 rich 库获取项目目录结构，渲染为深色主题 PNG 图片 |
+| 3 | **架构图** | 使用 diagrams 库根据项目语言和技术栈自动生成架构图 |
+| 4 | **代码截图** | 使用 carbon API 将项目入口文件代码渲染为精美截图 |
+| 5 | **关键词搜索** | 以项目名+语言为关键词进行网页图片搜索 |
+
+### 图片评估流程
+
+每张候选图片经过以下评估流程：
 
 ```
-CV 6 维评分 → Top 3 候选 → 视觉 AI 二次评估
-                     |
-               Gemini 可用？ → Gemini Flash 2.0（60% 权重）
-                     | 否
-               Ollama 可用？ → Gemma 3 4B 本地（60% 权重）
-                     | 否
-               纯 CV 评分兜底
+第一步：6 维 CV 评分
+├── 分辨率（像素数量）
+├── 宽高比（是否适合微信展示）
+├── 清晰度（拉普拉斯方差）
+├── 文字密度（OCR 检测文字占比）
+├── 色彩丰富度（颜色直方图熵）
+└── 文件大小（是否在微信限制内）
+
+第二步：Top 3 候选进入视觉 AI 二次评估
+├── Gemini Flash 2.0 可用？ → 使用 Gemini 评估（权重 60%）
+├── Ollama 本地模型可用？ → 使用 Gemma 3 4B 评估（权重 60%）
+└── 都不可用？ → 纯 CV 评分结果
+
+第三步：择优录取 + 微信尺寸适配
+├── 选择综合得分最高的图片
+├── 裁剪为微信推荐尺寸（封面 900×383 / 正文 900×500）
+├── 压缩至微信文件大小限制内（正文 2MB）
+└── 感知哈希去重（避免与已选图片重复）
 ```
 
 ---
@@ -194,24 +334,83 @@ CV 6 维评分 → Top 3 候选 → 视觉 AI 二次评估
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
-| `BRAND_NAME` | 品牌名称 | AutoWeChat |
-| `NEWS_SOURCES` | 启用的源 | 12 平台 |
-| `FILTER_CATEGORIES` | 优先过滤关键词 | 79 个 |
-| `LLM_MODEL` | LLM 模型 | deepseek-chat |
-| `LLM_TEMPERATURE` | 生成随机性 | 0.75 |
-| `IMAGE_DEFAULT_CANDIDATES` | 每次搜索候选图片数 | 5 |
-| `OLLAMA_VISION_MODEL` | 本地视觉模型 | gemma3:4b |
-| `GITHUB_TOKEN` | GitHub API Token（可选，提高速率限制） | 匿名 (60次/小时) |
+| `BRAND_NAME` | 品牌名称，显示在文章末尾和通知中 | AutoWeChat |
+| `NEWS_SOURCES` | 启用的热点数据源列表 | 12 个平台 |
+| `FILTER_CATEGORIES` | 优先筛选的关键词类别 | 79 个关键词 |
+| `LLM_MODEL` | DeepSeek 模型名称 | deepseek-chat |
+| `LLM_TEMPERATURE` | 生成文本的随机性（0-1，越高越随机） | 0.75 |
+| `LLM_BASE_URL` | LLM API 地址 | https://api.deepseek.com |
+| `IMAGE_DEFAULT_CANDIDATES` | 每次图片搜索的候选数量 | 5 |
+| `OLLAMA_VISION_MODEL` | Ollama 本地视觉模型名称 | gemma3:4b |
+| `GITHUB_TOKEN` | GitHub API Token（可选） | 匿名（60次/小时） |
+| `PEXELS_API_KEY` | Pexels 图库 API Key（可选） | 未配置 |
+| `WECHAT_TITLE_MAX_LEN` | 微信标题最大字数限制 | 64 |
+| `WECHAT_DIGEST_MAX_LEN` | 微信摘要最大字数限制 | 120 |
+
+---
+
+## 名词解释
+
+### 技术术语
+
+| 术语 | 解释 |
+|------|------|
+| **LLM** | Large Language Model，大语言模型。本项目使用 DeepSeek 作为 LLM，负责文章生成、选题筛选、摘要生成等文本任务 |
+| **SYSTEM_PROMPT** | 系统提示词。发送给 LLM 的角色设定和指令，定义 AI 的写作风格、文章结构、排版规则等 |
+| **pHash** | Perceptual Hash，感知哈希。一种图片指纹算法，将图片缩放并转换为灰度后计算哈希值。相似图片的哈希值接近，用于检测重复配图 |
+| **RapidFuzz** | 高性能模糊字符串匹配库。用于标题去重时计算两个标题的相似度（0-100%），比标准库快 10-100 倍 |
+| **ThreadPoolExecutor** | Python 线程池。用于并行执行多个任务（如同时下载多张图片），提高效率 |
+| **Selenium 隐身模式** | 通过配置浏览器参数（禁用自动化标志、设置 User-Agent 等），使 Selenium 控制的浏览器看起来像真人操作，绕过反爬检测 |
+| **icrawler** | Python 图片爬虫框架。封装了 Bing、百度等搜索引擎的图片抓取逻辑 |
+| **Webhook** | 回调通知机制。企业微信群机器人通过 Webhook URL 接收消息推送 |
+| **API Token** | 访问令牌。用于身份验证的密钥字符串，如 GitHub Personal Access Token |
+
+### 图片相关术语
+
+| 术语 | 解释 |
+|------|------|
+| **Pollinations.ai** | 免费 AI 图片生成服务。通过 URL 传入英文提示词即可生成图片，无需注册或 API Key |
+| **Pexels** | 免费高质量图片库。提供版权免费的摄影作品，每月 200 次免费 API 调用 |
+| **碳代码截图 (carbon)** | 代码美化截图服务。将代码片段渲染为带有语法高亮和精美背景的图片，常用于技术文章配图 |
+| **宽高比 (Aspect Ratio)** | 图片宽度与高度的比值。微信封面推荐 2.35:1（900×383），正文插图推荐 16:9（900×500） |
+| **拉普拉斯方差** | 图片清晰度评估指标。通过计算图片二阶导数的方差来衡量模糊程度，值越大越清晰 |
+| **颜色直方图熵** | 图片色彩丰富度指标。基于颜色分布计算信息熵，熵值越高说明颜色越丰富多样 |
+| **OCR** | Optical Character Recognition，光学字符识别。用于检测图片中的文字，文字过多的图片不适合做配图 |
+
+### GitHub 相关术语
+
+| 术语 | 解释 |
+|------|------|
+| **GitHub Trending** | GitHub 热门趋势页面。展示近期获得最多 star 的开源项目，按日/周/月筛选 |
+| **PyGithub** | Python 的 GitHub API 封装库。提供类型安全的接口访问 GitHub 数据（仓库、star、README 等） |
+| **rich** | Python 富文本和美化输出库。本项目用它将项目目录树渲染为带颜色和图标的 PNG 图片 |
+| **diagrams** | Python 架构图生成库。用代码绘制云架构图、系统拓扑图，支持 AWS/Azure/GCP/K8s 等节点，输出 PNG/SVG |
+| **目录树 (File Tree)** | 项目的文件和文件夹层级结构。展示项目包含哪些文件和目录，帮助读者快速了解项目组成 |
+| **架构图 (Architecture Diagram)** | 项目的系统架构示意图。展示各组件之间的关系和数据流向 |
+| **Personal Access Token** | GitHub 个人访问令牌。用于 API 调用的身份验证，比匿名访问有更高的速率限制（5000 vs 60 次/小时） |
+| **Graphviz** | 开源图形可视化软件。diagrams 库依赖它来渲染架构图为图片文件 |
+
+### 微信相关术语
+
+| 术语 | 解释 |
+|------|------|
+| **AppID / AppSecret** | 微信公众号的应用ID和密钥。用于调用微信 API 获取访问令牌 |
+| **草稿箱 (Draft Box)** | 微信公众号的文章草稿存储。系统将生成的文章推送到草稿箱，由运营人员审核后正式发布 |
+| **thumb_media_id** | 微信素材ID。封面图上传后返回的唯一标识，用于关联文章和封面 |
+| **access_token** | 微信 API 访问令牌。有效期 2 小时，系统自动刷新 |
+| **标题去重** | 发布前检查草稿箱中是否已有相似标题的文章，避免重复发布。支持精确匹配、模糊匹配、关键词匹配、AI 语义匹配 4 种策略 |
 
 ---
 
 ## 环境要求
 
-- Python 3.8+
-- [Graphviz](https://graphviz.org/download/)（架构图生成，需添加到 PATH）
-- Chrome 浏览器（Selenium 备用爬取）
-- 可选：[Ollama](https://ollama.com) 本地视觉 AI
-- 可选：EasyOCR 文字检测（需 PyTorch ~2GB）
+| 依赖 | 说明 | 是否必须 |
+|------|------|---------|
+| Python 3.8+ | 运行环境 | 必须 |
+| [Graphviz](https://graphviz.org/download/) | 架构图渲染引擎，安装后需添加到系统 PATH | 必须（GitHub 模块） |
+| Chrome 浏览器 | Selenium 备用爬取需要 | 可选 |
+| [Ollama](https://ollama.com) | 本地运行视觉 AI 模型 | 可选 |
+| EasyOCR | 图片文字检测（需 PyTorch ~2GB） | 可选 |
 
 ---
 
@@ -223,4 +422,4 @@ CV 6 维评分 → Top 3 候选 → 视觉 AI 二次评估
 
 ## 免责声明
 
-本工具仅供技术研究和内容创作辅助。请遵守微信公众号运营规范及相关法律法规。AI 生成内容需人工审核后发布。
+本工具仅供技术研究和内容创作辅助使用。请遵守微信公众号运营规范及相关法律法规。AI 生成内容需人工审核后发布。使用者应自行承担因使用本工具产生的一切法律责任。
