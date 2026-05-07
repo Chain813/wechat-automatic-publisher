@@ -11,7 +11,7 @@ from core.hotspots.processor import filter_tech_hotspots, generate_article, gene
 from core.shared.article_utils import process_article_content, _print_review_report
 from core.shared.llm import validate_title
 from core.shared.publisher import WeChatPublisher, send_to_qywechat
-from utils.image_handler import download_cover_image, reset_image_cache
+from utils.image_handler import download_cover_image_for_hotspot, reset_image_cache
 
 try:
     from rapidfuzz import fuzz as _fuzz
@@ -162,13 +162,13 @@ def _generate_article_assets(topic, publisher):
         return None
 
     print("\n🎨 正在执行排版优化与智能图选 (并行加速)...")
-    final_html, review_data = process_article_content(article_text, publisher)
+    final_html, review_data = process_article_content(article_text, publisher, use_ai_first=True)
     if not final_html:
         print("❌ 内容处理后异常，跳过。")
         return None
 
     print("\n📸 正在为文章生成门面封面图...")
-    cover_path = download_cover_image(topic)
+    cover_path = download_cover_image_for_hotspot(topic)
     thumb_id = None
     if cover_path:
         thumb_id = publisher.upload_image(cover_path)

@@ -32,6 +32,7 @@ Fully automated WeChat public account content production and publishing system. 
 - **Language**: Python 3.8+
 - **LLM**: DeepSeek Chat / Reasoner
 - **Vision AI**: Gemini Flash 2.0 (cloud) + Gemma 3 4B via Ollama (local)
+- **GitHub**: PyGithub (API), rich (directory tree rendering), diagrams (architecture diagrams), carbon (code screenshots)
 - **Crawling**: Requests, BeautifulSoup4, Selenium (Stealth Mode), icrawler
 - **Image**: Pillow, numpy, Pollinations.ai API, Pexels API
 - **Cache/Match**: requests-cache, RapidFuzz
@@ -58,8 +59,8 @@ wechat_auto_publish/
 │   │   ├── processor.py       # AI article generation engine
 │   │   └── workflow.py        # Hotspot publishing pipeline
 │   ├── github/
-│   │   ├── collector.py       # GitHub Trending scraping
-│   │   ├── processor.py       # GitHub article generation
+│   │   ├── collector.py       # GitHub Trending (PyGithub + rich tree + diagrams + carbon)
+│   │   ├── processor.py       # GitHub article generation (WeChat formatting)
 │   │   └── workflow.py        # GitHub publishing pipeline
 │   └── shared/
 │       ├── llm.py             # DeepSeek API wrapper
@@ -106,6 +107,9 @@ WECHAT_APP_ID="your-wechat-appid"
 WECHAT_APP_SECRET="your-wechat-appsecret"
 LLM_API_KEY="your-deepseek-api-key"
 
+# Optional: GitHub API (for GitHub Trending articles, higher rate limit)
+GITHUB_TOKEN="your-github-personal-access-token"
+
 # Optional: Gemini Vision (cloud image evaluation)
 GEMINI_API_KEY="your-gemini-api-key"
 
@@ -151,13 +155,21 @@ The dark-themed dashboard provides:
 
 ## Image Selection Strategy
 
-The system tries sources in priority order:
+### Hotspot Articles (AI-first)
 
-1. **Pexels Free Stock** — High-quality copyright-free images
-2. **Pollinations.ai AI Generation** — Keyword-based image generation, free, no API key needed
+1. **Pollinations.ai AI Generation** — Conceptual illustrations for current affairs (no stock photo matches specific events)
+2. **Pexels Free Stock** — High-quality copyright-free images
 3. **Bing Image Search** — Large landscape images filtered
 4. **Baidu Image Search** — Domestic fallback
 5. **Local Default** — Final fallback
+
+### GitHub Articles (multi-layer fallback)
+
+1. **README Images** — Architecture diagrams, screenshots (scored by relevance)
+2. **Directory Tree** — Rendered via rich library as styled PNG
+3. **Architecture Diagram** — Auto-generated via diagrams library based on tech stack
+4. **Code Screenshot** — Generated via carbon API from repo's main entry file
+5. **Keyword Search** — Web image search as final fallback
 
 Each image is evaluated on 6 dimensions, then optionally re-evaluated by vision AI:
 
@@ -186,12 +198,14 @@ Adjustable in `config.py` or `.env`:
 | `LLM_TEMPERATURE` | Generation randomness | 0.75 |
 | `IMAGE_DEFAULT_CANDIDATES` | Image candidates per search | 5 |
 | `OLLAMA_VISION_MODEL` | Local vision model | gemma3:4b |
+| `GITHUB_TOKEN` | GitHub API token (optional, higher rate limit) | anonymous (60/hr) |
 
 ---
 
 ## Requirements
 
 - Python 3.8+
+- [Graphviz](https://graphviz.org/download/) (for architecture diagram generation, add to PATH)
 - Chrome browser (for Selenium fallback scraping)
 - Optional: [Ollama](https://ollama.com) for local vision AI
 - Optional: EasyOCR for text detection (requires PyTorch ~2GB)

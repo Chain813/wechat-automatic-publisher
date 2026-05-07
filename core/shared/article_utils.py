@@ -14,18 +14,26 @@ ASSET_RETENTION_DAYS = 5
 PLACEHOLDER_PATTERN = re.compile(r"【此处插入配图\s*[：:]\s*(.*?)】")
 GITHUB_IMAGE_PATTERN = re.compile(r"【GITHUB配图：\s*(https?://.*?)】")
 
-def _download_and_upload(keyword, publisher):
+def _download_and_upload(keyword, publisher, use_ai_first=False):
     """下载图片并立即上传到微信，合并为单步操作（供并行调用）"""
     keyword = keyword.strip()
     if not keyword:
         return keyword, None
 
     logger.info("正在为段落关键词 '{}' 搜寻最佳配图...", keyword)
-    image_path = download_image(keyword)
+    if use_ai_first:
+        from utils.image_handler import download_image_for_hotspot
+        image_path = download_image_for_hotspot(keyword)
+    else:
+        image_path = download_image(keyword)
     if not image_path:
         simplified = simplify_keyword(keyword)
         if simplified and simplified.strip():
-            image_path = download_image(simplified)
+            if use_ai_first:
+                from utils.image_handler import download_image_for_hotspot
+                image_path = download_image_for_hotspot(simplified)
+            else:
+                image_path = download_image(simplified)
 
     if not image_path:
         return keyword, None
@@ -47,12 +55,22 @@ def _replace_placeholder(html_body, keyword, replacement):
     pattern = re.compile(rf"【此处插入配图\s*[：:]\s*{re.escape(keyword)}】")
     return pattern.sub(replacement, html_body)
 
-def process_article_content(article_text, publisher):
+def process_article_content(article_text, publisher, use_ai_first=False):
     if not article_text:
         return "", {"word_count": 0, "image_count": 0, "sensitive_words": []}
 
     cleaned = re.sub(r"```\s*markdown\s*\n?", "", article_text)
     cleaned = re.sub(r"```\s*\n?", "", cleaned).strip()
+
+    # 移除残留的结构性标签文字（LLM 可能仍会输出）
+    structural_labels = [
+        "事件钩子", "拆解博弈", "技术逻辑", "预判观点", "互动收尾",
+        "核心特性", "适用场景", "项目亮点", "技术/产业逻辑", "技术与产业深挖",
+    ]
+    for label in structural_labels:
+        cleaned = re.sub(rf'#+\s*{re.escape(label)}\s*[:：]?\s*\n?', '', cleaned)
+        cleaned = re.sub(rf'\*\*{re.escape(label)}\*\*\s*[:：]?\s*', '', cleaned)
+        cleaned = re.sub(rf'{re.escape(label)}[：:]\s*', '', cleaned)
 
     # 重点分级：**{红色加粗}** → 临时标记，防止 markdown 转换时丢失花括号
     cleaned = re.sub(r'\*\*\{(.*?)\}\*\*', r'<redbold>\1</redbold>', cleaned)
@@ -88,7 +106,7 @@ def process_article_content(article_text, publisher):
     if placeholders:
         logger.info("启动并行图片下载+上传引擎 ({} 张)...", len(placeholders))
         with ThreadPoolExecutor(max_workers=min(3, len(placeholders))) as executor:
-            futures = {executor.submit(_download_and_upload, kw, publisher): kw for kw in placeholders}
+            futures = {executor.submit(_download_and_upload, kw, publisher, use_ai_first): kw for kw in placeholders}
             for future in as_completed(futures):
                 try:
                     keyword, image_url = future.result()

@@ -421,6 +421,97 @@ def download_cover_image(keyword, save_dir="assets"):
     return _get_fallback_image(specific_dir)
 
 
+def download_image_for_hotspot(keyword, save_dir="assets"):
+    """时政热点专用图片搜索（AI生图优先 -> 免费图库 -> 多源搜索 -> 兜底）"""
+    if not keyword or not keyword.strip():
+        return None
+
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
+    clean_keyword = re.sub(r'[\\/:*?"<>|]', '', keyword.strip())[:30]
+    specific_dir = os.path.join(save_dir, clean_keyword)
+    if not os.path.exists(specific_dir):
+        os.makedirs(specific_dir)
+
+    logger.info("正在为热点 '{}' 启动智能采样筛选 (AI生图优先)...", keyword)
+
+    max_num = IMAGE_DEFAULT_CANDIDATES
+
+    # ---- 策略 0：Pollinations.ai AI 生图（时政热点优先） ----
+    best = _try_pollinations(keyword, specific_dir, width=1024, height=576)
+    if best:
+        best = _finalize_image(best, "body")
+        if best:
+            return best
+
+    # ---- 策略 1：Pexels 免费图库 ----
+    best = _try_pexels(keyword, specific_dir, max_num)
+    if best:
+        best = _finalize_image(best, "body")
+        if best:
+            return best
+
+    # ---- 策略 2：Bing 采样 ----
+    best = _try_crawl("bing", keyword, specific_dir, max_num, purpose="body")
+    if best:
+        best = _finalize_image(best, "body")
+        if best:
+            return best
+
+    # ---- 策略 3：百度采样 ----
+    best = _try_crawl("baidu", keyword, specific_dir, max(3, max_num // 2), purpose="body")
+    if best:
+        best = _finalize_image(best, "body")
+        if best:
+            return best
+
+    return _get_fallback_image(specific_dir)
+
+
+def download_cover_image_for_hotspot(keyword, save_dir="assets"):
+    """时政热点封面专用下载（AI生图优先 -> Pexels -> Bing -> 百度 -> 兜底）"""
+    if not keyword or not keyword.strip():
+        return _get_fallback_image(save_dir)
+
+    clean_keyword = re.sub(r'[\\/:*?"<>|]', '', keyword.strip())[:30]
+    specific_dir = os.path.join(save_dir, f"{clean_keyword}_cover")
+    if not os.path.exists(specific_dir):
+        os.makedirs(specific_dir)
+
+    logger.info("正在为热点封面 '{}' 搜索宽屏素材 (AI生图优先)...", keyword)
+
+    max_num = IMAGE_DEFAULT_CANDIDATES + 3
+
+    # ---- 策略 0：Pollinations.ai AI 生图（封面尺寸） ----
+    best = _try_pollinations(keyword, specific_dir, width=1280, height=545)
+    if best:
+        best = _finalize_image(best, "cover")
+        if best:
+            return best
+
+    # ---- 策略 1：Pexels 免费图库 ----
+    best = _try_pexels(keyword, specific_dir, max_num)
+    if best:
+        best = _finalize_image(best, "cover")
+        if best:
+            return best
+
+    best = _try_crawl("bing", keyword, specific_dir, max_num, scene="趋势", purpose="cover")
+    if best:
+        best = _finalize_image(best, "cover")
+        if best:
+            return best
+
+    best = _try_crawl("baidu", keyword, specific_dir, max(3, max_num // 2), scene="趋势", purpose="cover")
+    if best:
+        best = _finalize_image(best, "cover")
+        if best:
+            return best
+
+    return _get_fallback_image(specific_dir)
+
+
 def download_images(keyword, save_dir="assets", max_num=None):
     """返回多张候选图片列表（用于多图文配图）"""
     if max_num is None:

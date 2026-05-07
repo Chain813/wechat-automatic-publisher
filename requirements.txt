@@ -14,6 +14,9 @@ rapidfuzz>=3.5,<4
 feedparser>=6.0,<7
 flask>=3.0,<4
 google-genai>=1.0
+PyGithub>=2.0
+rich>=13.0
+diagrams>=0.23
 
 # 可选：图片文字检测（需要 PyTorch ~2GB，不装也能用）
 # easyocr>=1.7,<2
