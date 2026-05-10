@@ -11,8 +11,8 @@ from core.shared.llm import filter_sensitive, simplify_keyword
 from utils.image_handler import download_image
 
 ASSET_RETENTION_DAYS = 5
-PLACEHOLDER_PATTERN = re.compile(r"【此处插入配图\s*[：:]\s*(.*?)】")
-GITHUB_IMAGE_PATTERN = re.compile(r"【GITHUB配图：\s*(https?://.*?)】")
+PLACEHOLDER_PATTERN = re.compile(r"【\s*此处插入配图\s*[：:]\s*(.*?)\s*】")
+GITHUB_IMAGE_PATTERN = re.compile(r"【\s*GITHUB配图\s*[：:]\s*(https?://.*?)\s*】")
 
 def _download_and_upload(keyword, publisher, use_ai_first=False):
     """下载图片并立即上传到微信，合并为单步操作（供并行调用）"""
@@ -52,7 +52,8 @@ def _extract_image_placeholders(article_text):
     return placeholders
 
 def _replace_placeholder(html_body, keyword, replacement):
-    pattern = re.compile(rf"【此处插入配图\s*[：:]\s*{re.escape(keyword)}】")
+    # 使用正则表达式进行不区分空格的替换
+    pattern = re.compile(rf"【\s*此处插入配图\s*[：:]\s*{re.escape(keyword)}\s*】")
     return pattern.sub(replacement, html_body)
 
 def process_article_content(article_text, publisher, use_ai_first=False):
@@ -75,6 +76,20 @@ def process_article_content(article_text, publisher, use_ai_first=False):
     # 重点分级：**{红色加粗}** → 临时标记，防止 markdown 转换时丢失花括号
     cleaned = re.sub(r'\*\*\{(.*?)\}\*\*', r'<redbold>\1</redbold>', cleaned)
 
+    # ---- 修复低级格式错误 (Anti-Low-Level-Errors) ----
+    # 1. 修复冒号出现在行首的问题：将行首的冒号合并到上一行末尾
+    cleaned = re.sub(r'\n\s*[:：]', '：', cleaned)
+    
+    # 2. 修复空列表项：移除只有列表符号但没内容的行
+    cleaned = re.sub(r'^\s*[-*+]\s*$', '', cleaned, flags=re.MULTILINE)
+    
+    # 3. 修复列表项内部的换行问题：如果列表符号后面紧跟换行，则合并
+    cleaned = re.sub(r'([-*+]\s*)\n\s*', r'\1', cleaned)
+
+    # 4. 移除多余的空行（连续 3 个及以上合并为 2 个）
+    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+    # ---------------------------------------------
+
     cleaned, hit_words = filter_sensitive(cleaned)
     if hit_words:
         logger.warning("  检测到敏感词: {}", hit_words)
@@ -91,15 +106,18 @@ def process_article_content(article_text, publisher, use_ai_first=False):
 
     html_body = markdown.markdown(cleaned, extensions=["extra", "nl2br", "sane_lists"])
 
+    # 更加鲁棒地移除占位符周围的 P 标签
     html_body = re.sub(
-        r'<p>\s*(【此处插入配图\s*[：:].*?】)\s*</p>',
+        r'<p>\s*(【\s*此处插入配图\s*[：:].*?\s*】)\s*</p>',
         r'\1',
-        html_body
+        html_body,
+        flags=re.DOTALL
     )
     html_body = re.sub(
-        r'<p>\s*(【GITHUB配图：.*?】)\s*</p>',
+        r'<p>\s*(【\s*GITHUB配图\s*[：:].*?\s*】)\s*</p>',
         r'\1',
-        html_body
+        html_body,
+        flags=re.DOTALL
     )
 
     image_results = {}

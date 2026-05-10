@@ -13,8 +13,8 @@ app = Flask(__name__)
 
 class ProcessState:
     is_running = False
+    is_paused = False
     thread = None
-    cancel_flag = threading.Event()
 
 
 class PrintRedirector:
@@ -34,12 +34,20 @@ class PrintRedirector:
 
 
 def run_workflow_thread(task_type="hotspots"):
+    from core.shared.runtime import cancel_event, pause_event, WorkflowCancelled
     ProcessState.is_running = True
-    ProcessState.cancel_flag.clear()
+    ProcessState.is_paused = False
+    cancel_event.clear()
+    pause_event.set()  # 确保开始时是运行状态
     old_stdout = sys.stdout
     sys.stdout = PrintRedirector()
     try:
         run_main(task_type=task_type)
+    except WorkflowCancelled:
+        try:
+            log_queue.put_nowait("SYSTEM | ⛔ 任务已被用户中断。\n")
+        except queue.Full:
+            pass
     except Exception as e:
         from loguru import logger
         logger.error(f"Workflow failed: {e}")
@@ -50,6 +58,7 @@ def run_workflow_thread(task_type="hotspots"):
     finally:
         sys.stdout = old_stdout
         ProcessState.is_running = False
+        cancel_event.clear()
         try:
             log_queue.put_nowait("SYSTEM | Workflow finished.\n")
         except queue.Full:
@@ -83,12 +92,42 @@ def start_process():
 def stop_process():
     if not ProcessState.is_running:
         return jsonify({"status": "error", "message": "No task running"}), 400
-    ProcessState.cancel_flag.set()
+    from core.shared.runtime import cancel_event, pause_event
+    pause_event.set()  # 如果是在暂停状态下停止，先释放 wait
+    cancel_event.set()
     try:
         log_queue.put_nowait("SYSTEM | User requested stop...\n")
     except queue.Full:
         pass
     return jsonify({"status": "success", "message": "Stop signal sent"})
+
+
+@app.route('/api/pause', methods=['POST'])
+def pause_process():
+    if not ProcessState.is_running:
+        return jsonify({"status": "error", "message": "No task running"}), 400
+    from core.shared.runtime import pause_event
+    pause_event.clear()  # 设为暂停状态
+    ProcessState.is_paused = True
+    try:
+        log_queue.put_nowait("SYSTEM | ⏸️ User requested pause...\n")
+    except queue.Full:
+        pass
+    return jsonify({"status": "success", "message": "Paused"})
+
+
+@app.route('/api/resume', methods=['POST'])
+def resume_process():
+    if not ProcessState.is_running:
+        return jsonify({"status": "error", "message": "No task running"}), 400
+    from core.shared.runtime import pause_event
+    pause_event.set()  # 恢复运行
+    ProcessState.is_paused = False
+    try:
+        log_queue.put_nowait("SYSTEM | ▶️ User requested resume...\n")
+    except queue.Full:
+        pass
+    return jsonify({"status": "success", "message": "Resumed"})
 
 
 @app.route('/api/status', methods=['GET'])
@@ -102,6 +141,7 @@ def get_status():
             break
     return jsonify({
         "is_running": ProcessState.is_running,
+        "is_paused": ProcessState.is_paused,
         "logs": logs
     })
 

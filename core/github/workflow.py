@@ -3,12 +3,13 @@ import time
 from datetime import datetime
 from loguru import logger
 
-from config import BRAND_NAME
+from config import BRAND_NAME, SD_ENABLED
 from core.github.collector import fetch_github_trending, generate_code_screenshot, get_repo_code_snippet
 from core.github.processor import generate_github_article
 from core.shared.article_utils import process_article_content, _print_review_report
 from core.shared.llm import validate_title
-from utils.image_handler import download_cover_image, reset_image_cache
+from utils.image_handler import download_cover_image, download_project_image_for_github, reset_image_cache
+from core.shared.runtime import check_cancelled
 
 
 def _publish_draft_github(publisher, title, html_content, thumb_id, digest_text):
@@ -39,23 +40,41 @@ def _ensure_project_images(projects, publisher):
     """
     确保每个项目都有配图。优先级：
     1. README 中的图片（已在 collector 中处理）
-    2. 目录树截图（rich 渲染）
-    3. 架构图（diagrams 生成）
+    2. SD 生成的艺术配图（DeepSeek 提示词驱动）
+    3. 目录树截图（rich 渲染）
     4. 代码截图（carbon API）
     """
     for p in projects:
         if p.get('image_url'):
-            continue  # 已有图片
+            continue  # 已有 README 图片，最优选择
 
+        # ---- 优先尝试 SD 艺术配图 ----
+        if SD_ENABLED:
+            print(f"  🎨 正在为 [{p['repo']}] 生成 SD 艺术配图 (DeepSeek 提示词)...")
+            sd_path = download_project_image_for_github(
+                repo_name=p['repo'],
+                description=p.get('desc', ''),
+                lang=p.get('lang', 'Unknown'),
+                topics=p.get('topics', []),
+            )
+            if sd_path:
+                image_url = publisher.upload_news_image(sd_path)
+                if image_url:
+                    p['image_url'] = image_url
+                    print(f"  ✅ SD 配图已上传: {p['repo']}")
+                    continue
+                else:
+                    print(f"  ⚠️ SD 配图上传失败，尝试备选方案...")
+
+        # ---- Fallback: 目录树截图 ----
         local_path = p.get('tree_image_path')
         if local_path and os.path.exists(local_path):
-            # 上传本地图片到微信
             image_url = publisher.upload_news_image(local_path)
             if image_url:
                 p['image_url'] = image_url
                 continue
 
-        # 尝试 carbon 代码截图
+        # ---- Fallback: carbon 代码截图 ----
         code_text, file_name = get_repo_code_snippet(p['repo'])
         if code_text:
             code_img = generate_code_screenshot(code_text, p.get('lang', 'python'))
@@ -69,6 +88,7 @@ def _ensure_project_images(projects, publisher):
 def run_github_workflow(publisher):
     """处理 GitHub Trending 抓取和发布流程。"""
     projects = fetch_github_trending(limit=5)
+    check_cancelled()
     if not projects:
         print("📭 今日暂无获取到 GitHub 热门项目。")
         return
@@ -82,6 +102,7 @@ def run_github_workflow(publisher):
     _ensure_project_images(projects, publisher)
 
     article_text = generate_github_article(projects)
+    check_cancelled()
     if not article_text:
         print("❌ AI 创作失败，跳过。")
         return

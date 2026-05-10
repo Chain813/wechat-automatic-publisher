@@ -155,7 +155,23 @@ def fetch_weibo_light():
     logger.info("  正在同步 微博 全网热搜...")
     topics = []
 
-    # 方法1: 60s API（稳定）
+    # 方法1: 原生 API (实时性更高)
+    try:
+        headers = get_headers(referer="https://weibo.com/")
+        res = HTTP_SESSION.get("https://weibo.com/ajax/side/hotSearch", headers=headers, timeout=10)
+        res.raise_for_status()
+        data = res.json()
+        for item in data.get("data", {}).get("realtime", []):
+            word = item.get("word", "").strip()
+            if word and len(word) > 1 and "公告" not in word:
+                topics.append(word)
+        if topics:
+            _mark_source_success("weibo")
+            return topics[:NEWS_MAX_PER_SOURCE]
+    except Exception as e:
+        logger.warning("  微博原生 API 失败: {}，降级至 60s API", e)
+
+    # 方法2: 60s API（较稳定但可能有延迟）
     try:
         res = HTTP_SESSION.get(f"{API_60S_BASE}/weibo", headers=get_headers(), timeout=10)
         res.raise_for_status()
@@ -169,23 +185,7 @@ def fetch_weibo_light():
                 _mark_source_success("weibo")
                 return topics[:NEWS_MAX_PER_SOURCE]
     except Exception as e:
-        logger.warning("  微博 60s API 失败: {}，降级至原生 API", e)
-
-    # 方法2: 原生 API
-    try:
-        headers = get_headers(referer="https://weibo.com/")
-        res = HTTP_SESSION.get("https://weibo.com/ajax/side/hotSearch", headers=headers, timeout=10)
-        res.raise_for_status()
-        data = res.json()
-        for item in data.get("data", {}).get("realtime", []):
-            word = item.get("word", "").strip()
-            if word and len(word) > 1 and "公告" not in word:
-                topics.append(word)
-        if topics:
-            _mark_source_success("weibo")
-        return topics[:NEWS_MAX_PER_SOURCE]
-    except Exception as e:
-        logger.warning("  微博原生 API 也失败: {}，降级至 Selenium", e)
+        logger.warning("  微博 60s API 也失败: {}，降级至 Selenium", e)
         return fetch_weibo()
 
 
@@ -388,7 +388,24 @@ def fetch_zhihu_light():
     logger.info("  正在同步 知乎 热榜...")
     topics = []
 
-    # 方法1: 60s API（稳定）
+    # 方法1: 原生 API (实时性更高)
+    try:
+        url = "https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total?limit=20"
+        res = HTTP_SESSION.get(url, headers=get_headers(referer="https://www.zhihu.com/hot"), timeout=10)
+        res.raise_for_status()
+        data = res.json()
+        for item in data.get("data", []):
+            target = item.get("target", {})
+            title = target.get("title", "")
+            if title and len(title) > 1:
+                topics.append(title)
+        if topics:
+            _mark_source_success("zhihu")
+            return topics[:NEWS_MAX_PER_SOURCE]
+    except Exception as e:
+        logger.warning("  知乎原生 API 失败: {}，降级至 60s API", e)
+
+    # 方法2: 60s API（较稳定但可能有延迟）
     try:
         res = HTTP_SESSION.get(f"{API_60S_BASE}/zhihu", headers=get_headers(), timeout=10)
         res.raise_for_status()
@@ -400,24 +417,9 @@ def fetch_zhihu_light():
                     topics.append(title)
             if topics:
                 _mark_source_success("zhihu")
-                return topics
+                return topics[:NEWS_MAX_PER_SOURCE]
     except Exception as e:
-        logger.warning("  知乎 60s API 失败: {}，降级至原生 API", e)
-
-    # 方法2: 原生 API
-    try:
-        url = "https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total?limit=20"
-        res = HTTP_SESSION.get(url, headers=get_headers(referer="https://www.zhihu.com/hot"), timeout=10)
-        res.raise_for_status()
-        data = res.json()
-        for item in data.get("data", []):
-            target = item.get("target", {})
-            title = target.get("title", "")
-            if title and len(title) > 1:
-                topics.append(title)
-        _mark_source_success("zhihu")
-    except Exception as e:
-        logger.warning("  知乎原生 API 也失败: {}，降级至 Selenium", e)
+        logger.warning("  知乎 60s API 也失败: {}，降级至 Selenium", e)
     return topics
 
 
@@ -678,7 +680,23 @@ def fetch_toutiao():
     logger.info("  正在同步 今日头条 热榜...")
     topics = []
 
-    # 方法1: 60s API（稳定）
+    # 方法1: 原生 API (实时性更高)
+    try:
+        url = "https://www.toutiao.com/hot-event/hot-board/?origin=toutiao_pc"
+        res = HTTP_SESSION.get(url, headers=get_headers(referer="https://www.toutiao.com/"), timeout=10)
+        res.raise_for_status()
+        data = res.json()
+        for item in data.get("data", []):
+            title = item.get("Title", "").strip()
+            if title and len(title) > 1:
+                topics.append(title)
+        if topics:
+            _mark_source_success("toutiao")
+            return topics[:NEWS_MAX_PER_SOURCE]
+    except Exception as e:
+        logger.warning("  头条原生 API 失败: {}，降级至 60s API", e)
+
+    # 方法2: 60s API（较稳定但可能有延迟）
     try:
         res = HTTP_SESSION.get(f"{API_60S_BASE}/toutiao", headers=get_headers(), timeout=10)
         res.raise_for_status()
@@ -692,24 +710,7 @@ def fetch_toutiao():
                 _mark_source_success("toutiao")
                 return topics[:NEWS_MAX_PER_SOURCE]
     except Exception as e:
-        logger.warning("  头条 60s API 失败: {}，降级至原生 API", e)
-
-    # 方法2: 原生 API
-    try:
-        url = "https://www.toutiao.com/hot-event/hot-board/?origin=toutiao_pc"
-        res = HTTP_SESSION.get(url, headers=get_headers(referer="https://www.toutiao.com/"), timeout=10)
-        res.raise_for_status()
-        data = res.json()
-        for item in data.get("data", []):
-            title = item.get("Title", "").strip()
-            if title and len(title) > 1:
-                topics.append(title)
-        if topics:
-            _mark_source_success("toutiao")
-        else:
-            _mark_source_failure("toutiao")
-    except Exception as e:
-        logger.warning("  头条原生 API 也失败: {}", e)
+        logger.warning("  头条 60s API 也失败: {}", e)
         _mark_source_failure("toutiao")
     return topics[:NEWS_MAX_PER_SOURCE]
 

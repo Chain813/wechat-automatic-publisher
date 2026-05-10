@@ -12,6 +12,7 @@ from core.shared.article_utils import process_article_content, _print_review_rep
 from core.shared.llm import validate_title
 from core.shared.publisher import WeChatPublisher, send_to_qywechat
 from utils.image_handler import download_cover_image_for_hotspot, reset_image_cache
+from core.shared.runtime import check_cancelled
 
 try:
     from rapidfuzz import fuzz as _fuzz
@@ -123,6 +124,7 @@ def _get_past_topics(days=7):
     return past_topics
 
 def _fetch_selected_topics(publisher):
+    check_cancelled()
     raw_data = fetch_all_hotspots()
     if not raw_data:
         print("❌ 数据源扫描失败，请检查网络连接")
@@ -154,6 +156,7 @@ def _fetch_selected_topics(publisher):
     return candidates
 
 def _generate_article_assets(topic, publisher):
+    check_cancelled()
     reset_image_cache()
 
     article_text = generate_article(topic)
@@ -163,6 +166,7 @@ def _generate_article_assets(topic, publisher):
 
     print("\n🎨 正在执行排版优化与智能图选 (并行加速)...")
     final_html, review_data = process_article_content(article_text, publisher, use_ai_first=True)
+    check_cancelled()
     if not final_html:
         print("❌ 内容处理后异常，跳过。")
         return None
@@ -190,6 +194,7 @@ def _generate_article_assets(topic, publisher):
 
 def _publish_single_topic(topic, pub):
     try:
+        check_cancelled()
         if not pub.access_token:
             return topic, False, "Token 获取失败"
 
@@ -243,6 +248,7 @@ def _publish_single_topic(topic, pub):
 def run_hotspots_workflow(publisher):
     _load_history()
     try:
+        check_cancelled()
         selected_topics = _fetch_selected_topics(publisher)
         if not selected_topics:
             return

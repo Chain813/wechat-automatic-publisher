@@ -40,18 +40,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Process Control ---
     const btnStart = document.getElementById('btn-start');
+    const btnPause = document.getElementById('btn-pause');
+    const btnResume = document.getElementById('btn-resume');
     const btnStop = document.getElementById('btn-stop');
     const statusDot = document.getElementById('status-dot');
     const statusText = document.getElementById('status-text');
     let isRunning = false;
+    let isPaused = false;
 
-    function setRunningState(state) {
-        isRunning = state;
-        btnStart.style.display = state ? 'none' : 'flex';
-        btnStop.style.display = state ? 'flex' : 'none';
-        btnStart.disabled = state;
-        statusDot.className = state ? 'dot running' : 'dot idle';
-        statusText.textContent = state ? 'Running' : 'Idle';
+    function setRunningState(running, paused = false) {
+        isRunning = running;
+        isPaused = paused;
+
+        if (btnStart) btnStart.style.display = running ? 'none' : 'flex';
+        if (btnStop) btnStop.style.display = running ? 'flex' : 'none';
+
+        if (running) {
+            if (btnPause) btnPause.style.display = paused ? 'none' : 'flex';
+            if (btnResume) btnResume.style.display = paused ? 'flex' : 'none';
+            if (statusDot) statusDot.className = paused ? 'dot idle' : 'dot running';
+            if (statusText) statusText.textContent = paused ? 'Paused' : 'Running';
+        } else {
+            if (btnPause) btnPause.style.display = 'none';
+            if (btnResume) btnResume.style.display = 'none';
+            if (statusDot) statusDot.className = 'dot idle';
+            if (statusText) statusText.textContent = 'Idle';
+        }
+        if (btnStart) btnStart.disabled = running;
     }
 
     btnStart.addEventListener('click', async () => {
@@ -86,6 +101,26 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    btnPause.addEventListener('click', async () => {
+        try {
+            const res = await fetch('/api/pause', { method: 'POST' });
+            const data = await res.json();
+            appendLog('SYSTEM | ' + data.message, 'system');
+        } catch (e) {
+            appendLog('ERROR | Pause failed: ' + e.message, 'error');
+        }
+    });
+
+    btnResume.addEventListener('click', async () => {
+        try {
+            const res = await fetch('/api/resume', { method: 'POST' });
+            const data = await res.json();
+            appendLog('SYSTEM | ' + data.message, 'system');
+        } catch (e) {
+            appendLog('ERROR | Resume failed: ' + e.message, 'error');
+        }
+    });
+
     // --- Adaptive Polling ---
     let pollTimer = null;
     function schedulePoll() {
@@ -98,8 +133,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (data.logs && data.logs.length > 0) {
                     data.logs.forEach(log => appendLog(log));
                 }
-                if (data.is_running !== isRunning) {
-                    setRunningState(data.is_running);
+                if (data.is_running !== isRunning || data.is_paused !== isPaused) {
+                    setRunningState(data.is_running, data.is_paused);
                 }
             } catch (e) {
                 // server down, show once

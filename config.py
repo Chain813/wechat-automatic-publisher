@@ -32,7 +32,7 @@ ARTICLE_AUTHOR = "智界洞察社"
 LLM_TIMEOUT = 60
 IMAGE_TIMEOUT = 15
 WECHAT_API_TIMEOUT = 30
-HOTSPOT_CACHE_TTL_SECONDS = int(os.getenv("HOTSPOT_CACHE_TTL_SECONDS", "600"))
+HOTSPOT_CACHE_TTL_SECONDS = int(os.getenv("HOTSPOT_CACHE_TTL_SECONDS", "60"))
 HTTP_RETRY_TOTAL = int(os.getenv("HTTP_RETRY_TOTAL", "3"))
 HTTP_RETRY_BACKOFF = float(os.getenv("HTTP_RETRY_BACKOFF", "0.8"))
 
@@ -85,7 +85,11 @@ FILTER_CATEGORIES = [
 IMAGE_DEFAULT_CANDIDATES = 5  # 每次搜索下载候选图数量
 IMAGE_RETRY_MAX = 3           # 单张下载最大重试次数
 
-# 12. Ollama 本地视觉模型配置
+# 12. 本地 Stable Diffusion 配置
+SD_ENABLED = os.getenv("SD_ENABLED", "True").lower() == "true"
+SD_API_URL = os.getenv("SD_API_URL", "http://127.0.0.1:7860")
+
+# 13. Ollama 本地视觉模型配置
 OLLAMA_DEFAULT_MODEL = os.getenv("OLLAMA_DEFAULT_MODEL", "gemma4:e2b-it-q4_K_M")
 OLLAMA_VISION_MODEL = os.getenv("OLLAMA_VISION_MODEL", "gemma3:4b")
 

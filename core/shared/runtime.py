@@ -5,11 +5,36 @@ from __future__ import annotations
 
 import sys
 import queue
+import threading
 
 from loguru import logger
 
 # Global queue to store logs for the Web UI
 log_queue = queue.Queue()
+
+# ---- 全局控制信号 ----
+cancel_event = threading.Event()
+pause_event = threading.Event()
+pause_event.set()  # 默认运行状态 (Set=运行, Clear=暂停)
+
+
+class WorkflowCancelled(Exception):
+    """用户主动中断工作流时抛出"""
+    pass
+
+
+def check_cancelled():
+    """在工作流关键节点调用，处理中断和暂停"""
+    # 1. 检查中断
+    if cancel_event.is_set():
+        logger.warning("⛔ 用户已中断任务，正在终止...")
+        raise WorkflowCancelled("用户手动中断")
+
+    # 2. 检查暂停
+    if not pause_event.is_set():
+        logger.info("⏸️ 任务已暂停，等待恢复...")
+        pause_event.wait()  # 阻塞直到 pause_event.set() 被调用
+        logger.info("▶️ 任务已恢复。")
 
 def _queue_sink(message):
     try:
@@ -65,4 +90,4 @@ def configure_runtime():
     _validate_config()
 
 
-__all__ = ["configure_runtime", "log_queue"]
+__all__ = ["configure_runtime", "log_queue", "cancel_event", "pause_event", "check_cancelled", "WorkflowCancelled"]

@@ -22,7 +22,7 @@ try:
 except (ImportError, AttributeError):
     pass
 
-from config import IMAGE_DEFAULT_CANDIDATES, IMAGE_RETRY_MAX
+from config import IMAGE_DEFAULT_CANDIDATES, IMAGE_RETRY_MAX, SD_ENABLED, SD_API_URL
 
 from loguru import logger
 
@@ -229,8 +229,28 @@ def _try_pexels(keyword, directory, max_num=3):
 #  Pollinations.ai 免费 AI 生图
 # ==========================================
 def _build_pollinations_prompt(keyword):
-    """将中文关键词转为适合 AI 生图的英文 prompt"""
-    # 常见时政科技关键词 -> 英文 prompt 映射
+    """将中文关键词转为适合 AI 生图的英文 prompt，优先使用 LLM 增强"""
+    from core.shared.llm import call_deepseek_with_retry
+    
+    # 尝试使用 LLM 生成更丰富的 prompt
+    system_prompt = (
+        "你是一位精通 Midjourney 和 Stable Diffusion 提示词工程的视觉艺术导演。你能够将用户提供的抽象概念或文案，转化为精准、高质量的英文 AI 绘画提示词 (Prompt)。\n"
+        "请遵循以下核心公式：主体描述 + 环境场景 + 艺术风格 + 媒介/材质 + 构图镜头 + 光影色彩 + 渲染参数。\n"
+        "1. 英文优先：输出必须是高质量的英文 Prompt。\n"
+        "2. 细节丰富：精准描述主体的外貌、材质、环境细节，使用专业艺术术语 (如 Cinematic lighting, Photorealistic, 8k resolution)。\n"
+        "3. 安全铁律：生成的提示词必须是 Safe For Work (SFW)，严禁包含任何暗示、色情、暴力或不当内容。\n"
+        "4. 格式：直接输出英文 Prompt 文本，不要有任何解释、引导词或 Markdown 代码块。"
+    )
+    
+    try:
+        enhanced_prompt = call_deepseek_with_retry(keyword, system_content=system_prompt)
+        if enhanced_prompt and len(enhanced_prompt.strip()) > 10:
+            return enhanced_prompt.strip()
+    except Exception as e:
+        from loguru import logger
+        logger.warning(f"LLM 生成 prompt 失败，使用本地映射: {e}")
+
+    # 常见时政科技关键词 -> 英文 prompt 映射 (Fallback)
     prompt_map = {
         "AI": "artificial intelligence, futuristic digital brain, neon blue circuits",
         "人工智能": "artificial intelligence, futuristic digital brain, neon blue circuits",
@@ -276,7 +296,7 @@ def _try_pollinations(keyword, directory, width=1024, height=576):
         encoded = urllib.parse.quote(prompt)
         seed = random.randint(1, 99999)
 
-        url = f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&seed={seed}&nologo=true"
+        url = f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&seed={seed}&nologo=true&safe=true"
         logger.info("  Pollinations AI 生图中: {}", prompt[:60])
 
         res = requests.get(url, timeout=20)
@@ -298,6 +318,201 @@ def _try_pollinations(keyword, directory, width=1024, height=576):
             logger.debug("  Pollinations 请求失败: status={}", res.status_code)
     except Exception as e:
         logger.debug("  Pollinations 生图异常: {}", e)
+    return None
+
+
+# ==========================================
+#  Stable Diffusion 本地生图
+# ==========================================
+def _try_local_sd(keyword, directory, width=1024, height=576, max_retries=10):
+    """
+    调用本地 Stable Diffusion WebUI API 生图（唯一生图源）。
+    如果 SD 服务暂未启动，会持续等待重试直到成功。
+    要求 WebUI 启动时带上 --api 参数。
+    """
+    import requests
+    import base64
+
+    prompt = _build_pollinations_prompt(keyword)
+    logger.info("  本地 Stable Diffusion 生图中: {}", prompt[:60])
+
+    payload = {
+        "prompt": prompt,
+        "negative_prompt": "nsfw, nude, naked, suggestive, porn, lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry",
+        "steps": 25,
+        "width": width,
+        "height": height,
+        "cfg_scale": 7.5,
+        "sampler_name": "Euler a",
+        "seed": -1
+    }
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = requests.post(f"{SD_API_URL}/sdapi/v1/txt2img", json=payload, timeout=180)
+            if resp.status_code == 200:
+                data = resp.json()
+                if "images" in data and len(data["images"]) > 0:
+                    image_data = base64.b64decode(data["images"][0])
+                    save_path = os.path.join(directory, f"local_sd_{int(time.time())}.jpg")
+                    os.makedirs(directory, exist_ok=True)
+                    with open(save_path, "wb") as f:
+                        f.write(image_data)
+                    logger.info("  本地 SD 生图成功: {}x{}", width, height)
+                    return save_path
+            else:
+                logger.warning("  本地 SD 请求失败: status={} (第 {}/{} 次)", resp.status_code, attempt, max_retries)
+        except requests.exceptions.ConnectionError:
+            logger.warning("  本地 SD 服务未连接，等待重试... (第 {}/{} 次)", attempt, max_retries)
+        except requests.exceptions.Timeout:
+            logger.warning("  本地 SD 生图超时，等待重试... (第 {}/{} 次)", attempt, max_retries)
+        except Exception as e:
+            logger.warning("  本地 SD 生图异常: {} (第 {}/{} 次)", e, attempt, max_retries)
+
+        if attempt < max_retries:
+            wait = min(10, 2 ** (attempt - 1))
+            logger.info("  等待 {} 秒后重试...", wait)
+            time.sleep(wait)
+
+    logger.error("  本地 SD 在 {} 次重试后仍然失败", max_retries)
+    return None
+
+
+# ==========================================
+#  GitHub 项目专属 SD 生图
+# ==========================================
+def _build_github_project_prompt(repo_name, description, lang, topics=None):
+    """
+    使用 DeepSeek 为 GitHub 项目生成高质量 SD 提示词。
+    将项目的仓库名、描述、语言、标签等上下文信息转化为极具极客艺术感的视觉提示词。
+    """
+    from core.shared.llm import call_deepseek_with_retry
+
+    topics_str = ", ".join(topics) if topics else "N/A"
+    system_prompt = (
+        "你是一位精通 Stable Diffusion 提示词工程的视觉艺术导演，专注于科技与极客美学。\n"
+        "你的任务是根据用户提供的 GitHub 开源项目信息，生成一张能够传达该项目核心气质的艺术插图提示词。\n\n"
+        "## 核心公式\n"
+        "主体概念可视化 + 科技场景 + 艺术风格 + 光影色彩 + 渲染参数\n\n"
+        "## 风格指南\n"
+        "- AI/ML 项目 → 赛博朋克神经网络、数字脑、流光粒子\n"
+        "- 工具/CLI 项目 → 极简 3D 工具箱、终端界面艺术化、霓虹代码流\n"
+        "- Web/前端项目 → 未来主义 UI 界面、玻璃态设计、渐变光效\n"
+        "- 系统/底层项目 → 芯片电路板微距、数据中心、矩阵风\n"
+        "- 数据/数据库项目 → 数据可视化流光、全息图表、数字宇宙\n"
+        "- 安全项目 → 数字盾牌、加密锁链、暗色调网络空间\n"
+        "- 通用 → 科技感抽象艺术、代码雨、数字化景观\n\n"
+        "## 铁律\n"
+        "1. 输出必须是纯英文 Prompt，直接可用于 Stable Diffusion。\n"
+        "2. 必须包含质量修饰词：8k, ultra detailed, cinematic lighting, professional。\n"
+        "3. 严禁包含文字、logo、人脸、NSFW 内容。\n"
+        "4. 直接输出 Prompt 文本，不要有任何解释、引导词或 Markdown 代码块。\n"
+        "5. Prompt 长度控制在 50-120 个英文单词之间。"
+    )
+
+    user_prompt = (
+        f"请为以下 GitHub 开源项目生成一张 Stable Diffusion 艺术配图的提示词：\n\n"
+        f"- 仓库名: {repo_name}\n"
+        f"- 项目描述: {description}\n"
+        f"- 主要语言: {lang}\n"
+        f"- 标签: {topics_str}\n\n"
+        f"请根据项目的技术领域和核心功能，生成一段能传达其'灵魂'的视觉提示词。"
+    )
+
+    try:
+        enhanced_prompt = call_deepseek_with_retry(user_prompt, system_content=system_prompt)
+        if enhanced_prompt and len(enhanced_prompt.strip()) > 10:
+            logger.info("  DeepSeek 为项目 '{}' 生成 SD Prompt 成功", repo_name)
+            return enhanced_prompt.strip()
+    except Exception as e:
+        logger.warning("  DeepSeek 为 GitHub 项目生成 Prompt 失败: {}", e)
+
+    # Fallback: 使用通用的 prompt 构建器
+    fallback_keyword = f"{repo_name.split('/')[-1]} {lang} open source project"
+    return _build_pollinations_prompt(fallback_keyword)
+
+
+def download_project_image_for_github(repo_name, description, lang, topics=None, save_dir="assets"):
+    """
+    为 GitHub 项目生成 SD 艺术配图。
+    使用 DeepSeek 将项目信息转化为高质量 SD 提示词，然后调用本地 SD 生图。
+    返回本地图片路径。
+    """
+    if not repo_name:
+        return None
+
+    clean_name = _sanitize_path(f"gh_{repo_name.replace('/', '_')}")
+    specific_dir = os.path.join(save_dir, clean_name)
+    os.makedirs(specific_dir, exist_ok=True)
+
+    logger.info("🎨 正在为 GitHub 项目 '{}' 生成 SD 艺术配图...", repo_name)
+
+    # 使用 DeepSeek 生成专业的 SD prompt
+    prompt = _build_github_project_prompt(repo_name, description, lang, topics)
+    logger.info("  SD Prompt: {}", prompt[:80])
+
+    # 调用本地 SD 生图
+    save_path = _try_local_sd_with_prompt(prompt, specific_dir, width=1024, height=576)
+    if save_path:
+        save_path = _finalize_image(save_path, "body")
+        if save_path:
+            logger.info("  ✅ GitHub 项目 SD 配图生成成功: {}", os.path.basename(save_path))
+    return save_path
+
+
+def _try_local_sd_with_prompt(prompt, directory, width=1024, height=576, max_retries=10):
+    """
+    使用预先生成好的 prompt 直接调用本地 SD 生图。
+    与 _try_local_sd 不同的是，它不再内部调用 _build_pollinations_prompt，
+    而是直接使用传入的 prompt。
+    """
+    import requests as _requests
+    import base64
+
+    logger.info("  本地 Stable Diffusion 生图中 (GitHub 项目)...")
+
+    payload = {
+        "prompt": prompt,
+        "negative_prompt": "nsfw, nude, naked, suggestive, porn, text, words, letters, logo, watermark, "
+                           "lowres, bad anatomy, bad hands, error, missing fingers, extra digit, fewer digits, "
+                           "cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, "
+                           "username, blurry, human face, portrait, person",
+        "steps": 25,
+        "width": width,
+        "height": height,
+        "cfg_scale": 7.5,
+        "sampler_name": "Euler a",
+        "seed": -1
+    }
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = _requests.post(f"{SD_API_URL}/sdapi/v1/txt2img", json=payload, timeout=180)
+            if resp.status_code == 200:
+                data = resp.json()
+                if "images" in data and len(data["images"]) > 0:
+                    image_data = base64.b64decode(data["images"][0])
+                    save_path = os.path.join(directory, f"gh_sd_{int(time.time())}.jpg")
+                    os.makedirs(directory, exist_ok=True)
+                    with open(save_path, "wb") as f:
+                        f.write(image_data)
+                    logger.info("  GitHub SD 生图成功: {}x{}", width, height)
+                    return save_path
+            else:
+                logger.warning("  GitHub SD 请求失败: status={} (第 {}/{} 次)", resp.status_code, attempt, max_retries)
+        except _requests.exceptions.ConnectionError:
+            logger.warning("  本地 SD 服务未连接，等待重试... (第 {}/{} 次)", attempt, max_retries)
+        except _requests.exceptions.Timeout:
+            logger.warning("  本地 SD 生图超时，等待重试... (第 {}/{} 次)", attempt, max_retries)
+        except Exception as e:
+            logger.warning("  GitHub SD 生图异常: {} (第 {}/{} 次)", e, attempt, max_retries)
+
+        if attempt < max_retries:
+            wait = min(10, 2 ** (attempt - 1))
+            logger.info("  等待 {} 秒后重试...", wait)
+            time.sleep(wait)
+
+    logger.error("  GitHub SD 在 {} 次重试后仍然失败", max_retries)
     return None
 
 
@@ -324,12 +539,25 @@ def _build_search_query(keyword, scene="auto"):
         return f"{base} 实拍 高清{negative}"
 
 
+def _sanitize_path(text):
+    """清理路径名称，去除 Windows 不支持的字符，并严格去除首尾空格/点"""
+    if not text:
+        return "default"
+    # 去除非法字符
+    clean = re.sub(r'[\\/:*?"<>|]', '', text)
+    # 去除首尾空格和点（Windows 文件夹不允许以空格或点结尾）
+    clean = clean.strip().strip('.')
+    if not clean:
+        return "default"
+    return clean[:50]
+
+
 # ==========================================
 #  核心下载函数
 # ==========================================
 def download_image(keyword, save_dir="assets"):
     """
-    智能图片搜索（免费图库优先 -> 多源搜索 -> 评分筛选 -> 微信尺寸适配）
+    使用本地 Stable Diffusion 生成配图（唯一图源）
     """
     if not keyword or not keyword.strip():
         return None
@@ -337,179 +565,74 @@ def download_image(keyword, save_dir="assets"):
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
-    clean_keyword = re.sub(r'[\\/:*?"<>|]', '', keyword.strip())[:30]
+    clean_keyword = _sanitize_path(keyword)
     specific_dir = os.path.join(save_dir, clean_keyword)
     if not os.path.exists(specific_dir):
         os.makedirs(specific_dir)
 
-    logger.info("正在为 '{}' 启动智能采样筛选...", keyword)
+    logger.info("正在为 '{}' 调用本地 SD 生图...", keyword)
 
-    max_num = IMAGE_DEFAULT_CANDIDATES
-
-    # ---- 策略 0：Pexels 免费图库（版权安全，优先） ----
-    best = _try_pexels(keyword, specific_dir, max_num)
+    best = _try_local_sd(keyword, specific_dir, width=1024, height=576)
     if best:
         best = _finalize_image(best, "body")
-        if best:
-            return best
-
-    # ---- 策略 0.5：Pollinations.ai AI 生图（免费，无需 Key） ----
-    best = _try_pollinations(keyword, specific_dir, width=1024, height=576)
-    if best:
-        best = _finalize_image(best, "body")
-        if best:
-            return best
-
-    # ---- 策略 1：Bing 采样 ----
-    best = _try_crawl("bing", keyword, specific_dir, max_num, purpose="body")
-    if best:
-        best = _finalize_image(best, "body")
-        if best:
-            return best
-
-    # ---- 策略 2：百度采样 ----
-    best = _try_crawl("baidu", keyword, specific_dir, max(3, max_num // 2), purpose="body")
-    if best:
-        best = _finalize_image(best, "body")
-        if best:
-            return best
-
-    # ---- 兜底：本地默认图 ----
-    return _get_fallback_image(specific_dir)
+    return best
 
 
 def download_cover_image(keyword, save_dir="assets"):
-    """封面专用下载（Pexels 优先 -> Bing -> 百度 -> 兜底）"""
+    """封面专用下载（本地 SD 生图）"""
     if not keyword or not keyword.strip():
-        return _get_fallback_image(save_dir)
+        return None
 
-    clean_keyword = re.sub(r'[\\/:*?"<>|]', '', keyword.strip())[:30]
-    specific_dir = os.path.join(save_dir, f"{clean_keyword}_cover")
+    clean_keyword = _sanitize_path(f"{keyword}_cover")
+    specific_dir = os.path.join(save_dir, clean_keyword)
     if not os.path.exists(specific_dir):
         os.makedirs(specific_dir)
 
-    logger.info("正在为封面 '{}' 搜索宽屏素材...", keyword)
+    logger.info("正在为封面 '{}' 调用本地 SD 生图...", keyword)
 
-    max_num = IMAGE_DEFAULT_CANDIDATES + 3
-
-    # ---- 策略 0：Pexels 免费图库 ----
-    best = _try_pexels(keyword, specific_dir, max_num)
+    best = _try_local_sd(keyword, specific_dir, width=1280, height=545)
     if best:
         best = _finalize_image(best, "cover")
-        if best:
-            return best
-
-    # ---- 策略 0.5：Pollinations.ai AI 生图（封面尺寸） ----
-    best = _try_pollinations(keyword, specific_dir, width=1280, height=545)
-    if best:
-        best = _finalize_image(best, "cover")
-        if best:
-            return best
-
-    best = _try_crawl("bing", keyword, specific_dir, max_num, scene="趋势", purpose="cover")
-    if best:
-        best = _finalize_image(best, "cover")
-        if best:
-            return best
-
-    best = _try_crawl("baidu", keyword, specific_dir, max(3, max_num // 2), scene="趋势", purpose="cover")
-    if best:
-        best = _finalize_image(best, "cover")
-        if best:
-            return best
-
-    return _get_fallback_image(specific_dir)
+    return best
 
 
 def download_image_for_hotspot(keyword, save_dir="assets"):
-    """时政热点专用图片搜索（AI生图优先 -> 免费图库 -> 多源搜索 -> 兜底）"""
+    """时政热点专用图片（本地 SD 生图）"""
     if not keyword or not keyword.strip():
         return None
 
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
-    clean_keyword = re.sub(r'[\\/:*?"<>|]', '', keyword.strip())[:30]
+    clean_keyword = _sanitize_path(keyword)
     specific_dir = os.path.join(save_dir, clean_keyword)
     if not os.path.exists(specific_dir):
         os.makedirs(specific_dir)
 
-    logger.info("正在为热点 '{}' 启动智能采样筛选 (AI生图优先)...", keyword)
+    logger.info("正在为热点 '{}' 调用本地 SD 生图...", keyword)
 
-    max_num = IMAGE_DEFAULT_CANDIDATES
-
-    # ---- 策略 0：Pollinations.ai AI 生图（时政热点优先） ----
-    best = _try_pollinations(keyword, specific_dir, width=1024, height=576)
+    best = _try_local_sd(keyword, specific_dir, width=1024, height=576)
     if best:
         best = _finalize_image(best, "body")
-        if best:
-            return best
-
-    # ---- 策略 1：Pexels 免费图库 ----
-    best = _try_pexels(keyword, specific_dir, max_num)
-    if best:
-        best = _finalize_image(best, "body")
-        if best:
-            return best
-
-    # ---- 策略 2：Bing 采样 ----
-    best = _try_crawl("bing", keyword, specific_dir, max_num, purpose="body")
-    if best:
-        best = _finalize_image(best, "body")
-        if best:
-            return best
-
-    # ---- 策略 3：百度采样 ----
-    best = _try_crawl("baidu", keyword, specific_dir, max(3, max_num // 2), purpose="body")
-    if best:
-        best = _finalize_image(best, "body")
-        if best:
-            return best
-
-    return _get_fallback_image(specific_dir)
+    return best
 
 
 def download_cover_image_for_hotspot(keyword, save_dir="assets"):
-    """时政热点封面专用下载（AI生图优先 -> Pexels -> Bing -> 百度 -> 兜底）"""
+    """时政热点封面专用（本地 SD 生图）"""
     if not keyword or not keyword.strip():
-        return _get_fallback_image(save_dir)
+        return None
 
-    clean_keyword = re.sub(r'[\\/:*?"<>|]', '', keyword.strip())[:30]
-    specific_dir = os.path.join(save_dir, f"{clean_keyword}_cover")
+    clean_keyword = _sanitize_path(f"{keyword}_cover")
+    specific_dir = os.path.join(save_dir, clean_keyword)
     if not os.path.exists(specific_dir):
         os.makedirs(specific_dir)
 
-    logger.info("正在为热点封面 '{}' 搜索宽屏素材 (AI生图优先)...", keyword)
+    logger.info("正在为热点封面 '{}' 调用本地 SD 生图...", keyword)
 
-    max_num = IMAGE_DEFAULT_CANDIDATES + 3
-
-    # ---- 策略 0：Pollinations.ai AI 生图（封面尺寸） ----
-    best = _try_pollinations(keyword, specific_dir, width=1280, height=545)
+    best = _try_local_sd(keyword, specific_dir, width=1280, height=545)
     if best:
         best = _finalize_image(best, "cover")
-        if best:
-            return best
-
-    # ---- 策略 1：Pexels 免费图库 ----
-    best = _try_pexels(keyword, specific_dir, max_num)
-    if best:
-        best = _finalize_image(best, "cover")
-        if best:
-            return best
-
-    best = _try_crawl("bing", keyword, specific_dir, max_num, scene="趋势", purpose="cover")
-    if best:
-        best = _finalize_image(best, "cover")
-        if best:
-            return best
-
-    best = _try_crawl("baidu", keyword, specific_dir, max(3, max_num // 2), scene="趋势", purpose="cover")
-    if best:
-        best = _finalize_image(best, "cover")
-        if best:
-            return best
-
-    return _get_fallback_image(specific_dir)
+    return best
 
 
 def download_images(keyword, save_dir="assets", max_num=None):
@@ -519,7 +642,7 @@ def download_images(keyword, save_dir="assets", max_num=None):
     if not keyword or not keyword.strip():
         return []
 
-    clean_keyword = re.sub(r'[\\/:*?"<>|]', '', keyword.strip())[:30]
+    clean_keyword = _sanitize_path(keyword)
     specific_dir = os.path.join(save_dir, clean_keyword)
     if not os.path.exists(specific_dir):
         os.makedirs(specific_dir)
