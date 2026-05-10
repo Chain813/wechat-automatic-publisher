@@ -59,6 +59,8 @@
 - **标题去重**：4 种策略防止重复发布（精确匹配/模糊匹配/关键词匹配/AI 语义匹配）
 - **结构质量检查**：验证标题数、引用数、配图数是否达标
 - **自动补全**：配图不足时自动插入占位符
+- **排版健壮性 (v3.1)**：自动修复行首冒号、清理空列表项（幽灵圆点）、优化标题层级（H2/H3 混合排版）
+- **通俗化文风**：DeepSeek 提示词引擎升级，文风更接地气，避免复读机式重复
 
 ### 智能配图
 
@@ -68,6 +70,7 @@
 - **感知哈希去重**：使用 pHash（感知哈希）算法检测相似图片，避免重复配图
 - **微信尺寸适配**：自动裁剪为微信推荐尺寸（封面 900×383，正文 900×500）
 - **视觉 AI 二次评估**：候选图片经 Gemini Vision（云端）或 Ollama（本地）AI 模型二次评估，选出最佳
+- **本地 Stable Diffusion 集成**：支持调用本地 SD WebUI API 生成极具极客艺术感的项目配图
 
 ### 高效并行架构
 
@@ -296,10 +299,11 @@ python webui.py
 | 优先级 | 来源 | 说明 |
 |--------|------|------|
 | 1 | **README 图片** | 从项目 README 中提取图片，按架构图/流程图优先级评分 |
-| 2 | **目录树截图** | 使用 rich 库获取项目目录结构，渲染为深色主题 PNG 图片 |
-| 3 | **架构图** | 使用 diagrams 库根据项目语言和技术栈自动生成架构图 |
-| 4 | **代码截图** | 使用 carbon API 将项目入口文件代码渲染为精美截图 |
-| 5 | **关键词搜索** | 以项目名+语言为关键词进行网页图片搜索 |
+| 2 | **SD 艺术配图** | **(新)** 使用 DeepSeek 生成专业 Prompt，调用本地 SD 生成极客风格插图 |
+| 3 | **目录树截图** | 使用 rich 库获取项目目录结构，渲染为深色主题 PNG 图片 |
+| 4 | **架构图** | 使用 diagrams 库根据项目语言和技术栈自动生成架构图 |
+| 5 | **代码截图** | 使用 carbon API 将项目入口文件代码渲染为精美截图 |
+| 6 | **关键词搜索** | 以项目名+语言为关键词进行网页图片搜索 |
 
 ### 图片评估流程
 
@@ -344,6 +348,8 @@ python webui.py
 | `OLLAMA_VISION_MODEL` | Ollama 本地视觉模型名称 | gemma3:4b |
 | `GITHUB_TOKEN` | GitHub API Token（可选） | 匿名（60次/小时） |
 | `PEXELS_API_KEY` | Pexels 图库 API Key（可选） | 未配置 |
+| `SD_ENABLED` | 是否启用本地 Stable Diffusion 生图 | `True` |
+| `SD_API_URL` | Stable Diffusion WebUI API 地址 | `http://127.0.0.1:7860` |
 | `WECHAT_TITLE_MAX_LEN` | 微信标题最大字数限制 | 64 |
 | `WECHAT_DIGEST_MAX_LEN` | 微信摘要最大字数限制 | 120 |
 
@@ -365,6 +371,7 @@ python webui.py
 | [Graphviz](https://graphviz.org/download/) | 架构图渲染引擎，安装后需添加到系统 PATH | 必须（GitHub 模块） |
 | Chrome 浏览器 | Selenium 备用爬取需要 | 可选 |
 | [Ollama](https://ollama.com) | 本地运行视觉 AI 模型 | 可选 |
+| [Stable Diffusion](https://github.com/AUTOMATIC1111/stable-diffusion-webui) | 本地生图引擎（需开启 `--api`） | 可选 |
 | EasyOCR | 图片文字检测（需 PyTorch ~2GB） | 可选 |
 
 ---

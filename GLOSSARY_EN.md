@@ -20,6 +20,7 @@ This document provides detailed explanations of technical terms, tool names, and
 | Term | Description |
 |------|-------------|
 | **LLM** | Large Language Model. This project uses DeepSeek as the LLM for article generation, topic filtering, and digest creation |
+| **DeepSeek Prompting** | **(NEW)** Prompt engineering optimized specifically for DeepSeek. Combines colloquial tone instructions and layout robustness rules (e.g., leading colon filtering, automatic H2/H3 planning) to ensure professional and readable output |
 | **SYSTEM_PROMPT** | System prompt sent to the LLM defining the AI's role, writing style, article structure, and formatting rules. Essentially the AI's "work manual" |
 | **pHash** | Perceptual Hash. An image fingerprint algorithm that scales down and converts images to grayscale before computing a hash. Similar images produce similar hashes, enabling duplicate detection even after resizing, cropping, or minor modifications |
 | **RapidFuzz** | High-performance fuzzy string matching library. Calculates similarity (0-100%) between titles for deduplication, 10-100x faster than Python's built-in `difflib`. For example, "AI chip ban escalates" and "chip ban escalates again" would score ~75% similarity |
@@ -40,6 +41,7 @@ This document provides detailed explanations of technical terms, tool names, and
 |------|-------------|
 | **Pollinations.ai** | Free AI image generation service. Pass English prompts via URL to generate images with no registration or API key needed. E.g., visiting `https://image.pollinations.ai/prompt/a%20cat` generates a cat image |
 | **Pexels** | Free high-quality stock photo library with copyright-free images uploaded by professional photographers. 200 free API calls per month, higher quality than search engine results |
+| **Stable Diffusion** | **(NEW)** Open-source local image generation model. This project supports the Stable Diffusion WebUI API to generate custom geek-style illustrations for GitHub projects based on DeepSeek-generated prompts |
 | **Carbon** | Code screenshot beautification service (carbon.now.sh). Renders code snippets with syntax highlighting, line numbers, and styled backgrounds. The most popular code presentation method in tech blogs and articles |
 | **Aspect Ratio** | Width-to-height ratio of an image. WeChat recommends: cover 2.35:1 (900×383px), body image ~16:9 (900×500px). The system auto-crops to fit |
 | **Laplacian Variance** | Image sharpness metric. Computes variance after applying the Laplacian operator (second derivative). Blurry images have low variance (<100), sharp images have high variance (>500). No reference image needed |

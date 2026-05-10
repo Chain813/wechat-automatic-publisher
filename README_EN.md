@@ -31,7 +31,9 @@ Fully automated WeChat public account content production and publishing system. 
 
 **Multi-Source Hotspot Aggregation** — Parallel scraping from 12 platforms (Weibo, IT Home, 36Kr, Baidu, Zhihu, CSDN, RSS, Politics, Toutiao, The Paper, Huxiu, Douyin). Source-level health monitoring with automatic degradation.
 
-**AI Deep Creation** — DeepSeek-powered 2500-3500 word analysis articles. Built-in sensitive word filtering, title dedup (4 strategies), structural quality checks.
+**AI Deep Creation** — DeepSeek-powered 2500-3500 word analysis articles. Built-in sensitive word filtering, title dedup (4 strategies), structural quality checks. 
+- **Layout Robustness (v3.1)**: Auto-fix for leading colons, removal of ghost bullets, and optimized heading hierarchy (H2/H3).
+- **Colloquial Tone**: Upgraded DeepSeek prompt engine for a friendlier, more explanatory tone with analogies and jargon-free language.
 
 **Intelligent Image Selection** — Multi-source image retrieval (Pollinations AI generation -> Pexels free stock -> Bing/Baidu crawling). 6-dimension scoring (resolution, aspect ratio, sharpness, text density, color richness, file size). Perceptual hash dedup. WeChat cover/body dual-mode scoring. **Gemini Vision + Ollama local vision model** for AI-powered image evaluation with automatic fallback.
 
@@ -139,6 +141,10 @@ QYWECHAT_WEBHOOK=""
 OLLAMA_DEFAULT_MODEL="gemma4:e2b-it-q4_K_M"
 OLLAMA_VISION_MODEL="gemma3:4b"
 
+# Optional: Stable Diffusion (local image generation)
+SD_ENABLED="True"
+SD_API_URL="http://127.0.0.1:7860"
+
 # Optional: Pexels free stock images
 PEXELS_API_KEY=""
 ```
@@ -185,10 +191,11 @@ The dark-themed dashboard provides:
 ### GitHub Articles (multi-layer fallback)
 
 1. **README Images** — Architecture diagrams, screenshots (scored by relevance)
-2. **Directory Tree** — Rendered via rich library as styled PNG
-3. **Architecture Diagram** — Auto-generated via diagrams library based on tech stack
-4. **Code Screenshot** — Generated via carbon API from repo's main entry file
-5. **Keyword Search** — Web image search as final fallback
+2. **SD Art Illustration** — **(NEW)** DeepSeek-powered SD prompts for custom geek-style project art
+3. **Directory Tree** — Rendered via rich library as styled PNG
+4. **Architecture Diagram** — Auto-generated via diagrams library based on tech stack
+5. **Code Screenshot** — Generated via carbon API from repo's main entry file
+6. **Keyword Search** — Web image search as final fallback
 
 Each image is evaluated on 6 dimensions, then optionally re-evaluated by vision AI:
 
@@ -217,7 +224,9 @@ Adjustable in `config.py` or `.env`:
 | `LLM_TEMPERATURE` | Generation randomness | 0.75 |
 | `IMAGE_DEFAULT_CANDIDATES` | Image candidates per search | 5 |
 | `OLLAMA_VISION_MODEL` | Local vision model | gemma3:4b |
-| `GITHUB_TOKEN` | GitHub API token (optional, higher rate limit) | anonymous (60/hr) |
+| `GITHUB_TOKEN` | GitHub API token (optional) | anonymous (60/hr) |
+| `SD_ENABLED` | Enable local Stable Diffusion | `True` |
+| `SD_API_URL` | SD WebUI API address | `http://127.0.0.1:7860` |
 
 ---
 
@@ -235,6 +244,7 @@ Covers: Technical Terms | Image Terms | GitHub Terms | WeChat Terms
 - [Graphviz](https://graphviz.org/download/) (for architecture diagram generation, add to PATH)
 - Chrome browser (for Selenium fallback scraping)
 - Optional: [Ollama](https://ollama.com) for local vision AI
+- Optional: [Stable Diffusion](https://github.com/AUTOMATIC1111/stable-diffusion-webui) (WebUI with `--api` enabled)
 - Optional: EasyOCR for text detection (requires PyTorch ~2GB)
 
 ---
