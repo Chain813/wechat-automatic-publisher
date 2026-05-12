@@ -7,12 +7,47 @@ import requests
 from loguru import logger
 
 from config import BRAND_NAME, WECHAT_TITLE_MAX_LEN
-from core.shared.llm import filter_sensitive, simplify_keyword
+from core.shared.llm import filter_sensitive, simplify_keyword, call_deepseek_with_retry
 from utils.image_handler import download_image
 
 ASSET_RETENTION_DAYS = 5
 PLACEHOLDER_PATTERN = re.compile(r"【\s*此处插入配图\s*[：:]\s*(.*?)\s*】")
 GITHUB_IMAGE_PATTERN = re.compile(r"【\s*GITHUB配图\s*[：:]\s*(https?://.*?)\s*】")
+
+
+def _optimize_image_keyword_with_llm(original_keyword):
+    """
+    当常规搜索无法找到高质量图片时，调用 LLM 将抽象的政策/技术术语
+    转化为更具视觉表现力的搜索词。
+    例如：'AI 监管政策' -> '科技感天平 电路纹理 蓝色光效'
+    仅在 simplify_keyword 也失败后触发，token 消耗极低 (~100 tokens)。
+    """
+    if not original_keyword or len(original_keyword) < 2:
+        return ""
+    prompt = (
+        f"原始关键词：{original_keyword}\n\n"
+        "请将这个关键词转化为一个适合在图片搜索引擎中使用的、具有强烈视觉画面感的搜索词。\n"
+        "要求：\n"
+        "- 输出 3-5 个中文关键词，用空格分隔\n"
+        "- 关键词要具象化、有画面感（如'芯片电路板特写'、'数据流光效'）\n"
+        "- 避免抽象概念词（如'政策'、'监管'、'趋势'）\n"
+        "- 直接输出关键词，不要有其他文字"
+    )
+    try:
+        result = call_deepseek_with_retry(
+            prompt,
+            system_content="你是一个图片搜索优化专家。只输出优化后的搜索关键词。",
+            max_retries=1,
+            backoff_base=0.3,
+        )
+        if result:
+            optimized = result.strip().split('\n')[0].strip()
+            logger.info("  LLM 图像关键词优化: '{}' -> '{}'", original_keyword, optimized)
+            return optimized
+    except Exception as e:
+        logger.debug("  LLM 图像关键词优化失败: {}", e)
+    return ""
+
 
 def _download_and_upload(keyword, publisher, use_ai_first=False):
     """下载图片并立即上传到微信，合并为单步操作（供并行调用）"""
@@ -34,6 +69,16 @@ def _download_and_upload(keyword, publisher, use_ai_first=False):
                 image_path = download_image_for_hotspot(simplified)
             else:
                 image_path = download_image(simplified)
+
+    # LLM 关键词优化兜底：将抽象概念转化为视觉化搜索词
+    if not image_path:
+        optimized = _optimize_image_keyword_with_llm(keyword)
+        if optimized:
+            if use_ai_first:
+                from utils.image_handler import download_image_for_hotspot
+                image_path = download_image_for_hotspot(optimized)
+            else:
+                image_path = download_image(optimized)
 
     if not image_path:
         return keyword, None
@@ -73,21 +118,30 @@ def process_article_content(article_text, publisher, use_ai_first=False):
         cleaned = re.sub(rf'\*\*{re.escape(label)}\*\*\s*[:：]?\s*', '', cleaned)
         cleaned = re.sub(rf'{re.escape(label)}[：:]\s*', '', cleaned)
 
-    # 重点分级：**{红色加粗}** → 临时标记，防止 markdown 转换时丢失花括号
-    cleaned = re.sub(r'\*\*\{(.*?)\}\*\*', r'<redbold>\1</redbold>', cleaned)
+    # 重点分级：识别红字重点，自动剥离可能存在的多层花括号 (Anti-Brace-Overflow)
+    cleaned = re.sub(r'\*\*\{+(.*?)\}+\*\*', r'<redbold>\1</redbold>', cleaned)
 
-    # ---- 修复低级格式错误 (Anti-Low-Level-Errors) ----
+    # ---- 修复低级格式错误 (Anti-Low-Level-Errors V2) ----
     # 1. 修复冒号出现在行首的问题：将行首的冒号合并到上一行末尾
     cleaned = re.sub(r'\n\s*[:：]', '：', cleaned)
     
-    # 2. 修复空列表项：移除只有列表符号但没内容的行
+    # 1b. 修复加粗文本后换行再跟冒号的情况（如 **概念**\n：解释）
+    cleaned = re.sub(r'(\*\*[^*]+\*\*)\s*\n\s*[:：]', r'\1：', cleaned)
+    
+    # 2. 修复空列表项：移除只有列表符号但没内容的行（含空白字符）
     cleaned = re.sub(r'^\s*[-*+]\s*$', '', cleaned, flags=re.MULTILINE)
+    
+    # 2b. 修复列表符号后只有空格/标点但无实质内容的行
+    cleaned = re.sub(r'^\s*[-*+]\s*[：:。，,]\s*$', '', cleaned, flags=re.MULTILINE)
     
     # 3. 修复列表项内部的换行问题：如果列表符号后面紧跟换行，则合并
     cleaned = re.sub(r'([-*+]\s*)\n\s*', r'\1', cleaned)
 
     # 4. 移除多余的空行（连续 3 个及以上合并为 2 个）
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+    
+    # 5. 修复标题后紧跟冒号的问题（如 ## 标题：）
+    cleaned = re.sub(r'^(#{1,4}\s+[^\n]+)[:：]\s*$', r'\1', cleaned, flags=re.MULTILINE)
     # ---------------------------------------------
 
     cleaned, hit_words = filter_sensitive(cleaned)
@@ -226,6 +280,13 @@ def process_article_content(article_text, publisher, use_ai_first=False):
         r'<strong>(.*?)</strong>',
         r'<strong style="color: #1a1a1a; font-weight: bold;">\1</strong>',
         html_body
+    )
+
+    # 统一行内代码（英文字体）样式，解决字体不统一问题
+    font_stack = "-apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif"
+    html_body = html_body.replace(
+        '<code>',
+        f'<code style="font-family: {font_stack}; background-color: #f6f8fa; padding: 2px 5px; border-radius: 4px; color: #0366d6; font-size: 0.95em;">'
     )
 
     word_count = len(cleaned.replace("\n", "").replace(" ", ""))

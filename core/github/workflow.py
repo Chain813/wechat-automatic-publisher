@@ -3,7 +3,7 @@ import time
 from datetime import datetime
 from loguru import logger
 
-from config import BRAND_NAME, SD_ENABLED
+from config import BRAND_NAME, SD_ENABLED, GITHUB_FIXED_COVER
 from core.github.collector import fetch_github_trending, generate_code_screenshot, get_repo_code_snippet
 from core.github.processor import generate_github_article
 from core.shared.article_utils import process_article_content, _print_review_report
@@ -123,39 +123,8 @@ def run_github_workflow(publisher):
 
     topic = f"今日 GitHub 最火开源项目盘点 ({datetime.now().strftime('%m月%d日')})"
 
-    print("\n📸 正在为文章生成门面封面图...")
-    cover_path = None
-    for p in projects:
-        if p.get('image_url'):
-            try:
-                import requests
-                res = requests.get(p['image_url'], timeout=10)
-                if res.status_code == 200:
-                    tmp_path = os.path.join("assets", f"cover_{int(time.time())}.jpg")
-                    with open(tmp_path, 'wb') as f:
-                        f.write(res.content)
-                    cover_path = tmp_path
-                    break
-            except Exception as e:
-                logger.debug("  GitHub 封面下载失败: {}", e)
-
-    if not cover_path:
-        cover_path = download_cover_image("GitHub 开源趋势")
-
-    thumb_id = None
-    if cover_path:
-        thumb_id = publisher.upload_image(cover_path)
-        if not thumb_id:
-            print("⚠️ 封面上传失败，尝试压缩后重试...")
-            try:
-                from PIL import Image as PILImage
-                with PILImage.open(cover_path) as img:
-                    if img.mode != 'RGB':
-                        img = img.convert('RGB')
-                    img.save(cover_path, 'JPEG', quality=60, optimize=True)
-                thumb_id = publisher.upload_image(cover_path)
-            except Exception as e:
-                logger.warning("  封面压缩重试失败: {}", e)
+    # 封面处理：直接使用固定的 GitHub 专题封面
+    thumb_id = publisher.upload_image(GITHUB_FIXED_COVER)
 
     clean_title, title_warnings = validate_title(topic)
     for warning in title_warnings:
