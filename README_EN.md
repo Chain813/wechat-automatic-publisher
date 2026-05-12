@@ -32,10 +32,14 @@ Fully automated WeChat public account content production and publishing system. 
 **Multi-Source Hotspot Aggregation** — Parallel scraping from 12 platforms (Weibo, IT Home, 36Kr, Baidu, Zhihu, CSDN, RSS, Politics, Toutiao, The Paper, Huxiu, Douyin). Source-level health monitoring with automatic degradation.
 
 **AI Deep Creation** — DeepSeek-powered 2500-3500 word analysis articles. Built-in sensitive word filtering, title dedup (4 strategies), structural quality checks. 
-- **Layout Robustness (v3.1)**: Auto-fix for leading colons, removal of ghost bullets, and optimized heading hierarchy (H2/H3).
-- **Colloquial Tone**: Upgraded DeepSeek prompt engine for a friendlier, more explanatory tone with analogies and jargon-free language.
+- **Layout Robustness (v3.2)**: Auto-fix for leading colons, removal of ghost bullets, optimized H2/H3 hierarchy, **fixed red-bold brace overflow**, and **unified English/Code font stacks**.
+- **V3.0 Humanized Standard**: Fully upgraded DeepSeek prompt engine with "Viral Subtitles" and natural language flow, eliminating "AI-style" repetition.
+- **Three-Tier Topic Selection**: Prioritizes AI+Politics (High), Hardcore AI (Medium), and Finance+Politics (Low) to match brand positioning.
 
-**Intelligent Image Selection** — Multi-source image retrieval (Pollinations AI generation -> Pexels free stock -> Bing/Baidu crawling). 6-dimension scoring (resolution, aspect ratio, sharpness, text density, color richness, file size). Perceptual hash dedup. WeChat cover/body dual-mode scoring. **Gemini Vision + Ollama local vision model** for AI-powered image evaluation with automatic fallback.
+**Intelligent Image Selection** — Multi-source image retrieval (Pollinations AI generation -> Pexels free stock -> Bing/Baidu crawling). 
+- **LLM Keyword Optimization**: Uses LLM to transform abstract terms into visual search queries (e.g., "Regulation" -> "Tech Balance Scale") when standard searches fail.
+- **Fixed Branding Cover**: GitHub articles use a standardized 2.35:1 branding cover for consistent visual identity.
+- **Evaluation Engine**: 6-dimension scoring, perceptual hash dedup, and **Gemini Vision + Ollama local vision model** for AI-powered evaluation.
 
 **Efficient Parallel Architecture** — Image download+upload merged into parallel pipeline. Article asset generation parallelized with digest generation. Multi-source hotspot concurrent scanning.
 
@@ -192,10 +196,11 @@ The dark-themed dashboard provides:
 
 1. **README Images** — Architecture diagrams, screenshots (scored by relevance)
 2. **SD Art Illustration** — **(NEW)** DeepSeek-powered SD prompts for custom geek-style project art
-3. **Directory Tree** — Rendered via rich library as styled PNG
-4. **Architecture Diagram** — Auto-generated via diagrams library based on tech stack
-5. **Code Screenshot** — Generated via carbon API from repo's main entry file
-6. **Keyword Search** — Web image search as final fallback
+3. **Fixed Branding Cover** — **(NEW)** Standardized 2.35:1 branding cover for consistent visual identity
+4. **Directory Tree** — Rendered via rich library as styled PNG
+5. **Architecture Diagram** — Auto-generated via diagrams library based on tech stack
+6. **Code Screenshot** — Generated via carbon API from repo's main entry file
+7. **Keyword Search** — Web image search as final fallback
 
 Each image is evaluated on 6 dimensions, then optionally re-evaluated by vision AI:
 
