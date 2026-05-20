@@ -29,7 +29,7 @@ BRAND_DESC = "聚焦时政与科技的深度交汇——从大国博弈到技术
 ARTICLE_AUTHOR = "智界洞察社"
 
 # 6. 超时设置 (秒)
-LLM_TIMEOUT = 60
+LLM_TIMEOUT = 180
 IMAGE_TIMEOUT = 15
 WECHAT_API_TIMEOUT = 30
 HOTSPOT_CACHE_TTL_SECONDS = int(os.getenv("HOTSPOT_CACHE_TTL_SECONDS", "60"))
@@ -37,7 +37,7 @@ HTTP_RETRY_TOTAL = int(os.getenv("HTTP_RETRY_TOTAL", "3"))
 HTTP_RETRY_BACKOFF = float(os.getenv("HTTP_RETRY_BACKOFF", "0.8"))
 
 # 7. LLM 模型参数 (可配置)
-LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")
+LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-v4-pro")
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.75"))
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "4096"))
 LLM_MAX_RETRIES = 3          # API 调用最大重试次数

@@ -32,6 +32,8 @@ This document provides detailed explanations of technical terms, tool names, and
 | **Markdown** | Lightweight markup language using `#` for headings, `**` for bold, `>` for quotes, etc. LLM-generated articles use Markdown format, automatically converted to WeChat-compatible HTML |
 | **HTML** | HyperText Markup Language, the standard web format. The system converts Markdown articles to HTML with inline styles, adapted to WeChat's rendering engine |
 | **Inline Style** | CSS styles written directly on HTML tags (e.g., `style="color: red;"`). WeChat doesn't support external CSS files, so inline styles are the only way to control article formatting |
+| **Active Title Dedup** | **(NEW)** Pulls both draft and published article titles from WeChat API, matching them with the 4-layer deduplication algorithm to prevent duplicates. |
+| **WeChat Cloud Status Sync** | **(NEW)** Compares local history files with active WeChat titles before running. Purges local records for deleted articles, releasing hot topics/repos. |
 
 ---
 
@@ -66,6 +68,7 @@ This document provides detailed explanations of technical terms, tool names, and
 | **Personal Access Token (PAT)** | GitHub authentication token created at Settings → Developer settings → Personal access tokens. Used for API authentication with higher rate limits (5000 vs 60 requests/hour for anonymous access) |
 | **Graphviz** | Open-source graph visualization software (graphviz.org). The diagrams library depends on it to render architecture diagrams as PNG/SVG files. On Windows, the `bin` directory must be added to the system PATH after installation |
 | **API Rate Limit** | GitHub API request frequency limits. Anonymous: 60 requests/hour, authenticated: 5000 requests/hour. Exceeding the limit returns HTTP 403; the system automatically falls back to web scraping |
+| **Single-Project Deep-Dive** | **(NEW)** A new GitHub workflow that picks one hot repository and integrates English/Chinese README text and screenshots for a detailed project breakdown. |
 
 ---
 

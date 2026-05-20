@@ -156,7 +156,7 @@ def handle_config():
             "WECHAT_APP_SECRET": _mask_secret(os.getenv("WECHAT_APP_SECRET", "")),
             "LLM_API_KEY": _mask_secret(os.getenv("LLM_API_KEY", "")),
             "QYWECHAT_WEBHOOK": os.getenv("QYWECHAT_WEBHOOK", ""),
-            "LLM_MODEL": os.getenv("LLM_MODEL", "deepseek-chat"),
+            "LLM_MODEL": os.getenv("LLM_MODEL", "deepseek-v4-pro"),
             "GEMINI_API_KEY": _mask_secret(os.getenv("GEMINI_API_KEY", "")),
         })
     else:

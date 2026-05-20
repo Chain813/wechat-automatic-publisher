@@ -278,8 +278,8 @@ def run_hotspots_workflow(publisher):
         print(f"\n🚀 准备并行发布 {len(valid_topics)} 篇文章...")
         print(f"   候选：{valid_topics}")
 
-        # 预热草稿缓存，避免每个 topic 重复拉取
-        publisher.get_draft_titles()
+        # 预热活跃标题缓存，避免每个 topic 重复拉取
+        publisher.get_all_active_titles()
 
         published_count = 0
         with ThreadPoolExecutor(max_workers=len(valid_topics)) as executor:

@@ -4,7 +4,7 @@ from datetime import datetime
 from loguru import logger
 
 from config import BRAND_NAME, SD_ENABLED, GITHUB_FIXED_COVER
-from core.github.collector import fetch_github_trending, generate_code_screenshot, get_repo_code_snippet
+from core.github.collector import fetch_one_worthy_project, generate_code_screenshot, get_repo_code_snippet, save_github_history, take_github_readme_screenshot, take_live_ui_screenshot
 from core.github.processor import generate_github_article
 from core.shared.article_utils import process_article_content, _print_review_report
 from core.shared.llm import validate_title
@@ -36,21 +36,40 @@ def _publish_draft_github(publisher, title, html_content, thumb_id, digest_text)
     return True
 
 
-def _ensure_project_images(projects, publisher):
+def _ensure_deep_images(projects, publisher):
     """
-    确保每个项目都有配图。优先级：
-    1. README 中的图片（已在 collector 中处理）
-    2. SD 生成的艺术配图（DeepSeek 提示词驱动）
-    3. 目录树截图（rich 渲染）
-    4. 代码截图（carbon API）
+    确保单项目有 3+ 张深度配图。
+    1. README 概览截图 (优先使用中文文档)
+    2. 在线 Demo UI 截图
+    3. SD 艺术配图
+    4. README 中提取的其他大图 / 代码截图
     """
     for p in projects:
-        if p.get('image_url'):
-            continue  # 已有 README 图片，最优选择
+        urls = []
+        
+        # 1. README 概览截图
+        print(f"  📸 正在为 [{p['repo']}] 截取 README 概览...")
+        readme_path = take_github_readme_screenshot(p['repo'], p.get('readme_file_path'))
+        if readme_path and os.path.exists(readme_path):
+            img_url = publisher.upload_news_image(readme_path)
+            if img_url:
+                urls.append(img_url)
+                print(f"  ✅ README 截图已上传: {p['repo']}")
 
-        # ---- 优先尝试 SD 艺术配图 ----
+        # 2. 在线 Demo UI 截图
+        homepage = p.get('homepage')
+        if homepage:
+            print(f"  🖥️ 尝试获取在线 Demo/主页 截图: {homepage}...")
+            ui_path = take_live_ui_screenshot(p['repo'], homepage)
+            if ui_path and os.path.exists(ui_path):
+                img_url = publisher.upload_news_image(ui_path)
+                if img_url:
+                    urls.append(img_url)
+                    print(f"  ✅ 在线 UI 截图已上传")
+        
+        # 3. SD 艺术配图
         if SD_ENABLED:
-            print(f"  🎨 正在为 [{p['repo']}] 生成 SD 艺术配图 (DeepSeek 提示词)...")
+            print(f"  🎨 正在为 [{p['repo']}] 生成 SD 艺术配图...")
             sd_path = download_project_image_for_github(
                 repo_name=p['repo'],
                 description=p.get('desc', ''),
@@ -60,54 +79,58 @@ def _ensure_project_images(projects, publisher):
             if sd_path:
                 image_url = publisher.upload_news_image(sd_path)
                 if image_url:
-                    p['image_url'] = image_url
-                    print(f"  ✅ SD 配图已上传: {p['repo']}")
-                    continue
-                else:
-                    print(f"  ⚠️ SD 配图上传失败，尝试备选方案...")
+                    urls.append(image_url)
+                    print(f"  ✅ SD 配图已上传")
 
-        # ---- Fallback: 目录树截图 ----
-        local_path = p.get('tree_image_path')
-        if local_path and os.path.exists(local_path):
-            image_url = publisher.upload_news_image(local_path)
-            if image_url:
-                p['image_url'] = image_url
-                continue
-
-        # ---- Fallback: carbon 代码截图 ----
-        code_text, file_name = get_repo_code_snippet(p['repo'])
-        if code_text:
-            code_img = generate_code_screenshot(code_text, p.get('lang', 'python'))
-            if code_img and os.path.exists(code_img):
-                image_url = publisher.upload_news_image(code_img)
-                if image_url:
-                    p['image_url'] = image_url
-                    continue
+        # 4. Fallback: README 原图 / 其他说明文档中的大图
+        if len(urls) < 3 and p.get('image_url') and p.get('image_url') not in urls:
+            urls.append(p.get('image_url'))
+            
+        if len(urls) < 3:
+            for other_img in p.get('other_images', []):
+                if len(urls) >= 3:
+                    break
+                if other_img not in urls:
+                    urls.append(other_img)
+            
+        # 5. Final Fallback: Code 代码截图
+        if len(urls) < 3:
+            code_text, file_name = get_repo_code_snippet(p['repo'])
+            if code_text:
+                code_img = generate_code_screenshot(code_text, p.get('lang', 'python'))
+                if code_img and os.path.exists(code_img):
+                    img_url = publisher.upload_news_image(code_img)
+                    if img_url:
+                        urls.append(img_url)
+                        
+        p['image_urls'] = urls
+        if urls:
+            p['image_url'] = urls[0]
 
 
 def run_github_workflow(publisher):
-    """处理 GitHub Trending 抓取和发布流程。"""
-    projects = fetch_github_trending(limit=5)
+    """处理 GitHub 单项目深度推荐抓取和发布流程。"""
+    projects = fetch_one_worthy_project()
     check_cancelled()
     if not projects:
         print("📭 今日暂无获取到 GitHub 热门项目。")
         return
 
-    print(f"\n🚀 准备发布 GitHub 热门项目合集，共包含 {len(projects)} 个项目...")
+    print(f"\n🚀 准备深度解析 GitHub 热门项目: {projects[0]['repo']}")
 
     reset_image_cache()
 
-    # 确保每个项目都有配图
-    print("\n🖼️  正在为项目生成配图（目录树/架构图/代码截图）...")
-    _ensure_project_images(projects, publisher)
+    # 确保项目有深度配图
+    print("\n🖼️  正在为项目生成深度配图（README/UI/SD）...")
+    _ensure_deep_images(projects, publisher)
 
-    article_text = generate_github_article(projects)
+    article_text, dynamic_title = generate_github_article(projects)
     check_cancelled()
-    if not article_text:
+    if not article_text or not dynamic_title:
         print("❌ AI 创作失败，跳过。")
         return
 
-    # 后处理：将目录树图片的占位符转为 GITHUB配图 格式
+    # 后处理：将旧的占位符统一替换掉
     for p in projects:
         if p.get('tree_image_path') and p.get('image_url'):
             keyword = f"{p['repo'].split('/')[-1]} {p['lang']} project architecture"
@@ -121,7 +144,7 @@ def run_github_workflow(publisher):
     print("\n🎨 正在执行排版优化与配图处理...")
     final_html, review_data = process_article_content(article_text, publisher)
 
-    topic = f"今日 GitHub 最火开源项目盘点 ({datetime.now().strftime('%m月%d日')})"
+    topic = dynamic_title
 
     # 封面处理：直接使用固定的 GitHub 专题封面
     thumb_id = publisher.upload_image(GITHUB_FIXED_COVER)
@@ -141,4 +164,27 @@ def run_github_workflow(publisher):
         digest=digest,
     )
 
-    _publish_draft_github(publisher, clean_title, final_html, thumb_id, digest)
+    success = _publish_draft_github(publisher, clean_title, final_html, thumb_id, digest)
+    
+    # 发布成功后，将项目记入历史，避免下次重复抓取
+    if success:
+        repo_names = [p['repo'] for p in projects]
+        save_github_history(repo_names)
+        
+        try:
+            import json
+            record_file = "github_publish_records.json"
+            records = []
+            if os.path.exists(record_file):
+                with open(record_file, "r", encoding="utf-8") as f:
+                    records = json.load(f)
+            records.append({
+                "title": clean_title,
+                "repos": repo_names
+            })
+            with open(record_file, "w", encoding="utf-8") as f:
+                json.dump(records[-50:], f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning("保存 GitHub 发布记录失败: {}", e)
+            
+        print(f"✅ 已将 {len(repo_names)} 个项目加入历史过滤名单。")

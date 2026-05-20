@@ -8,6 +8,91 @@ from core.github.workflow import run_github_workflow
 from utils.image_filter import ollama_startup, ollama_shutdown
 from core.shared.runtime import check_cancelled, WorkflowCancelled
 
+def sync_local_history_with_wechat(publisher):
+    """
+    对比本地记录和微信云端草稿/已发布列表，
+    如果发现某篇文章已经在云端被删除，则同步清理本地历史，释放被占用的项目或热点。
+    """
+    import os
+    import json
+    from loguru import logger
+    
+    print("\n🔄 正在同步云端状态，检测是否有推文被删除...")
+    try:
+        active_titles = publisher.get_all_active_titles()
+    except Exception as e:
+        logger.warning(f"获取微信状态失败，跳过历史同步: {e}")
+        return
+
+    def is_title_active(title):
+        for act in active_titles:
+            if title in act or act in title:
+                return True
+        return False
+
+    # ---- 1. 同步 Hotspots 历史 ----
+    hotspots_file = "hotspots_history.json"
+    if os.path.exists(hotspots_file):
+        try:
+            with open(hotspots_file, "r", encoding="utf-8") as f:
+                hotspots_data = json.load(f)
+            changed = False
+            for date, data in hotspots_data.items():
+                if not isinstance(data, dict): continue
+                results = data.get("results", [])
+                valid_results = []
+                for res in results:
+                    topic = res.get("topic")
+                    success = res.get("success", False)
+                    if success and topic:
+                        if is_title_active(topic):
+                            valid_results.append(res)
+                        else:
+                            changed = True
+                            print(f"  🗑️ 云端已删除，本地释放热点: {topic}")
+                    else:
+                        valid_results.append(res)
+                if changed:
+                    data["results"] = valid_results
+            if changed:
+                with open(hotspots_file, "w", encoding="utf-8") as f:
+                    json.dump(hotspots_data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"同步 hotspots 历史失败: {e}")
+
+    # ---- 2. 同步 GitHub 历史 ----
+    github_records_file = "github_publish_records.json"
+    github_history_file = "github_history.json"
+    if os.path.exists(github_records_file) and os.path.exists(github_history_file):
+        try:
+            with open(github_records_file, "r", encoding="utf-8") as f:
+                records = json.load(f)
+            with open(github_history_file, "r", encoding="utf-8") as f:
+                history_repos = json.load(f)
+            
+            valid_records = []
+            changed = False
+            for rec in records:
+                title = rec.get("title", "")
+                repos = rec.get("repos", [])
+                if is_title_active(title):
+                    valid_records.append(rec)
+                else:
+                    changed = True
+                    print(f"  🗑️ 云端已删除，本地释放开源项目: {repos}")
+                    for r in repos:
+                        if r in history_repos:
+                            history_repos.remove(r)
+                            
+            if changed:
+                with open(github_records_file, "w", encoding="utf-8") as f:
+                    json.dump(valid_records, f, ensure_ascii=False, indent=2)
+                with open(github_history_file, "w", encoding="utf-8") as f:
+                    json.dump(history_repos, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"同步 GitHub 历史失败: {e}")
+
+
 def run_main(task_type="hotspots"):
     _print_banner()
     cleanup_old_assets("assets")
@@ -20,6 +105,8 @@ def run_main(task_type="hotspots"):
             return
 
         check_cancelled()
+        
+        sync_local_history_with_wechat(publisher)
 
         if task_type == "github":
             run_github_workflow(publisher)

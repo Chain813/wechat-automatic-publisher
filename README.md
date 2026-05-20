@@ -56,7 +56,8 @@
 
 - **5 段式结构**：开篇切入 → 多角度分析 → 技术与产业深挖 → 预判与观点 → 互动收尾
 - **敏感词过滤**：自动检测并过滤敏感词汇
-- **标题去重**：4 种策略防止重复发布（精确匹配/模糊匹配/关键词匹配/AI 语义匹配）
+- **双端活跃标题去重 (v4.0)**：不仅检测草稿箱，还会拉取最近已发布推文进行对比。使用 4 种策略（精确/模糊/关键词/AI语义匹配）进行查重，彻底杜绝重复。
+- **云端状态自动同步 (v4.0)**：新增本地与云端状态自动同步机制，在每次运行前自动拉取微信草稿和已发布列表，若发现某推文已在云端被删除，则自动清理本地历史（`hotspots_history.json`、`github_history.json`、`github_publish_records.json`），释放被占用的项目或热点。
 - **结构质量检查**：验证标题数、引用数、配图数是否达标
 - **自动补全**：配图不足时自动插入占位符
 - **排版健壮性 (v3.2)**：自动修复行首冒号、清理空列表项、优化标题层级（H2/H3）、**修复红字重点花括号溢出**、**统一英文字符与代码字体栈**。
@@ -214,6 +215,9 @@ LLM_API_KEY="你的DeepSeek API Key"
 
 # ===== 可选 =====
 
+# LLM 模型（默认: deepseek-v4-pro）
+LLM_MODEL="deepseek-v4-pro"
+
 # GitHub API Token（可选，提高 API 速率限制，匿名60次/小时 → 认证5000次/小时）
 # 获取方式：GitHub Settings → Developer settings → Personal access tokens → Generate new token
 # 权限：只需勾选 public_repo
@@ -295,18 +299,18 @@ python webui.py
 | 4 | **百度图片搜索** | 国内图片源，作为兜底 |
 | 5 | **本地默认图** | 最终兜底方案 |
 
-### GitHub 文章配图（多层兜底）
+### GitHub 文章配图与深度剖析 (v4.0)
 
-为每个 GitHub 项目生成配图，优先使用项目自身的资源：
+GitHub 专题全面升级为 **单项目深度拆解模式**。自动抓取并融合项目的英文/中文 README 及其他说明文档，进行深度翻译与本土化润色，并配置多维配图策略（单项目生成/匹配至少 3 张深度配图）：
 
 | 优先级 | 来源 | 说明 |
 |--------|------|------|
-| 1 | **README 图片** | 从项目 README 中提取图片，按架构图/流程图优先级评分 |
-| 2 | **SD 艺术配图** | **(新)** 使用 DeepSeek 生成专业 Prompt，调用本地 SD 生成极客风格插图 |
-| 3 | **目录树截图** | 使用 rich 库获取项目目录结构，渲染为深色主题 PNG 图片 |
-| 4 | **架构图** | 使用 diagrams 库根据项目语言和技术栈自动生成架构图 |
-| 5 | **代码截图** | 使用 carbon API 将项目入口文件代码渲染为精美截图 |
-| 6 | **关键词搜索** | 以项目名+语言为关键词进行网页图片搜索 |
+| 1 | **README 网页截图** | **(新)** 使用无头浏览器直接截取项目 README 渲染页面，自动裁剪为 2.35:1 微信封面/正文比例 |
+| 2 | **在线 UI 截图** | **(新)** 访问项目 Homepage 或 Demo 在线地址直接截取真实界面，避免本地构建失败的安全与依赖风险 |
+| 3 | **SD 艺术插图** | 调用本地 Stable Diffusion WebUI，根据 DeepSeek 生成的专属 Prompt 创作极客风格配图 |
+| 4 | **README 提取大图** | 智能检测并提取 README 中的流程图、架构图等，优先上传评分最高的图片 |
+| 5 | **代码精美截图** | 调用 carbon API 将项目入口/核心文件代码片段渲染为带有语法高亮的精美截图 |
+| 6 | **目录树 / 架构图** | 使用 rich 生成深色终端目录树图片，或使用 diagrams 自动绘制系统架构图 |
 
 ### 图片评估流程
 
@@ -344,12 +348,13 @@ python webui.py
 | `BRAND_NAME` | 品牌名称，显示在文章末尾和通知中 | AutoWeChat |
 | `NEWS_SOURCES` | 启用的热点数据源列表 | 12 个平台 |
 | `FILTER_CATEGORIES` | 优先筛选的关键词类别 | 79 个关键词 |
-| `LLM_MODEL` | DeepSeek 模型名称 | deepseek-chat |
+| `LLM_MODEL` | DeepSeek 模型名称 | `deepseek-v4-pro` |
+| `LLM_TIMEOUT` | LLM API 超时设置 (秒) | 180 |
 | `LLM_TEMPERATURE` | 生成文本的随机性（0-1，越高越随机） | 0.75 |
 | `LLM_BASE_URL` | LLM API 地址 | https://api.deepseek.com |
 | `IMAGE_DEFAULT_CANDIDATES` | 每次图片搜索的候选数量 | 5 |
 | `OLLAMA_VISION_MODEL` | Ollama 本地视觉模型名称 | gemma3:4b |
-| `GITHUB_TOKEN` | GitHub API Token（可选） | 匿名（60次/小时） |
+| `GITHUB_TOKEN` | GitHub API Token（可选） | 个人/机构 Token |
 | `PEXELS_API_KEY` | Pexels 图库 API Key（可选） | 未配置 |
 | `SD_ENABLED` | 是否启用本地 Stable Diffusion 生图 | `True` |
 | `SD_API_URL` | Stable Diffusion WebUI API 地址 | `http://127.0.0.1:7860` |

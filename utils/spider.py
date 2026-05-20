@@ -46,6 +46,7 @@ def build_stealth_browser(headless: bool = False):
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--lang=zh-CN")
     chrome_options.add_argument("--window-size=1440,960")
+    chrome_options.page_load_strategy = 'eager'
     if headless:
         chrome_options.add_argument("--headless=new")
 

@@ -11,10 +11,14 @@ from config import (
 
 API_SESSION = build_api_session()
 
-def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backoff_base=1.0):
-    """带指数退避的 API 调用"""
+def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backoff_base=1.0, timeout=None, max_tokens=None):
+    """带指数退避的 API 调用。timeout/max_tokens 可覆盖全局默认值。"""
     if max_retries is None:
         max_retries = LLM_MAX_RETRIES
+    if timeout is None:
+        timeout = LLM_TIMEOUT
+    if max_tokens is None:
+        max_tokens = LLM_MAX_TOKENS
 
     headers = {
         "Content-Type": "application/json",
@@ -30,13 +34,13 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
                     {"role": "user", "content": prompt}
                 ],
                 "temperature": LLM_TEMPERATURE,
-                "max_tokens": LLM_MAX_TOKENS
+                "max_tokens": max_tokens
             }
             response = API_SESSION.post(
                 f"{LLM_BASE_URL}/chat/completions",
                 headers=headers,
                 json=data,
-                timeout=LLM_TIMEOUT
+                timeout=timeout
             )
             response.raise_for_status()
             result = response.json()

@@ -31,7 +31,9 @@ Fully automated WeChat public account content production and publishing system. 
 
 **Multi-Source Hotspot Aggregation** — Parallel scraping from 12 platforms (Weibo, IT Home, 36Kr, Baidu, Zhihu, CSDN, RSS, Politics, Toutiao, The Paper, Huxiu, Douyin). Source-level health monitoring with automatic degradation.
 
-**AI Deep Creation** — DeepSeek-powered 2500-3500 word analysis articles. Built-in sensitive word filtering, title dedup (4 strategies), structural quality checks. 
+**AI Deep Creation** — DeepSeek-powered 2500-3500 word analysis articles. Built-in sensitive word filtering, structural quality checks. 
+- **Active Title Dedup (v4.0)**: Checks both drafts and published articles on WeChat using 4 matching strategies (exact, fuzzy, keyword, AI semantic), completely preventing duplicates.
+- **WeChat Cloud Status Sync (v4.0)**: Automatically synchronizes local records (`hotspots_history.json`, `github_history.json`, `github_publish_records.json`) with WeChat. If a draft or article is deleted on the cloud, the corresponding local history is cleared to release the topics or repositories for publishing.
 - **Layout Robustness (v3.2)**: Auto-fix for leading colons, removal of ghost bullets, optimized H2/H3 hierarchy, **fixed red-bold brace overflow**, and **unified English/Code font stacks**.
 - **V3.0 Humanized Standard**: Fully upgraded DeepSeek prompt engine with "Viral Subtitles" and natural language flow, eliminating "AI-style" repetition.
 - **Three-Tier Topic Selection**: Prioritizes AI+Politics (High), Hardcore AI (Medium), and Finance+Politics (Low) to match brand positioning.
@@ -132,6 +134,9 @@ WECHAT_APP_ID="your-wechat-appid"
 WECHAT_APP_SECRET="your-wechat-appsecret"
 LLM_API_KEY="your-deepseek-api-key"
 
+# Optional: LLM Model (default: deepseek-v4-pro)
+LLM_MODEL="deepseek-v4-pro"
+
 # Optional: GitHub API (for GitHub Trending articles, higher rate limit)
 GITHUB_TOKEN="your-github-personal-access-token"
 
@@ -192,15 +197,18 @@ The dark-themed dashboard provides:
 4. **Baidu Image Search** — Domestic fallback
 5. **Local Default** — Final fallback
 
-### GitHub Articles (multi-layer fallback)
+### GitHub Articles & Deep Analysis (v4.0)
 
-1. **README Images** — Architecture diagrams, screenshots (scored by relevance)
-2. **SD Art Illustration** — **(NEW)** DeepSeek-powered SD prompts for custom geek-style project art
-3. **Fixed Branding Cover** — **(NEW)** Standardized 2.35:1 branding cover for consistent visual identity
-4. **Directory Tree** — Rendered via rich library as styled PNG
-5. **Architecture Diagram** — Auto-generated via diagrams library based on tech stack
-6. **Code Screenshot** — Generated via carbon API from repo's main entry file
-7. **Keyword Search** — Web image search as final fallback
+GitHub workflow has been upgraded to a **single-project deep-dive mode**. It automatically fetches and merges English/Chinese READMEs and reference docs, applying deep translation and polishing, and generates/retrieves at least 3 deep image assets:
+
+| Priority | Source | Description |
+|----------|--------|-------------|
+| 1 | **README Screenshot** | **(NEW)** Headless Chrome screenshots the README rendering, automatically cropped to 2.35:1 WeChat aspect ratio. |
+| 2 | **Live UI Screenshot** | **(NEW)** Headless Chrome screenshots the project's Homepage or Demo URL directly, bypassing local deployment issues. |
+| 3 | **SD Art Illustration** | Local Stable Diffusion WebUI generates custom geek-style illustrations based on DeepSeek prompts. |
+| 4 | **README Images** | Extracts existing illustrations/flowcharts directly from README files. |
+| 5 | **Code Screenshot** | Carbon API renders main entry file code with high-quality styling. |
+| 6 | **Directory Tree & Diagrams** | Renders file directory trees with rich, or system architecture diagrams via diagrams. |
 
 Each image is evaluated on 6 dimensions, then optionally re-evaluated by vision AI:
 
@@ -225,11 +233,12 @@ Adjustable in `config.py` or `.env`:
 | `BRAND_NAME` | Brand name | AutoWeChat |
 | `NEWS_SOURCES` | Enabled sources | 12 platforms |
 | `FILTER_CATEGORIES` | Priority filter keywords | 79 terms |
-| `LLM_MODEL` | LLM model | deepseek-chat |
+| `LLM_MODEL` | LLM model | `deepseek-v4-pro` |
+| `LLM_TIMEOUT` | LLM API timeout (seconds) | 180 |
 | `LLM_TEMPERATURE` | Generation randomness | 0.75 |
 | `IMAGE_DEFAULT_CANDIDATES` | Image candidates per search | 5 |
 | `OLLAMA_VISION_MODEL` | Local vision model | gemma3:4b |
-| `GITHUB_TOKEN` | GitHub API token (optional) | anonymous (60/hr) |
+| `GITHUB_TOKEN` | GitHub API token (optional) | token-based |
 | `SD_ENABLED` | Enable local Stable Diffusion | `True` |
 | `SD_API_URL` | SD WebUI API address | `http://127.0.0.1:7860` |
 

@@ -187,9 +187,7 @@ class WeChatPublisher:
             return None
 
     def get_draft_titles(self, count=WECHAT_DRAFT_SCAN_COUNT):
-        """获取最近草稿标题列表（查重用），结果会缓存以避免重复 API 调用"""
-        if self._draft_titles_cache is not None:
-            return self._draft_titles_cache
+        """获取最近草稿标题列表"""
         self._ensure_valid_token()
         if not self.access_token:
             return []
@@ -203,9 +201,37 @@ class WeChatPublisher:
                     titles.append(news.get("title", ""))
         except Exception as exc:
             logger.warning("获取草稿标题失败: {}", exc)
-        self._draft_titles_cache = titles
-        logger.info("草稿标题缓存已建立，共 {} 条", len(titles))
         return titles
+
+    def get_published_titles(self, count=WECHAT_DRAFT_SCAN_COUNT):
+        """获取最近已发布文章标题列表"""
+        self._ensure_valid_token()
+        if not self.access_token:
+            return []
+        url = f"https://api.weixin.qq.com/cgi-bin/freepublish/batchget?access_token={self.access_token}"
+        data = {"offset": 0, "count": count, "no_content": 1}
+        titles = []
+        try:
+            res = self.session.post(url, json=data, timeout=WECHAT_API_TIMEOUT).json()
+            for item in res.get("item", []):
+                for news in item.get("content", {}).get("news_item", []):
+                    titles.append(news.get("title", ""))
+        except Exception as exc:
+            logger.warning("获取发布标题失败: {}", exc)
+        return titles
+
+    def get_all_active_titles(self):
+        """获取草稿箱和已发布的标题集合（缓存），用于查重"""
+        if self._draft_titles_cache is not None:
+            return self._draft_titles_cache
+        
+        drafts = self.get_draft_titles()
+        published = self.get_published_titles()
+        
+        all_titles = drafts + published
+        self._draft_titles_cache = all_titles
+        logger.info("微信活跃标题缓存已建立，共 {} 条 (草稿 {}/已发布 {})", len(all_titles), len(drafts), len(published))
+        return all_titles
 
     def _title_similarity(self, title_a, title_b):
         """字符级模糊相似度 (0-100)"""
@@ -230,7 +256,7 @@ class WeChatPublisher:
         3. 关键词 n-gram 重叠匹配
         4. AI 语义查重 (DeepSeek，~300 tokens，兜底)
         """
-        existing = self.get_draft_titles()
+        existing = self.get_all_active_titles()
         if extra_existing:
             existing = existing + extra_existing
             
