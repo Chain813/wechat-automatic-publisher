@@ -167,7 +167,7 @@ def process_article_content(article_text, publisher, use_ai_first=False):
         logger.warning("  检测到敏感词: {}", hit_words)
 
     placeholders = _extract_image_placeholders(cleaned)
-    
+
     github_images = []
     seen_gh = set()
     for match in GITHUB_IMAGE_PATTERN.findall(cleaned or ""):
@@ -175,6 +175,8 @@ def process_article_content(article_text, publisher, use_ai_first=False):
         if url and url not in seen_gh:
             seen_gh.add(url)
             github_images.append(url)
+
+    logger.info("  配图诊断: 普通占位符={}, GitHub配图={}", len(placeholders), len(github_images))
 
     html_body = markdown.markdown(cleaned, extensions=["extra", "nl2br", "sane_lists"])
 

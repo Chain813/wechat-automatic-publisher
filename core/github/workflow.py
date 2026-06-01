@@ -110,6 +110,14 @@ def _ensure_deep_images(projects, publisher):
                 print(f"  ⚠️ {label} 未返回有效图片")
             return img_url
 
+        # ---- 诊断：打印项目图片数据 ----
+        print(f"  🔍 项目数据: social={bool(p.get('social_preview_url'))}, "
+              f"gif={len([u for u in p.get('other_images', []) if u.lower().endswith('.gif')])}, "
+              f"homepage={bool(p.get('homepage'))}, "
+              f"image_url={bool(p.get('image_url'))}, "
+              f"other_images={len(p.get('other_images', []))}, "
+              f"SD={SD_ENABLED}")
+
         # ---- 构建所有图片来源任务 ----
         tasks = []
 
@@ -185,6 +193,9 @@ def _ensure_deep_images(projects, publisher):
         p['image_urls'] = urls
         if urls:
             p['image_url'] = urls[0]
+            print(f"  📸 最终配图: {len(urls)} 张 — {[u[:60]+'...' for u in urls]}")
+        else:
+            print(f"  ❌ 最终配图: 0 张（所有来源均失败）")
 
 
 def run_github_workflow(publisher):
