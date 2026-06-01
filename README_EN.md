@@ -31,19 +31,24 @@ Fully automated WeChat public account content production and publishing system. 
 
 **Multi-Source Hotspot Aggregation** — Parallel scraping from 12 platforms (Weibo, IT Home, 36Kr, Baidu, Zhihu, CSDN, RSS, Politics, Toutiao, The Paper, Huxiu, Douyin). Source-level health monitoring with automatic degradation.
 
-**AI Deep Creation** — DeepSeek-powered 2500-3500 word analysis articles. Built-in sensitive word filtering, structural quality checks. 
-- **Active Title Dedup (v4.0)**: Checks both drafts and published articles on WeChat using 4 matching strategies (exact, fuzzy, keyword, AI semantic), completely preventing duplicates.
-- **WeChat Cloud Status Sync (v4.0)**: Automatically synchronizes local records (`hotspots_history.json`, `github_history.json`, `github_publish_records.json`) with WeChat. If a draft or article is deleted on the cloud, the corresponding local history is cleared to release the topics or repositories for publishing.
-- **Layout Robustness (v3.2)**: Auto-fix for leading colons, removal of ghost bullets, optimized H2/H3 hierarchy, **fixed red-bold brace overflow**, and **unified English/Code font stacks**.
-- **V3.0 Humanized Standard**: Fully upgraded DeepSeek prompt engine with "Viral Subtitles" and natural language flow, eliminating "AI-style" repetition.
-- **Three-Tier Topic Selection**: Prioritizes AI+Politics (High), Hardcore AI (Medium), and Finance+Politics (Low) to match brand positioning.
+**AI Deep Creation** — DeepSeek-powered 2500-3500 word analysis articles.
+- **Personalized Writer Personas (v4.1)**: Both hotspot and GitHub writers have full personality profiles — background, thinking patterns, expression principles, worldview. No more "AI-style" writing.
+- **Tiered Bold Formatting**: Red bold (`**{{core conclusion}}`**, 3-5 per article) + black bold (key data/concepts, 1-2 per paragraph). Auto-fallback if LLM doesn't produce enough bold text.
+- **API Truncation Detection**: Auto-detects if the LLM API silently truncated the article (incomplete ending). Retries automatically, preventing broken articles from being published.
+- **Smart Retry**: When the first draft fails validation, passes it back to the LLM for targeted fixes (instead of rewriting from scratch), preserving good content.
+- **Active Title Dedup (v4.0)**: 4 strategies (exact/fuzzy/keyword/AI semantic) to prevent duplicates.
+- **Cloud Status Sync (v4.0)**: Auto-syncs local history with WeChat. Deleted cloud content releases local history.
+- **Three-Tier Topic Selection**: AI+Politics (High) → Hardcore AI (Medium) → Finance+Politics (Low).
 
 **Intelligent Image Selection** — Multi-source image retrieval (Pollinations AI generation -> Pexels free stock -> Bing/Baidu crawling). 
 - **LLM Keyword Optimization**: Uses LLM to transform abstract terms into visual search queries (e.g., "Regulation" -> "Tech Balance Scale") when standard searches fail.
 - **Fixed Branding Cover**: GitHub articles use a standardized 2.35:1 branding cover for consistent visual identity.
 - **Evaluation Engine**: 6-dimension scoring, perceptual hash dedup, and **Gemini Vision + Ollama local vision model** for AI-powered evaluation.
 
-**Efficient Parallel Architecture** — Image download+upload merged into parallel pipeline. Article asset generation parallelized with digest generation. Multi-source hotspot concurrent scanning.
+**Efficient Parallel Architecture**
+- **GitHub images fully parallel**: 6 image sources run concurrently, stops when 3 collected (3-5x speedup)
+- **Cover + article parallel**: Cover SD generation runs alongside article writing
+- **Interruptible**: All long operations support user cancellation (Stop button responds in 0.5s)
 
 **Safety & Compliance** — 4-strategy title dedup (exact/fuzzy/keyword/AI semantic). Cross-topic internal dedup. Draft box audit to prevent duplicates.
 
