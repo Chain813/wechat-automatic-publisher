@@ -128,61 +128,167 @@ def _find_other_docs_files(repo):
 
 
 # ================================================================
+#  Demo URL 多策略检测
+# ================================================================
+# 已知部署平台域名
+_DEPLOY_PLATFORMS = [
+    'vercel.app', 'netlify.app', 'github.io', 'onrender.com',
+    'fly.dev', 'railway.app', 'herokuapp.com', 'surge.sh',
+    'pages.dev', 'workers.dev', 'glitch.me', 'repl.co',
+]
+
+
+def _detect_demo_url(repo, chinese_readme_excerpt, readme_excerpt):
+    """
+    多策略检测项目的在线 Demo/主页 URL。
+    策略优先级：repo.homepage > README 关键词链接 > Badge 链接 > 平台 URL > GitHub Pages
+    """
+    # 策略 0: GitHub API 提供的 homepage
+    homepage_url = repo.homepage
+    if homepage_url:
+        logger.info(f"  🔍 使用 repo.homepage: {homepage_url}")
+        return homepage_url
+
+    readme_text = chinese_readme_excerpt if chinese_readme_excerpt else readme_excerpt
+    if not readme_text:
+        return None
+
+    # 策略 1: README 中带 Demo 关键词的 Markdown 链接
+    demo_matches = re.findall(
+        r'\[([^\]]*(?:demo|live|website|preview|homepage|playground|app|try|visit|online|在线)[^\]]*)\]'
+        r'\((https?://[^\)]+)\)',
+        readme_text, re.IGNORECASE
+    )
+    if demo_matches:
+        homepage_url = demo_matches[0][1]
+        logger.info(f"  🔍 从关键词链接提取: {homepage_url}")
+        return homepage_url
+
+    # 策略 2: Badge 链接 [![alt](badge-img)](actual-url)
+    badge_matches = re.findall(
+        r'\[!\[[^\]]*\]\([^\)]*\)\]\((https?://[^\)]+)\)',
+        readme_text
+    )
+    for url in badge_matches:
+        if any(p in url.lower() for p in _DEPLOY_PLATFORMS):
+            logger.info(f"  🔍 从 Badge 链接提取: {url}")
+            return url
+
+    # 策略 3: 裸平台 URL（非 Markdown 链接格式）
+    platform_pattern = (
+        r'https?://[a-zA-Z0-9_-]+\.'
+        r'(?:' + '|'.join(re.escape(p) for p in _DEPLOY_PLATFORMS) + r')'
+        r'[^\s\)\]"]*'
+    )
+    platform_matches = re.findall(platform_pattern, readme_text)
+    if platform_matches:
+        homepage_url = platform_matches[0]
+        logger.info(f"  🔍 从平台 URL 匹配: {homepage_url}")
+        return homepage_url
+
+    # 策略 4: GitHub Pages（repo.has_pages = True）
+    if repo.has_pages:
+        homepage_url = f"https://{repo.owner.login}.github.io/{repo.name}/"
+        logger.info(f"  🔍 GitHub Pages 兜底: {homepage_url}")
+        return homepage_url
+
+    return None
+
+
+# ================================================================
 #  PyGithub: 获取单项目深度推荐
 # ================================================================
 def fetch_one_worthy_project():
     """
-    使用 GitHub Search API 获取近期热门项目（范围扩大到 90 天，以及经典高星）。
-    调用 LLM 评估其推广价值，选出最优的 1 个。
+    使用 GitHub Search API 获取近期热门项目。
+    通过随机化查询策略 + 多样性约束确保每次推荐不同类型/语言的项目。
     自动过滤已经抓取过的历史项目。
     """
+    import random as _random
+
     logger.info("正在通过 GitHub Search API 拉取候选池进行 AI 评估...")
     history = _load_github_history()
     candidates = []
 
     try:
         g = _get_github_client()
-        # 近 90 天创建的高星项目
-        date_90d = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
-        query_recent = f"created:>{date_90d} stars:>500"
-        
-        # 经典活跃高星项目
-        date_30d = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-        query_classic = f"pushed:>{date_30d} stars:>10000"
 
-        for query in [query_recent, query_classic]:
-            raw_repos = list(g.search_repositories(query=query, sort="stars", order="desc")[:30])
-            for repo in raw_repos:
-                if repo.full_name not in history:
-                    candidates.append(repo)
-                    if len(candidates) >= 15:
-                        break
-            if len(candidates) >= 15:
+        # ---- 随机化搜索策略：每次从不同角度搜索，避免结果雷同 ----
+        date_30d = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        date_90d = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+        date_180d = (datetime.now() - timedelta(days=180)).strftime("%Y-%m-%d")
+
+        # 随机选择语言过滤（50% 概率加语言约束）
+        lang_pool = ["Python", "JavaScript", "TypeScript", "Go", "Rust", "Java", "C++", None]
+        rand_lang = _random.choice(lang_pool)
+        lang_filter = f" language:{rand_lang}" if rand_lang else ""
+
+        # 随机选择时间范围和星数门槛
+        query_variants = [
+            f"created:>{date_30d} stars:>200{lang_filter}",       # 近 1 月新兴
+            f"created:>{date_90d} stars:>500{lang_filter}",       # 近 3 月热门
+            f"created:>{date_180d} stars:>1000{lang_filter}",     # 近半年高星
+            f"pushed:>{date_30d} stars:>5000{lang_filter}",       # 经典活跃
+            f"pushed:>{date_30d} stars:>10000",                    # 顶级项目（不加语言限制）
+            f"created:>{date_90d} stars:>100 topic:ai",            # AI 专题
+            f"created:>{date_90d} stars:>100 topic:cli",           # CLI 工具
+            f"created:>{date_90d} stars:>100 topic:web",           # Web 项目
+        ]
+        # 每次随机选 2-3 个查询
+        num_queries = _random.randint(2, 3)
+        selected_queries = _random.sample(query_variants, min(num_queries, len(query_variants)))
+
+        for query in selected_queries:
+            logger.info("  搜索: {}", query)
+            try:
+                # 搜索结果也随机偏移起始位置（避免每次都是前几名）
+                offset = _random.randint(0, 10)
+                raw_repos = list(g.search_repositories(query=query, sort="stars", order="desc")[offset:offset+20])
+                for repo in raw_repos:
+                    if repo.full_name not in history:
+                        candidates.append(repo)
+                        if len(candidates) >= 20:
+                            break
+            except Exception as e:
+                logger.warning("  搜索失败: {} — {}", query, e)
+            if len(candidates) >= 20:
                 break
 
         if not candidates:
             return []
 
-        # 构造 LLM 评估 prompt
+        # 去重候选列表
+        seen = set()
+        unique_candidates = []
+        for repo in candidates:
+            if repo.full_name not in seen:
+                seen.add(repo.full_name)
+                unique_candidates.append(repo)
+        candidates = unique_candidates[:15]
+
+        # 构造 LLM 评估 prompt（强调多样性）
         eval_text = ""
-        for i, repo in enumerate(candidates[:15]):
-            desc = repo.description or "无"
+        for i, repo in enumerate(candidates):
+            desc = (repo.description or "无")[:100]
             lang = repo.language or "未知"
-            eval_text += f"{i}. {repo.full_name} | {lang} | {repo.stargazers_count} stars\n   描述: {desc}\n"
+            eval_text += f"{i}. {repo.full_name} | {lang} | {repo.stargazers_count}⭐\n   {desc}\n"
 
         system_prompt = (
-            "你是一个资深的开源技术社区编辑。你的任务是从以下候选列表中挑选出**1个最值得向中文开发者推荐**的开源项目。\n"
-            "评估维度：\n"
-            "1. 实用性与痛点解决（工具类、效率类优先）\n"
-            "2. 创新性与话题度（如 AI 结合、新颖创意）\n"
-            "3. 可视化/展示性（有 UI 界面、前端、可视化工具优先，因为配图更好看）\n"
-            "4. 适合大众开发者，而非极其底层的晦涩项目\n\n"
-            "请直接输出你挑选的项目编号（0-14之间的纯数字），不要输出任何其他内容。"
+            "你是资深开源社区编辑，为中文开发者挑选本周最值得推荐的 GitHub 项目。\n\n"
+            "## 核心原则：多样性优先\n"
+            "不要总是选同类项目。根据候选列表的实际内容，灵活选择最能给读者带来新鲜感的项目。\n\n"
+            "## 评估维度（综合考量，不要过度偏向某一项）\n"
+            "1. **实用性**：能解决开发者真实痛点的工具\n"
+            "2. **创新性**：技术方案新颖、有话题度\n"
+            "3. **可展示性**：有 README 截图/GIF/在线 Demo 的项目优先（方便配图）\n"
+            "4. **大众适用**：面向普通开发者，而非极其底层的晦涩项目\n"
+            "5. **新鲜感**：如果候选中有多个 AI 项目，选一个非 AI 的换换口味\n\n"
+            "请直接输出你挑选的项目编号（纯数字），不要输出任何其他内容。"
         )
 
         from core.shared.llm import call_deepseek_with_retry
         best_idx_str = call_deepseek_with_retry(eval_text, system_content=system_prompt, max_retries=2)
-        
+
         best_idx = 0
         try:
             best_idx = int(re.search(r'\d+', best_idx_str).group())
@@ -196,15 +302,16 @@ def fetch_one_worthy_project():
 
         image_url, readme_excerpt, tree_image_path, other_images, readme_file_path, chinese_readme_excerpt = get_readme_info(best_repo.full_name)
 
-        # 尝试提取主页
-        homepage_url = best_repo.homepage
-        if not homepage_url:
-            # 优先从中文文档中找 Demo 链接，其次从英文
-            readme_text_for_demo = chinese_readme_excerpt if chinese_readme_excerpt else readme_excerpt
-            demo_matches = re.findall(r'\[([^\]]*(?:demo|live|website|preview|homepage|playground)[^\]]*)\]\((https?://[^\)]+)\)', readme_text_for_demo, re.IGNORECASE)
-            if demo_matches:
-                homepage_url = demo_matches[0][1]
-                logger.info(f"  🔍 从说明文档提取到 Demo 链接: {homepage_url}")
+        # 提取 GitHub Social Preview 图片（仓库所有者设置的高质量封面）
+        social_preview_url = best_repo.raw_data.get("open_graph_image_url")
+        if social_preview_url:
+            if other_images is None:
+                other_images = []
+            other_images.insert(0, social_preview_url)
+            logger.info(f"  🖼️ 发现 Social Preview 封面图")
+
+        # 多策略提取 Demo/主页 URL
+        homepage_url = _detect_demo_url(best_repo, chinese_readme_excerpt, readme_excerpt)
 
         return [{
             "repo": best_repo.full_name,
@@ -219,6 +326,7 @@ def fetch_one_worthy_project():
             "homepage": homepage_url,
             "other_images": other_images,
             "readme_file_path": readme_file_path,
+            "social_preview_url": social_preview_url,
         }]
 
     except Exception as e:
@@ -292,6 +400,17 @@ def get_readme_info(repo_name):
                 alt_text = alt_match.group(1) if alt_match else ""
                 candidates.append((img_url, alt_text))
 
+        # 扫描 <video> 标签的 poster 和 <source>（GIF/视频是最高质量配图）
+        for text_block in [english_text, chinese_text]:
+            if not text_block:
+                continue
+            for match in re.finditer(r'<video[^>]+poster=["\']([^"\']+)["\'][^>]*>', text_block):
+                candidates.append((match.group(1).strip(), "video poster"))
+            for match in re.finditer(r'<source[^>]+src=["\']([^"\']+)["\'][^>]*>', text_block):
+                src = match.group(1).strip()
+                if any(src.lower().endswith(ext) for ext in ['.gif', '.mp4', '.webm', '.mov']):
+                    candidates.append((src, "video source"))
+
         # 扫描其他说明文档的文本与图片
         other_docs_text = ""
         other_docs_paths = _find_other_docs_files(repo)
@@ -356,7 +475,7 @@ def get_readme_info(repo_name):
 
     except Exception as e:
         logger.debug("  PyGithub 获取 README 失败 {}: {}", repo_name, e)
-        return None, "", None
+        return None, "", None, [], None, ""
 
 
 def _extract_readme_text(text):
@@ -368,7 +487,7 @@ def _extract_readme_text(text):
 
 
 def _score_readme_image(img_url, alt_text=""):
-    """评分 README 图片，优先选择架构图/流程图"""
+    """评分 README 图片，优先选择 GIF 动画 > 视频 > 架构图/流程图"""
     lower_url = img_url.lower()
     lower_alt = alt_text.lower() if alt_text else ""
     combined = lower_url + " " + lower_alt
@@ -381,8 +500,16 @@ def _score_readme_image(img_url, alt_text=""):
     for kw in ARCHITECTURE_KEYWORDS:
         if kw in combined:
             score += 10
-    if any(ext in lower_url for ext in [".png", ".svg", ".gif"]):
+
+    # 动画 GIF 是最有价值的配图（几乎都是项目实际运行效果）
+    if ".gif" in lower_url:
+        score += 25
+    # 视频 poster/截图也是高质量素材
+    elif any(ext in lower_url for ext in [".mp4", ".webm", ".mov"]):
+        score += 20
+    elif any(ext in lower_url for ext in [".png", ".svg"]):
         score += 2
+
     if "raw.githubusercontent.com" in lower_url:
         score += 3
     if "/assets/" in lower_url or "/docs/" in lower_url or "/images/" in lower_url:
@@ -808,9 +935,15 @@ def take_live_ui_screenshot(repo_name, homepage_url, save_dir="assets"):
         browser.set_window_size(1440, 900)
         browser.set_page_load_timeout(30)
         browser.get(homepage_url)
-        
-        # 等待页面充分渲染
-        time.sleep(5)
+
+        # 智能等待页面渲染完成（替代固定 sleep(5)，快页面省 2-4 秒）
+        try:
+            from selenium.webdriver.support.ui import WebDriverWait
+            WebDriverWait(browser, 8).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+        except Exception:
+            pass  # 超时也继续截图
         browser.save_screenshot(save_path)
         
         with Image.open(save_path) as img:

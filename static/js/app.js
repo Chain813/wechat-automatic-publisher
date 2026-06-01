@@ -53,7 +53,11 @@ document.addEventListener('DOMContentLoaded', () => {
         isPaused = paused;
 
         if (btnStart) btnStart.style.display = running ? 'none' : 'flex';
-        if (btnStop) btnStop.style.display = running ? 'flex' : 'none';
+        if (btnStop) {
+            btnStop.style.display = running ? 'flex' : 'none';
+            btnStop.disabled = false;
+            btnStop.innerHTML = '<span class="btn-icon">⏹</span> Stop';
+        }
 
         if (running) {
             if (btnPause) btnPause.style.display = paused ? 'none' : 'flex';
@@ -93,11 +97,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     btnStop.addEventListener('click', async () => {
         try {
+            btnStop.disabled = true;
+            btnStop.textContent = '⏳ Stopping...';
             const res = await fetch('/api/stop', { method: 'POST' });
             const data = await res.json();
             appendLog('SYSTEM | ' + data.message, 'system');
+            // 不立即切状态，等下一次 poll 确认后端真正结束
         } catch (e) {
             appendLog('ERROR | Stop failed: ' + e.message, 'error');
+            btnStop.disabled = false;
+            btnStop.innerHTML = '<span class="btn-icon">⏹</span> Stop';
         }
     });
 
@@ -209,16 +218,41 @@ document.addEventListener('DOMContentLoaded', () => {
             let html = '';
             dates.forEach(date => {
                 const entry = history[date];
+                const results = entry.results || [];
                 const topics = entry.topics || entry;
                 const items = Array.isArray(topics) ? topics : [];
+
                 html += `<div class="history-day">
-                    <div class="history-date">${date}</div>
-                    <div class="history-topics">`;
-                items.forEach(t => {
-                    const name = typeof t === 'string' ? t : (t.title || t.topic || JSON.stringify(t));
-                    html += `<span class="topic-tag">${name}</span>`;
-                });
-                html += '</div></div>';
+                    <div class="history-date">${date}</div>`;
+
+                // 显示发布结果（如果有详细数据）
+                if (results.length > 0) {
+                    html += '<div class="history-results">';
+                    results.forEach(r => {
+                        const icon = r.success ? '&#10003;' : '&#10007;';
+                        const cls = r.success ? 'result-ok' : 'result-fail';
+                        const time = r.time || '';
+                        const topic = r.topic || '';
+                        const draftId = r.draft_id ? ` <span class="draft-id">${r.draft_id}</span>` : '';
+                        const error = r.error ? ` <span class="result-error">${r.error}</span>` : '';
+                        html += `<div class="result-item ${cls}">
+                            <span class="result-icon">${icon}</span>
+                            <span class="result-topic">${topic}</span>
+                            ${draftId}${error}
+                            <span class="result-time">${time}</span>
+                        </div>`;
+                    });
+                    html += '</div>';
+                } else {
+                    // 兼容旧格式：只有 topics 列表
+                    html += '<div class="history-topics">';
+                    items.forEach(t => {
+                        const name = typeof t === 'string' ? t : (t.title || t.topic || JSON.stringify(t));
+                        html += `<span class="topic-tag">${name}</span>`;
+                    });
+                    html += '</div>';
+                }
+                html += '</div>';
             });
             container.innerHTML = html;
         } catch (e) {

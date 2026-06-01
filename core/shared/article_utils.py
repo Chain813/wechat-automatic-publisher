@@ -14,6 +14,18 @@ ASSET_RETENTION_DAYS = 5
 PLACEHOLDER_PATTERN = re.compile(r"【\s*此处插入配图\s*[：:]\s*(.*?)\s*】")
 GITHUB_IMAGE_PATTERN = re.compile(r"【\s*GITHUB配图\s*[：:]\s*(https?://.*?)\s*】")
 
+# 预编译结构性标签清理正则（避免每篇文章重复编译 30 个正则）
+_STRUCTURAL_LABELS = [
+    "事件钩子", "拆解博弈", "技术逻辑", "预判观点", "互动收尾",
+    "核心特性", "适用场景", "项目亮点", "技术/产业逻辑", "技术与产业深挖",
+]
+_STRUCTURAL_LABEL_PATTERNS = []
+for _label in _STRUCTURAL_LABELS:
+    _escaped = re.escape(_label)
+    _STRUCTURAL_LABEL_PATTERNS.append(re.compile(rf'#+\s*{_escaped}\s*[:：]?\s*\n?'))
+    _STRUCTURAL_LABEL_PATTERNS.append(re.compile(rf'\*\*{_escaped}\*\*\s*[:：]?\s*'))
+    _STRUCTURAL_LABEL_PATTERNS.append(re.compile(rf'{_escaped}[：:]\s*'))
+
 
 def _optimize_image_keyword_with_llm(original_keyword):
     """
@@ -55,30 +67,26 @@ def _download_and_upload(keyword, publisher, use_ai_first=False):
     if not keyword:
         return keyword, None
 
-    logger.info("正在为段落关键词 '{}' 搜寻最佳配图...", keyword)
+    # 根据场景选择下载函数（仅解析一次）
     if use_ai_first:
-        from utils.image_handler import download_image_for_hotspot
-        image_path = download_image_for_hotspot(keyword)
+        from utils.image_handler import download_image_for_hotspot as _dl
     else:
-        image_path = download_image(keyword)
+        from utils.image_handler import download_image as _dl
+
+    logger.info("正在为段落关键词 '{}' 搜寻最佳配图...", keyword)
+    image_path = _dl(keyword)
+
+    # 降级：简化关键词重试
     if not image_path:
         simplified = simplify_keyword(keyword)
         if simplified and simplified.strip():
-            if use_ai_first:
-                from utils.image_handler import download_image_for_hotspot
-                image_path = download_image_for_hotspot(simplified)
-            else:
-                image_path = download_image(simplified)
+            image_path = _dl(simplified)
 
     # LLM 关键词优化兜底：将抽象概念转化为视觉化搜索词
     if not image_path:
         optimized = _optimize_image_keyword_with_llm(keyword)
         if optimized:
-            if use_ai_first:
-                from utils.image_handler import download_image_for_hotspot
-                image_path = download_image_for_hotspot(optimized)
-            else:
-                image_path = download_image(optimized)
+            image_path = _dl(optimized)
 
     if not image_path:
         return keyword, None
@@ -109,24 +117,33 @@ def process_article_content(article_text, publisher, use_ai_first=False):
     cleaned = re.sub(r"```\s*\n?", "", cleaned).strip()
 
     # 移除残留的结构性标签文字（LLM 可能仍会输出）
-    structural_labels = [
-        "事件钩子", "拆解博弈", "技术逻辑", "预判观点", "互动收尾",
-        "核心特性", "适用场景", "项目亮点", "技术/产业逻辑", "技术与产业深挖",
-    ]
-    for label in structural_labels:
-        cleaned = re.sub(rf'#+\s*{re.escape(label)}\s*[:：]?\s*\n?', '', cleaned)
-        cleaned = re.sub(rf'\*\*{re.escape(label)}\*\*\s*[:：]?\s*', '', cleaned)
-        cleaned = re.sub(rf'{re.escape(label)}[：:]\s*', '', cleaned)
+    for pattern in _STRUCTURAL_LABEL_PATTERNS:
+        cleaned = pattern.sub('', cleaned)
+
+    # ---- 粗体兜底：如果 LLM 未输出足够粗体，自动标注关键语句 ----
+    bold_count = len(re.findall(r'\*\*[^*]+\*\*', cleaned))
+    if bold_count < 5:
+        # 自动加粗：带单位的数字（如 3400 亿美元、50%、10 倍）
+        cleaned = re.sub(
+            r'(?<!\*)\b(\d[\d,.]*\s*(?:亿|万|千|百|倍|%|美元|元|人民币|欧元|英镑|日元|亿美元|万元))\b(?!\*)',
+            r'**\1**', cleaned
+        )
+        # 自动加粗：引号内的关键短句（3-15 字的引用）
+        cleaned = re.sub(
+            r'(?<!\*)["“]([^"”]{3,15})["”](?!\*)',
+            r'**"\1"**', cleaned
+        )
 
     # 重点分级：识别红字重点，自动剥离可能存在的多层花括号 (Anti-Brace-Overflow)
     cleaned = re.sub(r'\*\*\{+(.*?)\}+\*\*', r'<redbold>\1</redbold>', cleaned)
 
     # ---- 修复低级格式错误 (Anti-Low-Level-Errors V2) ----
     # 1. 修复冒号出现在行首的问题：将行首的冒号合并到上一行末尾
-    cleaned = re.sub(r'\n\s*[:：]', '：', cleaned)
-    
+    #    负向前瞻 (?!\d) 避免破坏时间戳（如 10:30）和比例（如 3:1）
+    cleaned = re.sub(r'\n\s*[:：](?!\d)', '：', cleaned)
+
     # 1b. 修复加粗文本后换行再跟冒号的情况（如 **概念**\n：解释）
-    cleaned = re.sub(r'(\*\*[^*]+\*\*)\s*\n\s*[:：]', r'\1：', cleaned)
+    cleaned = re.sub(r'(\*\*[^*]+\*\*)\s*\n\s*[:：](?!\d)', r'\1：', cleaned)
     
     # 2. 修复空列表项：移除只有列表符号但没内容的行（含空白字符）
     cleaned = re.sub(r'^\s*[-*+]\s*$', '', cleaned, flags=re.MULTILINE)
@@ -135,7 +152,8 @@ def process_article_content(article_text, publisher, use_ai_first=False):
     cleaned = re.sub(r'^\s*[-*+]\s*[：:。，,]\s*$', '', cleaned, flags=re.MULTILINE)
     
     # 3. 修复列表项内部的换行问题：如果列表符号后面紧跟换行，则合并
-    cleaned = re.sub(r'([-*+]\s*)\n\s*', r'\1', cleaned)
+    #    使用 [ \t]* 而非 \s* 避免吞噬列表项之间的空行导致合并不同列表项
+    cleaned = re.sub(r'([-*+]\s*)\n[ \t]*', r'\1', cleaned)
 
     # 4. 移除多余的空行（连续 3 个及以上合并为 2 个）
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
@@ -203,40 +221,47 @@ def process_article_content(article_text, publisher, use_ai_first=False):
             html_body = _replace_placeholder(html_body, keyword, "")
             logger.info("  最终未匹配到合适配图，已移除占位符")
 
-    for gh_url in github_images:
-        tmp_path = None
-        try:
-            logger.info("正在下载 GitHub 配图: {}", gh_url)
-            res = requests.get(gh_url, timeout=10)
-            if res.status_code == 200:
-                tmp_path = os.path.join("assets", f"gh_{int(time.time()*1000)}.jpg")
-                with open(tmp_path, 'wb') as f:
-                    f.write(res.content)
+    # GitHub 配图并行下载上传
+    if github_images:
+        def _process_gh_image(gh_url):
+            tmp_path = None
+            try:
+                logger.info("正在下载 GitHub 配图: {}", gh_url)
+                res = requests.get(gh_url, timeout=10)
+                if res.status_code == 200:
+                    tmp_path = os.path.join("assets", f"gh_{int(time.time()*1000)}_{id(gh_url)}.jpg")
+                    with open(tmp_path, 'wb') as f:
+                        f.write(res.content)
+                    image_url = publisher.upload_news_image(tmp_path)
+                    return gh_url, image_url
+            except Exception as e:
+                logger.warning("  GitHub 配图处理失败: {}", e)
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
+            return gh_url, None
 
-                image_url = publisher.upload_news_image(tmp_path)
-                if image_url:
-                    image_html = (
-                        '<p style="text-align:center;margin: 20px 0;">'
-                        f'<img src="{image_url}" style="width:100%;max-width:600px;border-radius:12px;'
-                        'box-shadow: 0 4px 12px rgba(0,0,0,0.1);">'
-                        "</p>"
-                    )
-                    pattern = re.compile(rf"【GITHUB配图：\s*{re.escape(gh_url)}】")
-                    html_body = pattern.sub(image_html, html_body)
-                    image_count += 1
-                    logger.info("  GitHub 配图已成功嵌入文章")
-                    continue
-        except Exception as e:
-            logger.warning("  GitHub 配图处理失败: {}", e)
-        finally:
-            if tmp_path and os.path.exists(tmp_path):
-                try:
-                    os.remove(tmp_path)
-                except OSError:
-                    pass
+        logger.info("并行处理 {} 张 GitHub 配图...", len(github_images))
+        with ThreadPoolExecutor(max_workers=min(3, len(github_images))) as gh_pool:
+            gh_results = list(gh_pool.map(_process_gh_image, github_images))
 
-        pattern = re.compile(rf"【GITHUB配图：\s*{re.escape(gh_url)}】")
-        html_body = pattern.sub("", html_body)
+        for gh_url, image_url in gh_results:
+            pattern = re.compile(rf"【GITHUB配图：\s*{re.escape(gh_url)}】")
+            if image_url:
+                image_html = (
+                    '<p style="text-align:center;margin: 20px 0;">'
+                    f'<img src="{image_url}" style="width:100%;max-width:600px;border-radius:12px;'
+                    'box-shadow: 0 4px 12px rgba(0,0,0,0.1);">'
+                    "</p>"
+                )
+                html_body = pattern.sub(image_html, html_body)
+                image_count += 1
+                logger.info("  GitHub 配图已成功嵌入文章")
+            else:
+                html_body = pattern.sub("", html_body)
 
     # 统一增加段落缩进和间距
     html_body = html_body.replace(

@@ -125,12 +125,14 @@ def _ai_semantic_check(new_title, existing_titles):
 
 class WeChatPublisher:
     def __init__(self, app_id, app_secret):
+        import threading
         self.app_id = app_id
         self.app_secret = app_secret
         self.session = build_api_session()
         self.access_token = None
         self._token_expires_at = 0
         self._draft_titles_cache = None
+        self._lock = threading.Lock()
         self._refresh_token()
 
     def _refresh_token(self):
@@ -150,11 +152,14 @@ class WeChatPublisher:
             self.access_token = None
 
     def _ensure_valid_token(self):
-        """检查 Token 是否即将过期，自动刷新"""
+        """检查 Token 是否即将过期，自动刷新（线程安全）"""
         if not self.access_token or time.time() >= self._token_expires_at:
-            logger.info("Token 已过期或即将过期，正在自动刷新...")
-            self._draft_titles_cache = None  # Token 切换后缓存失效
-            self._refresh_token()
+            with self._lock:
+                # 双重检查：获取锁后再次确认是否仍需刷新
+                if not self.access_token or time.time() >= self._token_expires_at:
+                    logger.info("Token 已过期或即将过期，正在自动刷新...")
+                    self._draft_titles_cache = None  # Token 切换后缓存失效
+                    self._refresh_token()
 
     def upload_image(self, image_path):
         """上传素材，返回 media_id"""
@@ -352,11 +357,15 @@ class WeChatPublisher:
 
         return {"errcode": -1, "errmsg": "重试耗尽"}
 
+_qywechat_session = None
+
 def send_to_qywechat(webhook_url, text):
+    global _qywechat_session
     if not webhook_url:
         return
-    session = build_api_session()
+    if _qywechat_session is None:
+        _qywechat_session = build_api_session()
     try:
-        session.post(webhook_url, json={"msgtype": "text", "text": {"content": text}}, timeout=5)
+        _qywechat_session.post(webhook_url, json={"msgtype": "text", "text": {"content": text}}, timeout=5)
     except Exception as exc:
         logger.warning("企业微信通知失败: {}", exc)

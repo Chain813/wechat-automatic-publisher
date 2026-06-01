@@ -80,8 +80,14 @@ def _flush_history():
     global _history_cache
     if _history_cache is None:
         return
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(_history_cache, f, ensure_ascii=False, indent=2)
+    try:
+        tmp = HISTORY_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(_history_cache, f, ensure_ascii=False, indent=2)
+        import shutil
+        shutil.move(tmp, HISTORY_FILE)
+    except Exception as e:
+        logger.warning("  历史记录持久化失败: {}", e)
 
 def _ensure_today(history):
     today = datetime.now().strftime("%Y-%m-%d")
@@ -156,23 +162,33 @@ def _fetch_selected_topics(publisher):
     return candidates
 
 def _generate_article_assets(topic, publisher):
+    from concurrent.futures import ThreadPoolExecutor
+
     check_cancelled()
     reset_image_cache()
 
-    article_text = generate_article(topic)
-    if not article_text:
-        print("❌ AI 创作失败，跳过。")
-        return None
+    # 封面生成与文章创作并行（封面不依赖文章内容）
+    with ThreadPoolExecutor(max_workers=1) as cover_pool:
+        cover_future = cover_pool.submit(download_cover_image_for_hotspot, topic)
 
-    print("\n🎨 正在执行排版优化与智能图选 (并行加速)...")
-    final_html, review_data = process_article_content(article_text, publisher, use_ai_first=True)
-    check_cancelled()
-    if not final_html:
-        print("❌ 内容处理后异常，跳过。")
-        return None
+        article_text = generate_article(topic)
+        if not article_text:
+            cover_future.cancel()
+            print("❌ AI 创作失败，跳过。")
+            return None
 
-    print("\n📸 正在为文章生成门面封面图...")
-    cover_path = download_cover_image_for_hotspot(topic)
+        print("\n🎨 正在执行排版优化与智能图选 (并行加速)...")
+        final_html, review_data = process_article_content(article_text, publisher, use_ai_first=True)
+        check_cancelled()
+        if not final_html:
+            cover_future.cancel()
+            print("❌ 内容处理后异常，跳过。")
+            return None
+
+        # 等待封面完成（此时封面大概率已经生成好了）
+        print("\n📸 等待封面图生成...")
+        cover_path = cover_future.result()
+
     thumb_id = None
     if cover_path:
         thumb_id = publisher.upload_image(cover_path)
@@ -246,6 +262,8 @@ def _publish_single_topic(topic, pub):
         return topic, False, str(exc)
 
 def run_hotspots_workflow(publisher):
+    global _history_cache
+    _history_cache = None  # 强制从磁盘重新加载，避免跨任务缓存污染
     _load_history()
     try:
         check_cancelled()

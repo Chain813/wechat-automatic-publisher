@@ -279,6 +279,21 @@ body {
     font-size: 0.85rem;
 }
 
+.history-results { display: flex; flex-direction: column; gap: 4px; }
+.result-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 8px; border-radius: 6px; font-size: 0.85rem;
+}
+.result-ok { background: rgba(16, 185, 129, 0.08); }
+.result-fail { background: rgba(239, 68, 68, 0.08); }
+.result-icon { font-size: 0.9rem; width: 18px; text-align: center; }
+.result-ok .result-icon { color: #10B981; }
+.result-fail .result-icon { color: #EF4444; }
+.result-topic { flex: 1; color: var(--text-primary); }
+.result-time { color: var(--text-secondary); font-size: 0.8rem; }
+.draft-id { color: var(--accent-primary); font-family: var(--font-mono); font-size: 0.8rem; }
+.result-error { color: #EF4444; font-size: 0.8rem; }
+
 /* Source Health */
 .sources-grid {
     display: grid;

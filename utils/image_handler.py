@@ -324,21 +324,29 @@ def _try_pollinations(keyword, directory, width=1024, height=576):
 # ==========================================
 #  Stable Diffusion 本地生图
 # ==========================================
-def _try_local_sd(keyword, directory, width=1024, height=576, max_retries=10):
+def _try_local_sd(keyword, directory, width=1024, height=576, max_retries=5, prompt=None, prefix="local_sd"):
     """
     调用本地 Stable Diffusion WebUI API 生图（唯一生图源）。
     如果 SD 服务暂未启动，会持续等待重试直到成功。
     要求 WebUI 启动时带上 --api 参数。
+    prompt: 直接传入预构建的 prompt；为 None 时从 keyword 自动生成。
+    prefix: 保存文件名前缀。
+    支持用户中断（检查 cancel_event）。
     """
     import requests
     import base64
+    from core.shared.runtime import cancel_event, WorkflowCancelled
 
-    prompt = _build_pollinations_prompt(keyword)
+    if prompt is None:
+        prompt = _build_pollinations_prompt(keyword)
     logger.info("  本地 Stable Diffusion 生图中: {}", prompt[:60])
 
     payload = {
         "prompt": prompt,
-        "negative_prompt": "nsfw, nude, naked, suggestive, porn, lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry",
+        "negative_prompt": "nsfw, nude, naked, suggestive, porn, text, words, letters, logo, watermark, "
+                           "lowres, bad anatomy, bad hands, error, missing fingers, extra digit, fewer digits, "
+                           "cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, "
+                           "username, blurry, human face, portrait, person",
         "steps": 25,
         "width": width,
         "height": height,
@@ -348,13 +356,17 @@ def _try_local_sd(keyword, directory, width=1024, height=576, max_retries=10):
     }
 
     for attempt in range(1, max_retries + 1):
+        # 每次重试前检查中断信号
+        if cancel_event.is_set():
+            raise WorkflowCancelled("SD 生图被用户中断")
+
         try:
             resp = requests.post(f"{SD_API_URL}/sdapi/v1/txt2img", json=payload, timeout=180)
             if resp.status_code == 200:
                 data = resp.json()
                 if "images" in data and len(data["images"]) > 0:
                     image_data = base64.b64decode(data["images"][0])
-                    save_path = os.path.join(directory, f"local_sd_{int(time.time())}.jpg")
+                    save_path = os.path.join(directory, f"{prefix}_{int(time.time())}.jpg")
                     os.makedirs(directory, exist_ok=True)
                     with open(save_path, "wb") as f:
                         f.write(image_data)
@@ -367,12 +379,19 @@ def _try_local_sd(keyword, directory, width=1024, height=576, max_retries=10):
         except requests.exceptions.Timeout:
             logger.warning("  本地 SD 生图超时，等待重试... (第 {}/{} 次)", attempt, max_retries)
         except Exception as e:
+            # WorkflowCancelled 不应被捕获
+            if isinstance(e, WorkflowCancelled):
+                raise
             logger.warning("  本地 SD 生图异常: {} (第 {}/{} 次)", e, attempt, max_retries)
 
         if attempt < max_retries:
             wait = min(10, 2 ** (attempt - 1))
             logger.info("  等待 {} 秒后重试...", wait)
-            time.sleep(wait)
+            # 可中断的等待
+            for _ in range(wait * 2):
+                if cancel_event.is_set():
+                    raise WorkflowCancelled("SD 生图被用户中断")
+                time.sleep(0.5)
 
     logger.error("  本地 SD 在 {} 次重试后仍然失败", max_retries)
     return None
@@ -452,68 +471,12 @@ def download_project_image_for_github(repo_name, description, lang, topics=None,
     logger.info("  SD Prompt: {}", prompt[:80])
 
     # 调用本地 SD 生图
-    save_path = _try_local_sd_with_prompt(prompt, specific_dir, width=1024, height=576)
+    save_path = _try_local_sd(None, specific_dir, width=1024, height=576, prompt=prompt, prefix="gh_sd")
     if save_path:
         save_path = _finalize_image(save_path, "body")
         if save_path:
             logger.info("  ✅ GitHub 项目 SD 配图生成成功: {}", os.path.basename(save_path))
     return save_path
-
-
-def _try_local_sd_with_prompt(prompt, directory, width=1024, height=576, max_retries=10):
-    """
-    使用预先生成好的 prompt 直接调用本地 SD 生图。
-    与 _try_local_sd 不同的是，它不再内部调用 _build_pollinations_prompt，
-    而是直接使用传入的 prompt。
-    """
-    import requests as _requests
-    import base64
-
-    logger.info("  本地 Stable Diffusion 生图中 (GitHub 项目)...")
-
-    payload = {
-        "prompt": prompt,
-        "negative_prompt": "nsfw, nude, naked, suggestive, porn, text, words, letters, logo, watermark, "
-                           "lowres, bad anatomy, bad hands, error, missing fingers, extra digit, fewer digits, "
-                           "cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, "
-                           "username, blurry, human face, portrait, person",
-        "steps": 25,
-        "width": width,
-        "height": height,
-        "cfg_scale": 7.5,
-        "sampler_name": "Euler a",
-        "seed": -1
-    }
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            resp = _requests.post(f"{SD_API_URL}/sdapi/v1/txt2img", json=payload, timeout=180)
-            if resp.status_code == 200:
-                data = resp.json()
-                if "images" in data and len(data["images"]) > 0:
-                    image_data = base64.b64decode(data["images"][0])
-                    save_path = os.path.join(directory, f"gh_sd_{int(time.time())}.jpg")
-                    os.makedirs(directory, exist_ok=True)
-                    with open(save_path, "wb") as f:
-                        f.write(image_data)
-                    logger.info("  GitHub SD 生图成功: {}x{}", width, height)
-                    return save_path
-            else:
-                logger.warning("  GitHub SD 请求失败: status={} (第 {}/{} 次)", resp.status_code, attempt, max_retries)
-        except _requests.exceptions.ConnectionError:
-            logger.warning("  本地 SD 服务未连接，等待重试... (第 {}/{} 次)", attempt, max_retries)
-        except _requests.exceptions.Timeout:
-            logger.warning("  本地 SD 生图超时，等待重试... (第 {}/{} 次)", attempt, max_retries)
-        except Exception as e:
-            logger.warning("  GitHub SD 生图异常: {} (第 {}/{} 次)", e, attempt, max_retries)
-
-        if attempt < max_retries:
-            wait = min(10, 2 ** (attempt - 1))
-            logger.info("  等待 {} 秒后重试...", wait)
-            time.sleep(wait)
-
-    logger.error("  GitHub SD 在 {} 次重试后仍然失败", max_retries)
-    return None
 
 
 # ==========================================
@@ -662,7 +625,7 @@ def download_images(keyword, save_dir="assets", max_num=None):
                 if c:
                     results.append(c)
                     if score.phash:
-                        _downloaded_hashes.add(score.phash)
+                        _register_hash(score.phash)
         if len(results) >= max_num:
             break
 

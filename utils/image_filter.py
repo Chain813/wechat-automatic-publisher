@@ -8,6 +8,7 @@
 import os
 import re
 import json
+import threading
 from dataclasses import dataclass
 from PIL import Image
 import numpy as np
@@ -28,23 +29,27 @@ BODY_WEIGHTS  = (0.20, 0.20, 0.20, 0.15, 0.15, 0.10)
 # ---- 延迟加载 EasyOCR ----
 _READER = None
 _OCR_STATUS = "PENDING"
+_OCR_LOCK = threading.Lock()
 
 
 def get_ocr_reader():
-    """延迟加载 EasyOCR（仅作可选增强）"""
+    """延迟加载 EasyOCR（仅作可选增强，线程安全双重检查锁）"""
     global _READER, _OCR_STATUS
     if _OCR_STATUS == "DISABLED":
         return None
     if _READER is not None:
         return _READER
-    try:
-        import easyocr
-        _READER = easyocr.Reader(['ch_sim', 'en'], gpu=False, verbose=False)
-        _OCR_STATUS = "READY"
-        return _READER
-    except Exception:
-        _OCR_STATUS = "DISABLED"
-        return None
+    with _OCR_LOCK:
+        if _READER is not None:  # 双重检查：获取锁后再次确认
+            return _READER
+        try:
+            import easyocr
+            _READER = easyocr.Reader(['ch_sim', 'en'], gpu=False, verbose=False)
+            _OCR_STATUS = "READY"
+            return _READER
+        except Exception:
+            _OCR_STATUS = "DISABLED"
+            return None
 
 
 # ==========================================
@@ -78,9 +83,10 @@ def ollama_startup():
 
 
 def ollama_shutdown():
-    """项目结束：恢复默认模型"""
-    global _OLLAMA_MODEL
-    _OLLAMA_MODEL = _OLLAMA_DEFAULT_MODEL
+    """项目结束：恢复默认模型并关闭视觉评估"""
+    global _OLLAMA_MODEL, _OLLAMA_STATUS
+    _OLLAMA_MODEL = None
+    _OLLAMA_STATUS = "PENDING"
     logger.info("  Ollama 已恢复默认: {}", _OLLAMA_DEFAULT_MODEL)
 
 

@@ -11,8 +11,21 @@ from config import (
 
 API_SESSION = build_api_session()
 
+
+def _interruptible_sleep(seconds):
+    """可中断的 sleep：每 0.5 秒检查一次 cancel_event"""
+    from core.shared.runtime import cancel_event
+    steps = int(seconds / 0.5)
+    for _ in range(max(steps, 1)):
+        if cancel_event.is_set():
+            return
+        time.sleep(0.5)
+
+
 def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backoff_base=1.0, timeout=None, max_tokens=None):
-    """带指数退避的 API 调用。timeout/max_tokens 可覆盖全局默认值。"""
+    """带指数退避的 API 调用。timeout/max_tokens 可覆盖全局默认值。支持中断。"""
+    from core.shared.runtime import cancel_event, WorkflowCancelled
+
     if max_retries is None:
         max_retries = LLM_MAX_RETRIES
     if timeout is None:
@@ -26,6 +39,10 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
     }
 
     for attempt in range(1, max_retries + 1):
+        # 每次重试前检查中断信号
+        if cancel_event.is_set():
+            raise WorkflowCancelled("AI 调用被用户中断")
+
         try:
             data = {
                 "model": LLM_MODEL,
@@ -47,22 +64,25 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
             return result['choices'][0]['message']['content']
 
         except Exception as e:
+            # WorkflowCancelled 不应被捕获，直接向上抛
+            if isinstance(e, WorkflowCancelled):
+                raise
             if isinstance(e, requests.exceptions.Timeout):
                 logger.warning("AI 调用超时 (第 {}/{} 次)", attempt, max_retries)
                 if attempt < max_retries:
-                    time.sleep(backoff_base * (2 ** (attempt - 1)))
+                    _interruptible_sleep(backoff_base * (2 ** (attempt - 1)))
                 continue
             if isinstance(e, requests.exceptions.HTTPError):
                 status = getattr(e.response, 'status_code', 500)
                 if status == 429:
                     logger.warning("AI 限流 429 (第 {}/{} 次)，退避重试", attempt, max_retries)
                     if attempt < max_retries:
-                        time.sleep(backoff_base * (2 ** attempt))
+                        _interruptible_sleep(backoff_base * (2 ** attempt))
                     continue
                 if status >= 500:
                     logger.error("AI 服务端错误 {} (第 {}/{} 次)", status, attempt, max_retries)
                     if attempt < max_retries:
-                        time.sleep(backoff_base * (2 ** (attempt - 1)))
+                        _interruptible_sleep(backoff_base * (2 ** (attempt - 1)))
                     continue
                 logger.error("AI 客户端错误 {}，不重试: {}", status, e)
                 return ""
@@ -71,7 +91,7 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
                 return ""
             logger.error("AI 调用失败: {} (第 {}/{} 次)", e, attempt, max_retries)
             if attempt < max_retries:
-                time.sleep(backoff_base * (2 ** (attempt - 1)))
+                _interruptible_sleep(backoff_base * (2 ** (attempt - 1)))
 
     return ""
 

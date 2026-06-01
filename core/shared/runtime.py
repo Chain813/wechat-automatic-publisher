@@ -9,8 +9,8 @@ import threading
 
 from loguru import logger
 
-# Global queue to store logs for the Web UI
-log_queue = queue.Queue()
+# Global queue to store logs for the Web UI (bounded to prevent memory leak)
+log_queue = queue.Queue(maxsize=5000)
 
 # ---- 全局控制信号 ----
 cancel_event = threading.Event()

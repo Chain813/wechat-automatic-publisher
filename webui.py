@@ -9,6 +9,7 @@ import sys
 from dotenv import load_dotenv, set_key
 
 app = Flask(__name__)
+_start_lock = threading.Lock()
 
 
 class ProcessState:
@@ -79,12 +80,15 @@ def index():
 
 @app.route('/api/start', methods=['POST'])
 def start_process():
-    if ProcessState.is_running:
-        return jsonify({"status": "error", "message": "Task already running"}), 400
-    data = request.json or {}
-    task_type = data.get("task_type", "hotspots")
-    ProcessState.thread = threading.Thread(target=run_workflow_thread, args=(task_type,), daemon=True)
-    ProcessState.thread.start()
+    with _start_lock:
+        if ProcessState.is_running:
+            return jsonify({"status": "error", "message": "Task already running"}), 400
+        data = request.json or {}
+        task_type = data.get("task_type", "hotspots")
+        if task_type not in ("hotspots", "github"):
+            return jsonify({"status": "error", "message": f"Invalid task_type: {task_type}"}), 400
+        ProcessState.thread = threading.Thread(target=run_workflow_thread, args=(task_type,), daemon=True)
+        ProcessState.thread.start()
     return jsonify({"status": "success", "message": "Workflow started"})
 
 
@@ -161,13 +165,18 @@ def handle_config():
         })
     else:
         data = request.json
+        if not isinstance(data, dict):
+            return jsonify({"status": "error", "message": "Invalid request body"}), 400
         if not os.path.exists(env_file):
             with open(env_file, 'a') as f:
                 pass
         for key in ["WECHAT_APP_ID", "WECHAT_APP_SECRET", "LLM_API_KEY",
                      "QYWECHAT_WEBHOOK", "LLM_MODEL", "GEMINI_API_KEY"]:
-            if key in data and "*" not in data[key]:
-                set_key(env_file, key, data[key])
+            if key in data and "*" not in str(data[key]):
+                value = str(data[key]).strip()
+                if len(value) > 500 or '\n' in value or '\r' in value:
+                    continue  # 防止 .env 注入和异常大值
+                set_key(env_file, key, value)
         load_dotenv(env_file, override=True)
         return jsonify({"status": "success", "message": "Config saved"})
 
@@ -201,4 +210,10 @@ if __name__ == '__main__':
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
     print("Web UI started: http://127.0.0.1:5000")
+    
+    # 延迟 1 秒后自动打开浏览器，确保 Flask 服务已完全启动
+    import webbrowser
+    from threading import Timer
+    Timer(1.0, lambda: webbrowser.open("http://127.0.0.1:5000")).start()
+    
     app.run(host='127.0.0.1', port=5000, debug=False)

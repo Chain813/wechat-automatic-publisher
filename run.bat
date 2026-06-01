@@ -29,7 +29,6 @@ echo [System] Installing requirements...
 python -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 echo [System] Starting Web UI...
-start http://127.0.0.1:5000
 python webui.py
 
 pause

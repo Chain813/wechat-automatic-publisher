@@ -41,6 +41,7 @@ def sync_local_history_with_wechat(publisher):
                 if not isinstance(data, dict): continue
                 results = data.get("results", [])
                 valid_results = []
+                date_changed = False
                 for res in results:
                     topic = res.get("topic")
                     success = res.get("success", False)
@@ -48,11 +49,12 @@ def sync_local_history_with_wechat(publisher):
                         if is_title_active(topic):
                             valid_results.append(res)
                         else:
-                            changed = True
+                            date_changed = True
                             print(f"  🗑️ 云端已删除，本地释放热点: {topic}")
                     else:
                         valid_results.append(res)
-                if changed:
+                if date_changed:
+                    changed = True
                     data["results"] = valid_results
             if changed:
                 with open(hotspots_file, "w", encoding="utf-8") as f:
@@ -71,20 +73,19 @@ def sync_local_history_with_wechat(publisher):
                 history_repos = json.load(f)
             
             valid_records = []
-            changed = False
+            repos_to_remove = set()
             for rec in records:
                 title = rec.get("title", "")
                 repos = rec.get("repos", [])
                 if is_title_active(title):
                     valid_records.append(rec)
                 else:
-                    changed = True
                     print(f"  🗑️ 云端已删除，本地释放开源项目: {repos}")
-                    for r in repos:
-                        if r in history_repos:
-                            history_repos.remove(r)
-                            
+                    repos_to_remove.update(repos)
+
+            changed = bool(repos_to_remove)
             if changed:
+                history_repos = [r for r in history_repos if r not in repos_to_remove]
                 with open(github_records_file, "w", encoding="utf-8") as f:
                     json.dump(valid_records, f, ensure_ascii=False, indent=2)
                 with open(github_history_file, "w", encoding="utf-8") as f:
@@ -94,11 +95,14 @@ def sync_local_history_with_wechat(publisher):
 
 
 def run_main(task_type="hotspots"):
+    from core.hotspots.collector import reset_source_health
+
     _print_banner()
     cleanup_old_assets("assets")
-    ollama_startup()
+    reset_source_health()
 
     try:
+        ollama_startup()
         publisher = WeChatPublisher(WECHAT_APP_ID, WECHAT_APP_SECRET)
         if not publisher.access_token:
             print("❌ 微信发布组件初始化失败，请检查公众号凭证配置。")

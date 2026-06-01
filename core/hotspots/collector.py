@@ -531,9 +531,9 @@ def fetch_rss():
 # ==========================================
 def _ngram_set(text: str, n: int = 2) -> set:
     """生成文本的 n-gram 集合（中文按字，英文按词）"""
-    # 英文单词按词级 n-gram，中文按字级 n-gram
+    # 英文单词按词级 n-gram，中文按字级 n-gram（覆盖 CJK 扩展 A）
     tokens = []
-    for m in re.finditer(r'[a-zA-Z0-9]+|[一-鿿]', text):
+    for m in re.finditer(r'[a-zA-Z0-9]+|[一-鿿㐀-䶿]', text):
         tokens.append(m.group().lower())
     if len(tokens) < n:
         return set(tokens) if tokens else set()
@@ -555,18 +555,26 @@ def deduplicate_topics(topics_list, threshold=0.5):
     """
     跨源语义去重。
     用 2-gram Jaccard 相似度去除不同源的高度相似话题。
+    缓存已接受话题的 n-gram 集合，避免重复计算。
     """
     if not topics_list:
         return []
     unique = []
+    unique_ng = []  # 缓存对应 n-gram 集合
     for item in topics_list:
+        item_ng = _ngram_set(item, 2)
         is_dup = False
-        for existing in unique:
-            if _jaccard_similarity(item, existing) >= threshold:
+        for eng in unique_ng:
+            if not item_ng or not eng:
+                continue
+            inter = len(item_ng & eng)
+            union = len(item_ng | eng)
+            if union > 0 and inter / union >= threshold:
                 is_dup = True
                 break
         if not is_dup:
             unique.append(item)
+            unique_ng.append(item_ng)
     return unique
 
 
