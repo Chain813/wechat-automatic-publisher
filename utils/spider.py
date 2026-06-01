@@ -1,15 +1,12 @@
 """
 Selenium browser bootstrap helpers used by the collector fallback path.
+支持 Chrome 和 Edge 浏览器，自动检测可用的浏览器。
 """
 from __future__ import annotations
 
 import random
 
 from loguru import logger
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 
 USER_AGENTS = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -34,32 +31,80 @@ window.navigator.permissions.query = (parameters) => (
 """
 
 
-def build_stealth_browser(headless: bool = False):
-    """Create a minimally fingerprinted Chrome instance for fallback scraping."""
-    logger.info("初始化 Selenium 隐身浏览器...")
+def _try_chrome(headless: bool):
+    """尝试启动 Chrome"""
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
+    from webdriver_manager.chrome import ChromeDriverManager
 
-    chrome_options = Options()
-    chrome_options.add_argument(f"user-agent={random.choice(USER_AGENTS)}")
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_argument("--disable-infobars")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--lang=zh-CN")
-    chrome_options.add_argument("--window-size=1440,960")
-    chrome_options.page_load_strategy = 'eager'
+    options = Options()
+    options.add_argument(f"user-agent={random.choice(USER_AGENTS)}")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--disable-infobars")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--lang=zh-CN")
+    options.add_argument("--window-size=1440,960")
+    options.page_load_strategy = 'eager'
     if headless:
-        chrome_options.add_argument("--headless=new")
-
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option("useAutomationExtension", False)
+        options.add_argument("--headless=new")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
 
     service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-    driver.execute_cdp_cmd(
-        "Page.addScriptToEvaluateOnNewDocument",
-        {"source": STEALTH_SCRIPT},
-    )
+    driver = webdriver.Chrome(service=service, options=options)
     return driver
+
+
+def _try_edge(headless: bool):
+    """尝试启动 Edge"""
+    from selenium import webdriver
+    from selenium.webdriver.edge.options import Options
+    from selenium.webdriver.edge.service import Service
+    from webdriver_manager.microsoft import EdgeChromiumDriverManager
+
+    options = Options()
+    options.add_argument(f"user-agent={random.choice(USER_AGENTS)}")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--disable-infobars")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--lang=zh-CN")
+    options.add_argument("--window-size=1440,960")
+    options.page_load_strategy = 'eager'
+    if headless:
+        options.add_argument("--headless=new")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
+
+    service = Service(EdgeChromiumDriverManager().install())
+    driver = webdriver.Edge(service=service, options=options)
+    return driver
+
+
+def build_stealth_browser(headless: bool = False):
+    """
+    创建隐身浏览器实例，自动检测可用浏览器（Chrome → Edge）。
+    """
+    logger.info("初始化 Selenium 隐身浏览器...")
+
+    # 按优先级尝试：Chrome → Edge
+    for name, factory in [("Chrome", _try_chrome), ("Edge", _try_edge)]:
+        try:
+            driver = factory(headless)
+            driver.execute_cdp_cmd(
+                "Page.addScriptToEvaluateOnNewDocument",
+                {"source": STEALTH_SCRIPT},
+            )
+            logger.info("  使用 {} 浏览器", name)
+            return driver
+        except Exception as e:
+            logger.debug("  {} 不可用: {}", name, e)
+
+    raise RuntimeError(
+        "未找到可用的浏览器。请安装 Chrome 或 Edge 浏览器。"
+    )
 
 
 __all__ = ["build_stealth_browser"]
