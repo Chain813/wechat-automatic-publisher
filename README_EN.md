@@ -21,6 +21,8 @@ Fully automated WeChat public account content production and publishing system. 
 - [Image Selection Strategy](#image-selection-strategy)
 - [Core Configuration](#core-configuration)
 - [Glossary](GLOSSARY_EN.md)
+- [Development Workflow](DEVELOPMENT.md)
+- [Claude Code Guide](CLAUDE.md)
 - [Requirements](#requirements)
 - [License](#license)
 - [Disclaimer](#disclaimer)
@@ -254,6 +256,15 @@ Adjustable in `config.py` or `.env`:
 Detailed explanations of technical terms, tool names, and concepts used in this project: **[GLOSSARY_EN.md](GLOSSARY_EN.md)**
 
 Covers: Technical Terms | Image Terms | GitHub Terms | WeChat Terms
+
+---
+
+## Development Docs
+
+| Document | Description |
+|----------|-------------|
+| **[DEVELOPMENT.md](DEVELOPMENT.md)** | Development workflow: environment setup, coding standards, testing, release process, debugging tips, troubleshooting |
+| **[CLAUDE.md](CLAUDE.md)** | Claude Code project guide: architecture overview, core modules, coding conventions, common development tasks |
 
 ---
 
