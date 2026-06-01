@@ -38,33 +38,40 @@ def _publish_draft_github(publisher, title, html_content, thumb_id, digest_text)
 
 def _download_and_upload_url(url, publisher, prefix="remote"):
     """下载远程图片到临时文件并上传到微信，返回 URL 或 None"""
-    import requests as _req
     from utils.http_client import build_api_session
     tmp_path = None
     try:
         session = build_api_session()
         res = session.get(url, timeout=15)
-        if res.status_code == 200 and len(res.content) > 5000:
-            ext = ".jpg"
-            if ".png" in url.lower(): ext = ".png"
-            elif ".gif" in url.lower(): ext = ".gif"
-            elif ".webp" in url.lower(): ext = ".webp"
-            tmp_path = os.path.join("assets", f"{prefix}_{int(time.time()*1000)}{ext}")
-            os.makedirs("assets", exist_ok=True)
-            with open(tmp_path, 'wb') as f:
-                f.write(res.content)
-            img_url = publisher.upload_news_image(tmp_path)
-            if img_url:
-                return img_url
+        if res.status_code != 200:
+            logger.warning("  下载失败 status={}: {}", res.status_code, url[:80])
+            return None
+        if len(res.content) <= 5000:
+            logger.warning("  图片太小 ({} bytes): {}", len(res.content), url[:80])
+            return None
+
+        ext = ".jpg"
+        if ".png" in url.lower(): ext = ".png"
+        elif ".gif" in url.lower(): ext = ".gif"
+        elif ".webp" in url.lower(): ext = ".webp"
+        tmp_path = os.path.join("assets", f"{prefix}_{int(time.time()*1000)}{ext}")
+        os.makedirs("assets", exist_ok=True)
+        with open(tmp_path, 'wb') as f:
+            f.write(res.content)
+
+        img_url = publisher.upload_news_image(tmp_path)
+        if not img_url:
+            logger.warning("  微信上传失败: {}", tmp_path)
+        return img_url
     except Exception as e:
-        logger.debug("  下载远程图片失败: {}", e)
+        logger.warning("  下载/上传异常: {} — {}", str(e)[:80], url[:80])
+        return None
     finally:
         if tmp_path and os.path.exists(tmp_path):
             try:
                 os.remove(tmp_path)
             except OSError:
                 pass
-    return None
 
 
 def _ensure_deep_images(projects, publisher):
@@ -90,7 +97,7 @@ def _ensure_deep_images(projects, publisher):
             try:
                 img_url = make_fn()
             except Exception as e:
-                logger.debug("  {} 失败: {}", label, e)
+                logger.warning("  ❌ {} 异常: {}", label, e)
                 return None
             if img_url:
                 with urls_lock:
@@ -99,6 +106,8 @@ def _ensure_deep_images(projects, publisher):
                         print(f"  ✅ {label} 已上传")
                         if len(urls) >= 3:
                             enough.set()
+            else:
+                print(f"  ⚠️ {label} 未返回有效图片")
             return img_url
 
         # ---- 构建所有图片来源任务 ----
@@ -147,18 +156,21 @@ def _ensure_deep_images(projects, publisher):
 
         # ---- 并行执行所有任务，集满即止 ----
         print(f"  🚀 并行启动 {len(tasks)} 个配图任务...")
-        with ThreadPoolExecutor(max_workers=min(4, len(tasks))) as pool:
-            futures = {pool.submit(_try_add, fn, name): name for name, fn in tasks}
-            for future in as_completed(futures):
-                try:
-                    future.result()
-                except Exception as e:
-                    logger.debug("  配图任务异常: {}", e)
-                if enough.is_set():
-                    # 集满了，取消还在排队的任务
-                    for f in futures:
-                        f.cancel()
-                    break
+        if not tasks:
+            print("  ⚠️ 无可用配图任务（social_url/gif/homepage/SD 均为空）")
+        else:
+            with ThreadPoolExecutor(max_workers=min(4, len(tasks))) as pool:
+                futures = {pool.submit(_try_add, fn, name): name for name, fn in tasks}
+                for future in as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        logger.warning("  配图任务异常: {}", e)
+                    if enough.is_set():
+                        for f in futures:
+                            f.cancel()
+                        break
+            print(f"  📊 并行配图完成: 成功 {len(urls)}/3 张")
 
         # 6. 兜底：README 中的静态图（不需要下载/上传，直接用远程 URL）
         if len(urls) < 3 and p.get('image_url') and p.get('image_url') not in urls:
