@@ -216,7 +216,7 @@ def _is_article_truncated(article):
     if not any(stripped.endswith(end) for end in valid_endings):
         # 检查是否以品牌关注语结尾
         if BRAND_NAME not in stripped[-50:]:
-            return False
+            return True
     return False
 
 

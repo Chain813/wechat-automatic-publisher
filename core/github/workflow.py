@@ -8,14 +8,14 @@ from core.github.collector import fetch_one_worthy_project, generate_code_screen
 from core.github.processor import generate_github_article, generate_github_digest
 from core.shared.article_utils import process_article_content, _print_review_report
 from core.shared.llm import validate_title
-from utils.image_handler import download_cover_image, download_project_image_for_github, reset_image_cache
+from utils.image_handler import download_project_image_for_github, reset_image_cache
 from core.shared.runtime import check_cancelled
 
 
 def _publish_draft_github(publisher, title, html_content, thumb_id, digest_text):
     print("\n🚀 正在同步至微信公众号云端草稿箱...")
-    result = publisher.add_draft(title, html_content, thumb_id, digest_text)
-    if "media_id" not in result:
+    success, result = publisher.publish_and_notify(title, html_content, thumb_id, digest_text)
+    if not success:
         print(f"❌ 同步草稿箱失败：{result}")
         return False
 
@@ -25,14 +25,6 @@ def _publish_draft_github(publisher, title, html_content, thumb_id, digest_text)
     print(f"  📄 标题：{title}")
     print(f"  🆔 草稿：{draft_id}")
     print(f"{'⭐' * 30}")
-
-    try:
-        from config import QYWECHAT_WEBHOOK
-        from core.shared.publisher import send_to_qywechat
-        send_to_qywechat(QYWECHAT_WEBHOOK, f"【{BRAND_NAME}】《{title}》已就绪，请审核发布。")
-    except Exception as e:
-        logger.debug("  企微通知发送失败（非关键）: {}", e)
-
     return True
 
 

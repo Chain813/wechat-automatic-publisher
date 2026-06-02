@@ -93,20 +93,38 @@ FILTER_CATEGORIES = [
     "硅谷", "创投", "独角兽",
 ]
 
-# 11. 图片采集参数
-IMAGE_DEFAULT_CANDIDATES = 5  # 每次搜索下载候选图数量
-IMAGE_RETRY_MAX = 3           # 单张下载最大重试次数
+# 11. 微信图片规格
+WECHAT_COVER_WIDTH = 900
+WECHAT_COVER_HEIGHT = 383
+WECHAT_BODY_WIDTH = 900
+WECHAT_BODY_HEIGHT = 500
+WECHAT_BODY_MAX_MB = 2
 
 # 12. 本地 Stable Diffusion 配置
 SD_ENABLED = os.getenv("SD_ENABLED", "True").lower() == "true"
 SD_API_URL = os.getenv("SD_API_URL", "http://127.0.0.1:7860")
+SD_TIMEOUT = int(os.getenv("SD_TIMEOUT", "120"))        # 单次生图超时秒数
+SD_STEPS = int(os.getenv("SD_STEPS", "15"))              # 采样步数（15 兼顾速度与质量）
+SD_MAX_RETRIES = int(os.getenv("SD_MAX_RETRIES", "2"))   # 最大重试次数（不含首次）
 
 # 13. Ollama 本地视觉模型配置
 OLLAMA_DEFAULT_MODEL = os.getenv("OLLAMA_DEFAULT_MODEL", "gemma4:e2b-it-q4_K_M")
 OLLAMA_VISION_MODEL = os.getenv("OLLAMA_VISION_MODEL", "gemma3:4b")
 
-# 13. 微信敏感词列表 (部分示例，根据实际情况补充)
+# 14. 微信敏感词列表 (部分示例，根据实际情况补充)
 SENSITIVE_WORDS = []  # 留空则跳过敏感词过滤
 
-# 14. 专题固定封面
+# 15. 工作流参数
+MAX_TOPICS_PER_RUN = int(os.getenv("MAX_TOPICS_PER_RUN", "3"))      # 每次运行最多发布文章数
+MAX_TOPIC_CANDIDATES = int(os.getenv("MAX_TOPIC_CANDIDATES", "5"))  # 候选话题上限
+HOTSPOTS_HISTORY_FILE = os.getenv("HOTSPOTS_HISTORY_FILE", "hotspots_history.json")
+GITHUB_HISTORY_FILE = os.getenv("GITHUB_HISTORY_FILE", "github_history.json")
+ASSET_RETENTION_DAYS = int(os.getenv("ASSET_RETENTION_DAYS", "5"))  # 素材保留天数
+HISTORY_MAX_ENTRIES = int(os.getenv("HISTORY_MAX_ENTRIES", "2000")) # 历史记录最大条数
+
+# 16. GitHub 搜索配置
+GITHUB_SEARCH_STARS_THRESHOLDS = [200, 500, 1000, 5000, 10000]  # 星数阈值梯度
+GITHUB_SEARCH_LANGUAGES = ["Python", "JavaScript", "TypeScript", "Go", "Rust", "Java", "C++"]
+
+# 17. 专题固定封面
 GITHUB_FIXED_COVER = os.path.join("static", "images", "github_fixed_cover.png")

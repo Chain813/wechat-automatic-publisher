@@ -6,11 +6,10 @@ import markdown
 import requests
 from loguru import logger
 
-from config import BRAND_NAME, WECHAT_TITLE_MAX_LEN
+from config import BRAND_NAME, WECHAT_TITLE_MAX_LEN, ASSET_RETENTION_DAYS
 from core.shared.llm import filter_sensitive, simplify_keyword, call_deepseek_with_retry
 from utils.image_handler import download_image
 
-ASSET_RETENTION_DAYS = 5
 PLACEHOLDER_PATTERN = re.compile(r"【\s*此处插入配图\s*[：:]\s*(.*?)\s*】")
 GITHUB_IMAGE_PATTERN = re.compile(r"【\s*GITHUB配图\s*[：:]\s*(https?://.*?)\s*】")
 
@@ -67,11 +66,7 @@ def _download_and_upload(keyword, publisher, use_ai_first=False):
     if not keyword:
         return keyword, None
 
-    # 根据场景选择下载函数（仅解析一次）
-    if use_ai_first:
-        from utils.image_handler import download_image_for_hotspot as _dl
-    else:
-        from utils.image_handler import download_image as _dl
+    from utils.image_handler import download_image as _dl
 
     logger.info("正在为段落关键词 '{}' 搜寻最佳配图...", keyword)
     image_path = _dl(keyword)

@@ -123,11 +123,10 @@ def run_main(task_type="hotspots"):
         print(f"❌ 未知的任务类型: {task_type}")
 
     except WorkflowCancelled:
-        print("\n⛔ 任务已被用户中断。")
+        logger.warning("任务已被用户中断")
         raise
     except Exception as exc:
-        print(f"\n💥 系统核心崩溃：{exc}")
-        traceback.print_exc()
+        logger.exception("系统核心崩溃: {}", exc)
     finally:
         ollama_shutdown()
 

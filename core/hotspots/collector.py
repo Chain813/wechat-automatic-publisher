@@ -9,6 +9,7 @@ import re
 import json
 import time
 import random
+import threading
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -34,11 +35,12 @@ USER_AGENTS = [
 
 # ---- 源健康状态 ----
 _source_health = {}
+_source_health_lock = threading.Lock()
 HTTP_SESSION = build_cached_session("hotspot_cache", HOTSPOT_CACHE_TTL_SECONDS)
 
 
 def _get_source_health(name):
-    """获取或初始化源健康状态"""
+    """获取或初始化源健康状态（调用方需持有 _source_health_lock）"""
     if name not in _source_health:
         _source_health[name] = {"failures": 0, "disabled": False}
     return _source_health[name]
@@ -46,23 +48,26 @@ def _get_source_health(name):
 
 def _mark_source_failure(name):
     """标记源失败，连续 3 次后禁用"""
-    h = _get_source_health(name)
-    h["failures"] += 1
-    if h["failures"] >= 3:
-        h["disabled"] = True
-        logger.warning("  {} 连续失败 3 次，已自动降级跳过", name)
+    with _source_health_lock:
+        h = _get_source_health(name)
+        h["failures"] += 1
+        if h["failures"] >= 3:
+            h["disabled"] = True
+            logger.warning("  {} 连续失败 3 次，已自动降级跳过", name)
 
 
 def _mark_source_success(name):
     """标记源成功，重置失败计数"""
-    h = _get_source_health(name)
-    h["failures"] = 0
-    h["disabled"] = False
+    with _source_health_lock:
+        h = _get_source_health(name)
+        h["failures"] = 0
+        h["disabled"] = False
 
 
 def _is_source_disabled(name):
     """检查源是否被禁用"""
-    return _get_source_health(name)["disabled"]
+    with _source_health_lock:
+        return _get_source_health(name)["disabled"]
 
 
 def get_headers(referer=None):

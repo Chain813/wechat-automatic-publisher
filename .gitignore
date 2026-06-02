@@ -28,3 +28,4 @@ assets/
 
 # Dev artifacts
 scratch/
+.codegraph/

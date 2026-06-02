@@ -8,6 +8,7 @@ import os
 import json
 import re
 import time
+import threading
 from difflib import SequenceMatcher
 
 from loguru import logger
@@ -355,16 +356,35 @@ class WeChatPublisher:
                 if attempt < max_retries:
                     time.sleep(1.5 * (2 ** (attempt - 1)))
 
-        return {"errcode": -1, "errmsg": "重试耗尽"}
+        return {"errcode": 99999, "errmsg": "重试耗尽"}
+
+    def publish_and_notify(self, title, html_content, thumb_media_id, digest=""):
+        """发布草稿并发送企业微信通知，返回 (success, result)"""
+        result = self.add_draft(title, html_content, thumb_media_id, digest)
+        if "media_id" in result:
+            draft_id = result["media_id"]
+            logger.info("发布成功: {} → {}", title, draft_id)
+            try:
+                from config import QYWECHAT_WEBHOOK, BRAND_NAME
+                send_to_qywechat(QYWECHAT_WEBHOOK, f"【{BRAND_NAME}】《{title}》已就绪，请审核发布。")
+            except Exception as e:
+                logger.debug("  企微通知发送失败（非关键）: {}", e)
+            return True, result
+        else:
+            logger.warning("发布失败: {} → {}", title, result.get("errmsg", "未知错误"))
+            return False, result
 
 _qywechat_session = None
+_qywechat_session_lock = threading.Lock()
 
 def send_to_qywechat(webhook_url, text):
     global _qywechat_session
     if not webhook_url:
         return
     if _qywechat_session is None:
-        _qywechat_session = build_api_session()
+        with _qywechat_session_lock:
+            if _qywechat_session is None:
+                _qywechat_session = build_api_session()
     try:
         _qywechat_session.post(webhook_url, json={"msgtype": "text", "text": {"content": text}}, timeout=5)
     except Exception as exc:

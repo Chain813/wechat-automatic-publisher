@@ -1,17 +1,18 @@
 import json
 import os
+import threading
 from datetime import datetime, timedelta
 from loguru import logger
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from config import BRAND_NAME, QYWECHAT_WEBHOOK, WECHAT_APP_ID, WECHAT_APP_SECRET
+from config import BRAND_NAME, WECHAT_APP_ID, WECHAT_APP_SECRET, MAX_TOPICS_PER_RUN, MAX_TOPIC_CANDIDATES, HOTSPOTS_HISTORY_FILE, HISTORY_MAX_ENTRIES
 from core.shared.publisher import _normalize_title
 from core.hotspots.collector import fetch_all_hotspots, get_source_health_report
 from core.hotspots.processor import filter_tech_hotspots, generate_article, generate_digest
 from core.shared.article_utils import process_article_content, _print_review_report
 from core.shared.llm import validate_title
-from core.shared.publisher import WeChatPublisher, send_to_qywechat
-from utils.image_handler import download_cover_image_for_hotspot, reset_image_cache
+from core.shared.publisher import WeChatPublisher
+from utils.image_handler import download_cover_image, reset_image_cache
 from core.shared.runtime import check_cancelled
 
 try:
@@ -20,10 +21,8 @@ except ImportError:
     _fuzz = None
 from difflib import SequenceMatcher
 
-MAX_TOPICS_PER_RUN = 3
-MAX_TOPIC_CANDIDATES = 5
-HISTORY_FILE = "hotspots_history.json"
 _history_cache = None
+_history_cache_lock = threading.Lock()
 
 
 def _dedup_topics_against_each_other(topics, threshold=70):
@@ -67,25 +66,28 @@ def _load_history():
     global _history_cache
     if _history_cache is not None:
         return _history_cache
-    _history_cache = {}
-    if os.path.exists(HISTORY_FILE):
-        try:
-            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                _history_cache = json.load(f)
-        except Exception as e:
-            logger.warning("  历史记录加载失败，将使用空记录: {}", e)
-    return _history_cache
+    with _history_cache_lock:
+        if _history_cache is not None:
+            return _history_cache
+        _history_cache = {}
+        if os.path.exists(HOTSPOTS_HISTORY_FILE):
+            try:
+                with open(HOTSPOTS_HISTORY_FILE, "r", encoding="utf-8") as f:
+                    _history_cache = json.load(f)
+            except Exception as e:
+                logger.warning("  历史记录加载失败，将使用空记录: {}", e)
+        return _history_cache
 
 def _flush_history():
     global _history_cache
     if _history_cache is None:
         return
     try:
-        tmp = HISTORY_FILE + ".tmp"
+        tmp = HOTSPOTS_HISTORY_FILE + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(_history_cache, f, ensure_ascii=False, indent=2)
         import shutil
-        shutil.move(tmp, HISTORY_FILE)
+        shutil.move(tmp, HOTSPOTS_HISTORY_FILE)
     except Exception as e:
         logger.warning("  历史记录持久化失败: {}", e)
 
@@ -169,7 +171,7 @@ def _generate_article_assets(topic, publisher):
 
     # 封面生成与文章创作并行（封面不依赖文章内容）
     with ThreadPoolExecutor(max_workers=1) as cover_pool:
-        cover_future = cover_pool.submit(download_cover_image_for_hotspot, topic)
+        cover_future = cover_pool.submit(download_cover_image, topic)
 
         article_text = generate_article(topic)
         if not article_text:
@@ -244,12 +246,11 @@ def _publish_single_topic(topic, pub):
             digest=digest,
         )
 
-        result = pub.add_draft(clean_title, final_html, thumb_id, digest_text)
-        if "media_id" in result:
+        success, result = pub.publish_and_notify(clean_title, final_html, thumb_id, digest_text)
+        if success:
             draft_id = result["media_id"]
             print(f"\n✅ 「{clean_title}」发布成功 → {draft_id}")
             _save_publish_result(clean_title, success=True, draft_id=draft_id)
-            send_to_qywechat(QYWECHAT_WEBHOOK, f"【{BRAND_NAME}】《{clean_title}》已就绪，请审核发布。")
             return topic, True, None
         else:
             err = result.get("errmsg", "未知错误")
@@ -263,7 +264,8 @@ def _publish_single_topic(topic, pub):
 
 def run_hotspots_workflow(publisher):
     global _history_cache
-    _history_cache = None  # 强制从磁盘重新加载，避免跨任务缓存污染
+    with _history_cache_lock:
+        _history_cache = None  # 强制从磁盘重新加载，避免跨任务缓存污染
     _load_history()
     try:
         check_cancelled()

@@ -16,6 +16,22 @@ class ProcessState:
     is_running = False
     is_paused = False
     thread = None
+    _lock = threading.Lock()
+
+    @classmethod
+    def set_running(cls, value):
+        with cls._lock:
+            cls.is_running = value
+
+    @classmethod
+    def set_paused(cls, value):
+        with cls._lock:
+            cls.is_paused = value
+
+    @classmethod
+    def get_state(cls):
+        with cls._lock:
+            return cls.is_running, cls.is_paused
 
 
 class PrintRedirector:
@@ -28,7 +44,7 @@ class PrintRedirector:
             try:
                 log_queue.put_nowait(f"PRINT | {message.strip()}\n")
             except queue.Full:
-                pass
+                logger.warning("日志队列已满，丢弃消息")
 
     def flush(self):
         self.terminal.flush()
@@ -36,8 +52,8 @@ class PrintRedirector:
 
 def run_workflow_thread(task_type="hotspots"):
     from core.shared.runtime import cancel_event, pause_event, WorkflowCancelled
-    ProcessState.is_running = True
-    ProcessState.is_paused = False
+    ProcessState.set_running(True)
+    ProcessState.set_paused(False)
     cancel_event.clear()
     pause_event.set()  # 确保开始时是运行状态
     old_stdout = sys.stdout
@@ -48,22 +64,22 @@ def run_workflow_thread(task_type="hotspots"):
         try:
             log_queue.put_nowait("SYSTEM | ⛔ 任务已被用户中断。\n")
         except queue.Full:
-            pass
+            logger.warning("日志队列已满，丢弃消息")
     except Exception as e:
         from loguru import logger
         logger.error(f"Workflow failed: {e}")
         try:
             log_queue.put_nowait(f"SYSTEM | Workflow crashed: {e}\n")
         except queue.Full:
-            pass
+            logger.warning("日志队列已满，丢弃消息")
     finally:
         sys.stdout = old_stdout
-        ProcessState.is_running = False
+        ProcessState.set_running(False)
         cancel_event.clear()
         try:
             log_queue.put_nowait("SYSTEM | Workflow finished.\n")
         except queue.Full:
-            pass
+            logger.warning("日志队列已满，丢弃消息")
 
 
 def _mask_secret(value):
@@ -102,7 +118,7 @@ def stop_process():
     try:
         log_queue.put_nowait("SYSTEM | User requested stop...\n")
     except queue.Full:
-        pass
+        logger.warning("日志队列已满，丢弃消息")
     return jsonify({"status": "success", "message": "Stop signal sent"})
 
 
@@ -112,11 +128,11 @@ def pause_process():
         return jsonify({"status": "error", "message": "No task running"}), 400
     from core.shared.runtime import pause_event
     pause_event.clear()  # 设为暂停状态
-    ProcessState.is_paused = True
+    ProcessState.set_paused(True)
     try:
         log_queue.put_nowait("SYSTEM | ⏸️ User requested pause...\n")
     except queue.Full:
-        pass
+        logger.warning("日志队列已满，丢弃消息")
     return jsonify({"status": "success", "message": "Paused"})
 
 
@@ -126,11 +142,11 @@ def resume_process():
         return jsonify({"status": "error", "message": "No task running"}), 400
     from core.shared.runtime import pause_event
     pause_event.set()  # 恢复运行
-    ProcessState.is_paused = False
+    ProcessState.set_paused(False)
     try:
         log_queue.put_nowait("SYSTEM | ▶️ User requested resume...\n")
     except queue.Full:
-        pass
+        logger.warning("日志队列已满，丢弃消息")
     return jsonify({"status": "success", "message": "Resumed"})
 
 

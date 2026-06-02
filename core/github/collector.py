@@ -16,8 +16,9 @@ from github import Github
 from bs4 import BeautifulSoup
 from utils.http_client import build_api_session
 
+from config import GITHUB_HISTORY_FILE, HISTORY_MAX_ENTRIES, GITHUB_SEARCH_STARS_THRESHOLDS, GITHUB_SEARCH_LANGUAGES
+
 HTTP_SESSION = build_api_session()
-GITHUB_HISTORY_FILE = "github_history.json"
 
 def _load_github_history():
     if os.path.exists(GITHUB_HISTORY_FILE):
@@ -31,8 +32,8 @@ def _load_github_history():
 def save_github_history(new_repos):
     history = _load_github_history()
     history.update(new_repos)
-    # 限制历史记录数量，防止文件过大（保留最新2000条）
-    history_list = list(history)[-2000:]
+    # 限制历史记录数量，防止文件过大
+    history_list = list(history)[-HISTORY_MAX_ENTRIES:]
     try:
         with open(GITHUB_HISTORY_FILE, "w", encoding="utf-8") as f:
             json.dump(history_list, f, ensure_ascii=False, indent=2)
@@ -219,17 +220,17 @@ def fetch_one_worthy_project():
         date_180d = (datetime.now() - timedelta(days=180)).strftime("%Y-%m-%d")
 
         # 随机选择语言过滤（50% 概率加语言约束）
-        lang_pool = ["Python", "JavaScript", "TypeScript", "Go", "Rust", "Java", "C++", None]
+        lang_pool = GITHUB_SEARCH_LANGUAGES + [None]
         rand_lang = _random.choice(lang_pool)
         lang_filter = f" language:{rand_lang}" if rand_lang else ""
 
         # 随机选择时间范围和星数门槛
         query_variants = [
-            f"created:>{date_30d} stars:>200{lang_filter}",       # 近 1 月新兴
-            f"created:>{date_90d} stars:>500{lang_filter}",       # 近 3 月热门
-            f"created:>{date_180d} stars:>1000{lang_filter}",     # 近半年高星
-            f"pushed:>{date_30d} stars:>5000{lang_filter}",       # 经典活跃
-            f"pushed:>{date_30d} stars:>10000",                    # 顶级项目（不加语言限制）
+            f"created:>{date_30d} stars:>{GITHUB_SEARCH_STARS_THRESHOLDS[0]}{lang_filter}",       # 近 1 月新兴
+            f"created:>{date_90d} stars:>{GITHUB_SEARCH_STARS_THRESHOLDS[1]}{lang_filter}",       # 近 3 月热门
+            f"created:>{date_180d} stars:>{GITHUB_SEARCH_STARS_THRESHOLDS[2]}{lang_filter}",     # 近半年高星
+            f"pushed:>{date_30d} stars:>{GITHUB_SEARCH_STARS_THRESHOLDS[3]}{lang_filter}",       # 经典活跃
+            f"pushed:>{date_30d} stars:>{GITHUB_SEARCH_STARS_THRESHOLDS[4]}",                    # 顶级项目（不加语言限制）
             f"created:>{date_90d} stars:>100 topic:ai",            # AI 专题
             f"created:>{date_90d} stars:>100 topic:cli",           # CLI 工具
             f"created:>{date_90d} stars:>100 topic:web",           # Web 项目

@@ -93,6 +93,7 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
             if attempt < max_retries:
                 _interruptible_sleep(backoff_base * (2 ** (attempt - 1)))
 
+    logger.error("AI 调用在 {} 次重试后全部失败，返回空响应", max_retries)
     return ""
 
 
