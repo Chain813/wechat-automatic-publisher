@@ -7,7 +7,7 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from loguru import logger
 
-from config import BRAND_NAME, MAX_AIKEPU_PER_RUN
+from config import MAX_AIKEPU_PER_RUN
 from core.aikepu.skill_tree import (
     select_next_topic, mark_published, get_skill_tree_stats,
     reset_tree_cache, release_reserved
@@ -28,7 +28,6 @@ def _generate_article_assets(topic_info, publisher):
     reset_image_cache()
 
     topic_title = topic_info["title"]
-    node_id = topic_info["node_id"]
 
     # 封面生成与文章创作并行
     with ThreadPoolExecutor(max_workers=1) as cover_pool:
@@ -194,7 +193,7 @@ def run_aikepu_workflow(publisher):
             if success:
                 published_count += 1
             elif error:
-                logger.warning("  「{}」发布失败: {}", title)
+                logger.warning("  「{}」发布失败: {}", title, error)
 
     # 最终统计
     final_stats = get_skill_tree_stats()

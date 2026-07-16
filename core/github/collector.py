@@ -4,41 +4,34 @@ GitHub Trending 采集引擎 v2.0
 """
 import os
 import re
-import io
 import time
 import requests
 from datetime import datetime, timedelta
-import json
 from loguru import logger
-import subprocess
-import shutil
 from github import Github
-from bs4 import BeautifulSoup
 from utils.http_client import build_api_session
 
-from config import GITHUB_HISTORY_FILE, HISTORY_MAX_ENTRIES, GITHUB_SEARCH_STARS_THRESHOLDS, GITHUB_SEARCH_LANGUAGES
+from config import GITHUB_SEARCH_STARS_THRESHOLDS, GITHUB_SEARCH_LANGUAGES
 
 HTTP_SESSION = build_api_session()
 
+from core.db.manager import db_manager
+from core.db.models import ArticleHistory
+
 def _load_github_history():
-    if os.path.exists(GITHUB_HISTORY_FILE):
-        try:
-            with open(GITHUB_HISTORY_FILE, "r", encoding="utf-8") as f:
-                return set(json.load(f))
-        except Exception as e:
-            logger.warning("  历史记录加载失败: {}", e)
-    return set()
+    session = db_manager.get_session()
+    records = session.query(ArticleHistory.title).filter_by(source_type="github_repo").all()
+    return set(r.title for r in records)
 
 def save_github_history(new_repos):
-    history = _load_github_history()
-    history.update(new_repos)
-    # 限制历史记录数量，防止文件过大
-    history_list = list(history)[-HISTORY_MAX_ENTRIES:]
-    try:
-        with open(GITHUB_HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(history_list, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.warning("  历史记录保存失败: {}", e)
+    session = db_manager.get_session()
+    today = datetime.now().strftime("%Y-%m-%d")
+    for repo in new_repos:
+        existing = session.query(ArticleHistory).filter_by(title=repo, source_type="github_repo").first()
+        if not existing:
+            ah = ArticleHistory(title=repo, source_type="github_repo", publish_date=today, success_status=True)
+            session.add(ah)
+    session.commit()
 
 # ---- 优先匹配：架构图、流程图、演示截图等 ----
 ARCHITECTURE_KEYWORDS = [
@@ -545,7 +538,6 @@ def _render_tree_with_rich(repo_name, repo=None):
     try:
         from rich.tree import Tree
         from rich.console import Console
-        from PIL import Image
 
         save_dir = "assets"
         os.makedirs(save_dir, exist_ok=True)
@@ -916,7 +908,6 @@ def take_live_ui_screenshot(repo_name, homepage_url, save_dir="assets"):
     放弃本地 Clone/部署策略，规避安全风险与依赖构建失败问题。
     """
     import os
-    import time
     from PIL import Image
     from utils.spider import build_stealth_browser
 

@@ -1,13 +1,15 @@
 """
 ============================================================
-  AI 科普文章生成器 v1.0
+  AI 科普文章生成器 v2.0 (Map-Reduce 架构)
   教育风格：生动图解 + 循序渐进 + 零基础友好
 ============================================================
 """
+import json
+import re
 from loguru import logger
 
-from config import BRAND_NAME, WECHAT_TITLE_MAX_LEN
-from core.shared.llm import call_deepseek_with_retry, validate_article_length
+from config import BRAND_NAME
+from core.shared.llm import call_deepseek_with_retry
 
 SYSTEM_PROMPT = f"""
 # 你是谁
@@ -32,7 +34,6 @@ SYSTEM_PROMPT = f"""
 **你的表达原则**：
 - **先给直觉，再给定义**：开头一定是一个能让读者「秒懂」的类比或场景，然后才引入正式概念
 - **图解思维**：你会用文字引导读者在脑中形成画面——「想象你面前有一排开关…」
-- **从上往下讲**：先讲这个东西解决了什么问题（WHY），再讲怎么解决（HOW），最后才是内部细节（WHAT）
 - **难度标识**：在关键难点处主动提示读者「这里稍微有点绕，我们慢一点」
 
 **绝对禁止**：
@@ -58,162 +59,156 @@ SYSTEM_PROMPT = f"""
 每段至少 1-2 处。让扫读的读者快速定位关键信息。
 - 这个过程叫做 **反向传播**，它本质上就是「猜错了就倒退检查」
 - **Transformer 架构** 彻底改变了 NLP 领域，它只做了一件事
-
-# 文章结构
-
-## 1. 开篇钩子（200-300 字）
-从一个读者能感知到的场景或问题切入。抛出一个让人好奇的悬念。比如：「你问 ChatGPT 一个问题，它几乎立刻就能回答。但在那零点几秒里，发生了一件极其精妙的事——」
-
-## 2. 直觉先行（400-600 字）
-用 2-3 个生活化类比，帮读者建立直觉。这是你文章最重要的段落。
-好的类比不止一个——用多个角度反复诠释同一概念，直到读者彻底「秒懂」。
-
-## 3. 逐步深入（14000-17000 字）
-用至少 8 个 ## 小节，从浅到深，每个小节 1500-2500 字。
-- 每个小节就是一个独立的小教程：概念 → 历史 → 数学 → 代码 → 应用
-- 每个概念至少用 3-4 个具体例子从不同场景演示
-- 必须讲清楚：为什么需要、之前怎么做、核心突破是什么、现在怎么做、什么场景不适用
-- 每个小节至少插入 1 个图表占位符【此处绘制图表：描述】
-
-## 4. 代码实战（1000-2000 字）
-给出 4-6 段完整可运行的 Python 代码（使用 PyTorch/NumPy 等），逐行注释。
-让读者复制粘贴就能跑起来。这是文章的硬核部分。
-
-## 5. 常见误区与进阶思考（800-1200 字）
-纠正 4-5 个最常见的理解误区。每个误区配上正确理解，引用经典论文或业界实践。
-
-## 6. 延伸阅读推荐（300-500 字）
-推荐 5-8 篇经典论文、博客、视频课程，附上简要说明为什么值得读。
-
-## 7. 核心要点回顾（400-600 字）
-用 > 引用格式，列出 10 个最重要的 takeaway，每条一句话。
-
-## 8. 知识地图导航（200-300 字）
-告诉读者这个知识点在 AI 技能树中的位置，以及下一步学什么最合适。
-
-文末：**关注「{BRAND_NAME}」，系统学习 AI 知识体系。**
 """
 
 # AI科普文章的额外要求：技术图表
 DIAGRAM_HINTS = """
 在文章中，请在需要图解的关键位置插入图表占位符（而非照片配图）。
 格式：【此处绘制图表：图表描述】
-至少插入 2 个图表占位符，类型建议：
-- 核心架构处 → 【此处绘制图表：Transformer编码器-解码器架构图】
-- 算法/数据流 → 【此处绘制图表：RAG检索增强生成的完整流程图】
-- 概念对比处 → 【此处绘制图表：RNN与Transformer的对比】
-- 层次关系 → 【此处绘制图表：AI技术栈层次图：基础层→模型层→应用层】
-- 时间线/演进 → 【此处绘制图表：GPT-1到GPT-4的演进时间线】
 
 注意：
-- 图表描述要具体，包含节点名称和关系，便于自动生成
-- 全文图表不超过 3 个，只放在「不看图就理解不了」的关键处
+- 图表描述要具体，包含节点名称和关系，便于自动生成 (比如: 【此处绘制图表：Transformer编码器-解码器架构图】)
 - 相比照片配图，技术文章中流程图和架构图更有价值
 """
 
 
+def extract_json_block(text):
+    match = re.search(r'```(?:json)?\s*(.*?)\s*```', text, re.DOTALL)
+    if match:
+        return match.group(1)
+    return text
+
+
 def generate_aikepu_article(topic_info):
     """
-    根据技能树节点信息生成 AI 科普文章。
-    
-    Args:
-        topic_info: dict with keys:
-            - title: 文章标题
-            - tags: 标签列表
-            - difficulty: 难度等级 (1-4)
-            - summary: 一句话摘要
-            - prerequisites: 先修知识点 id 列表
-    
-    Returns:
-        完整的 markdown 文章字符串，或 None
+    采用 Map-Reduce 架构生成 20000 字长文
     """
     title = topic_info.get("title", "")
     tags = topic_info.get("tags", [])
     difficulty = topic_info.get("difficulty", 1)
     summary = topic_info.get("summary", "")
-    prerequisites = topic_info.get("prerequisites", [])
 
     difficulty_labels = {1: "入门", 2: "基础", 3: "进阶", 4: "前沿"}
     diff_label = difficulty_labels.get(difficulty, "基础")
     tags_str = " · ".join(tags)
 
-    user_prompt = f"""# 任务：撰写一篇 AI 科普文章
+    logger.info("🎓 [阶段1] 正在生成大纲: {}", title)
+    
+    outline_prompt = f"""# 任务：为 AI 科普文章生成分段大纲
 
 ## 文章主题
 标题：{title}
 摘要：{summary}
-难度：{diff_label}（{'⭐' * difficulty}）
-领域标签：{tags_str}
+难度：{diff_label}
+标签：{tags_str}
 
-## 难度要求
-这篇文章的难度等级是 **{diff_label}**，请根据以下规则调整讲解深度：
-- 入门（⭐）：假设读者零基础，大量使用类比，避免任何术语
-- 基础（⭐⭐）：读者有一定概念认知，可以引入少量术语但必须解释
-- 进阶（⭐⭐⭐）：读者已了解前置知识，可以深入技术细节
-- 前沿（⭐⭐⭐⭐）：读者是业内人士，可以讨论最新进展和争议
+## 要求
+我们需要生成一篇总字数约 20000 字的极长科普迷你电子书。请为这篇文章设计一个包含 8 个小节的详细大纲。
+必须包含开篇场景、直觉类比、逐步深入的原理、代码实战(如适用)、局限与前沿等。
+
+每个小节应该包含：
+1. `title`: 小节的二级标题 (不带##)
+2. `description`: 该小节要讲的核心内容、要使用的类比、要包含的图表描述、是否包含代码等（详细指导写作的 prompt）。
+
+必须严格返回以下 JSON 格式：
+```json
+[
+  {{"title": "小节标题1", "description": "指导该小节生成的详细描述..."}},
+  {{"title": "小节标题2", "description": "指导该小节生成的详细描述..."}}
+]
+```
+不要有任何其他前缀解释。"""
+    
+    outline_res = call_deepseek_with_retry(outline_prompt, system_content="你是一个专业的技术大纲规划师。严格输出 JSON 数组格式，不要废话。")
+    if not outline_res:
+        logger.error("大纲生成失败")
+        return None
+        
+    try:
+        outline_json = extract_json_block(outline_res)
+        sections = json.loads(outline_json)
+    except Exception as e:
+        logger.error("大纲 JSON 解析失败: {}", e)
+        logger.error("原始响应: {}", outline_res[:200])
+        return None
+        
+    if not isinstance(sections, list) or len(sections) == 0:
+        logger.error("大纲格式错误，非有效列表")
+        return None
+        
+    logger.info("✅ 大纲生成完毕，共 {} 节", len(sections))
+    
+    full_article = []
+    
+    for i, sec in enumerate(sections):
+        sec_title = sec.get("title", f"第 {i+1} 节")
+        sec_desc = sec.get("description", "")
+        
+        logger.info("🎓 [阶段2] 正在生成第 {}/{} 节: {}", i+1, len(sections), sec_title)
+        
+        outline_context = "\n".join([f"{j+1}. {s.get('title')}" for j, s in enumerate(sections)])
+        
+        section_prompt = f"""# 任务：撰写 AI 科普文章的其中一节
+
+## 全文背景
+全文标题：{title}
+全文难度：{diff_label}
+全文大纲索引：
+{outline_context}
+
+## 当前章节任务 (第 {i+1} 节 / 共 {len(sections)} 节)
+你需要撰写的是：**{sec_title}**
+本节核心指引：
+{sec_desc}
 
 ## 写作要求（严格遵守！）
-1. **文章总字数 18000-22000 字，低于 15000 字视为严重不合格。**
-   - 这是一本迷你电子书，一个章节的量。不是快餐，不是短文。
-   - 每个概念六步展开：直觉 → 历史背景 → 原理 → 数学推导 → 代码实现 → 应用场景 → 局限前沿。
-2. 至少 8 个 ## 二级标题，每个小节 1500-2500 字
-3. 必须包含 6-8 个图表占位符【此处绘制图表：描述】，每小节至少 1 个
-4. 必须包含至少 8 个 > 引用段落（金句、要点、注意事项）
-5. 至少 4 处完整可运行的 Python 代码片段（每段 10-25 行，带详细注释）
-6. 推荐 5-8 篇经典论文/博客/视频作为延伸阅读
-7. 在「知识地图导航」部分，提到读者学习完这篇后可以继续学什么
-
-{DIAGRAM_HINTS}
-
-## 特别说明
-这篇文章是「AI 全栈技能树」系列的第 N 篇。请在文末的「知识地图导航」中自然地让读者感知到：他们正在沿着一条系统性的学习路线前进，这不是一篇孤立的知识碎片。
-
-请直接输出完整的 Markdown 格式文章，不要有任何前缀解释。"""
-
-    logger.info("🎓 正在生成 AI科普文章: {}", title)
-    article = call_deepseek_with_retry(user_prompt, system_content=SYSTEM_PROMPT)
-
-    if not article:
-        logger.error("AI科普文章生成失败: {}", title)
+1. **本节字数要求 2000 - 2500 字。** 必须极其详实、生动、层层递进。
+2. 必须以 `## {sec_title}` 作为本节的开头。
+3. 如果本节适合图解，请包含 1 个图表占位符。{DIAGRAM_HINTS}
+4. 必须包含至少 2 个 `> ` 引用段落（金句、要点、注意事项）。
+5. 难度匹配 {diff_label}。如果是入门，大量使用类比；如果是进阶，深入细节。
+6. (如果描述中要求写代码) 给出带详细注释的 Python 代码，单段控制在 25 行内。
+7. 不要写任何“欢迎点赞关注”的废话，只输出纯 Markdown 正文。
+"""
+        sec_content = call_deepseek_with_retry(section_prompt, system_content=SYSTEM_PROMPT, timeout=180)
+        if not sec_content:
+            logger.warning("第 {} 节生成失败，将导致文章不完整", i+1)
+            continue
+            
+        full_article.append(sec_content.strip())
+        
+    if not full_article:
         return None
+        
+    final_article = "\n\n".join(full_article)
+    
+    # 追加知识地图和关注尾缀
+    final_article += f"\n\n## 知识地图导航\n\n学习完这篇内容，你在 AI 技能树上又点亮了一个重要节点。你可以继续探索与此相关的前置或后置知识，构建完整的知识体系。\n\n**关注「{BRAND_NAME}」，系统学习 AI 知识体系。**"
+    
+    # 统计
+    word_count = len(final_article.replace(" ", "").replace("\n", ""))
+    heading_count = final_article.count("## ")
+    quote_count = final_article.count("> ")
+    diagram_placeholders = final_article.count("【此处绘制图表：")
 
-    # 基本校验
-    word_count = len(article.replace(" ", "").replace("\n", ""))
-    heading_count = article.count("## ")
-    quote_count = article.count("> ")
-    diagram_placeholders = article.count("【此处绘制图表：")
-
-    print(f"\n📝 AI科普文章生成报告:")
+    print(f"\n📝 AI科普长文生成报告:")
     print(f"   标题: {title}")
     print(f"   字数: {word_count}")
     print(f"   二级标题: {heading_count} 个")
     print(f"   引用段落: {quote_count} 个")
     print(f"   图表占位符: {diagram_placeholders} 个")
-
+    
     if word_count < 10000:
-        logger.warning("⚠️ 文章字数严重不足 (当前 {})，远低于 18000 字要求", word_count)
-    elif word_count < 15000:
-        logger.warning("⚠️ 文章字数偏短 (当前 {})，未达 15000 字最低要求", word_count)
-
-    return article
+        logger.warning("⚠️ 文章字数严重不足 (当前 {})，远低于预期要求", word_count)
+        
+    return final_article
 
 
 def generate_digest(topic_title, article_text=None):
-    """
-    为 AI科普文章生成微信摘要。
-    
-    Args:
-        topic_title: 文章标题
-        article_text: 文章全文（可选，用于提取精华）
-    
-    Returns:
-        摘要字符串（≤120 字）
-    """
     from config import WECHAT_DIGEST_MAX_LEN
 
     context = ""
     if article_text:
-        # 取文章前 500 字作为上下文
         context = f"\n文章开头：{article_text[:500]}\n"
 
     prompt = (

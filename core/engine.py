@@ -1,4 +1,4 @@
-import traceback
+from loguru import logger
 
 from config import WECHAT_APP_ID, WECHAT_APP_SECRET
 from core.shared.publisher import WeChatPublisher

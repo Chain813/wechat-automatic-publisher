@@ -13,6 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (targetId === 'settings') loadSettings();
             if (targetId === 'history') loadHistory();
             if (targetId === 'sources') loadSources();
+            if (targetId === 'schedule') loadSchedule();
         });
     });
 
@@ -290,5 +291,107 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             container.innerHTML = '<div class="log-line error">Failed to load sources</div>';
         }
+    // --- Schedule ---
+    async function loadSchedule() {
+        const list = document.getElementById('schedule-jobs-list');
+        list.innerHTML = '<div class="log-line system">Loading jobs...</div>';
+        try {
+            const res = await fetch('/api/schedule/jobs');
+            const data = await res.json();
+            if (data.status !== 'success') throw new Error(data.message);
+            
+            if (!data.jobs || data.jobs.length === 0) {
+                list.innerHTML = '<div class="log-line system">No active scheduled jobs.</div>';
+                return;
+            }
+            
+            let html = '<table class="table" style="width:100%; text-align:left;">';
+            html += '<tr><th>Task Type</th><th>Status</th><th>Next Run</th><th>Actions</th></tr>';
+            data.jobs.forEach(job => {
+                const statusBadge = job.status === 'active' ? 
+                    '<span class="badge" style="background:#2ecc71;padding:2px 6px;">Active</span>' : 
+                    '<span class="badge" style="background:#f1c40f;padding:2px 6px;">Paused</span>';
+                
+                html += `<tr>
+                    <td>${job.task_type || 'Unknown'}</td>
+                    <td>${statusBadge}</td>
+                    <td>${job.next_run_time || 'N/A'}</td>
+                    <td>
+                        ${job.status === 'active' ? 
+                            `<button class="btn btn-warning btn-sm" onclick="window.pauseJob('${job.id}')">Pause</button>` :
+                            `<button class="btn btn-success btn-sm" onclick="window.resumeJob('${job.id}')">Resume</button>`
+                        }
+                        <button class="btn btn-danger btn-sm" onclick="window.removeJob('${job.id}')">Delete</button>
+                    </td>
+                </tr>`;
+            });
+            html += '</table>';
+            list.innerHTML = html;
+        } catch (e) {
+            list.innerHTML = `<div class="log-line error">Failed to load jobs: ${e.message}</div>`;
+        }
     }
+
+    document.getElementById('btn-add-schedule').addEventListener('click', async () => {
+        const taskType = document.getElementById('sched-task-type').value;
+        const cronExpr = document.getElementById('sched-cron').value;
+        const btn = document.getElementById('btn-add-schedule');
+        
+        btn.disabled = true;
+        btn.textContent = 'Adding...';
+        
+        try {
+            const res = await fetch('/api/schedule/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ task_type: taskType, cron_expr: cronExpr })
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                alert('Schedule added successfully!');
+                loadSchedule();
+            } else {
+                alert('Error adding schedule: ' + data.message);
+            }
+        } catch (e) {
+            alert('Request failed: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Add';
+        }
+    });
+
+    window.removeJob = async (jobId) => {
+        if(!confirm('Delete this scheduled task?')) return;
+        try {
+            await fetch('/api/schedule/remove', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ job_id: jobId })
+            });
+            loadSchedule();
+        } catch (e) { alert('Error: ' + e.message); }
+    };
+
+    window.pauseJob = async (jobId) => {
+        try {
+            await fetch('/api/schedule/pause', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ job_id: jobId })
+            });
+            loadSchedule();
+        } catch (e) { alert('Error: ' + e.message); }
+    };
+
+    window.resumeJob = async (jobId) => {
+        try {
+            await fetch('/api/schedule/resume', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ job_id: jobId })
+            });
+            loadSchedule();
+        } catch (e) { alert('Error: ' + e.message); }
+    };
 });

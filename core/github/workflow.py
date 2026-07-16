@@ -2,34 +2,26 @@ import os
 import time
 from datetime import datetime
 from loguru import logger
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from config import BRAND_NAME, SD_ENABLED, GITHUB_FIXED_COVER
-from core.github.collector import fetch_one_worthy_project, generate_code_screenshot, get_repo_code_snippet, save_github_history, take_github_readme_screenshot, take_live_ui_screenshot
+from config import SD_ENABLED, GITHUB_FIXED_COVER
+from core.github.collector import generate_code_screenshot, get_repo_code_snippet, save_github_history, take_github_readme_screenshot, take_live_ui_screenshot
 from core.github.processor import generate_github_article, generate_github_digest
 from core.shared.article_utils import process_article_content, _print_review_report
 from core.shared.llm import validate_title
 from utils.image_handler import download_project_image_for_github, reset_image_cache
 from core.shared.runtime import check_cancelled
 
+from core.pipeline.nodes import BaseNode
+from core.pipeline.engine import PipelineEngine
+from core.plugins.manager import plugin_manager
+from core.db.manager import db_manager
+from core.db.models import ArticleHistory
 
-def _publish_draft_github(publisher, title, html_content, thumb_id, digest_text):
-    print("\n🚀 正在同步至微信公众号云端草稿箱...")
-    success, result = publisher.publish_and_notify(title, html_content, thumb_id, digest_text)
-    if not success:
-        print(f"❌ 同步草稿箱失败：{result}")
-        return False
-
-    draft_id = result['media_id']
-    print(f"\n{'⭐' * 30}")
-    print("  🎉 恭喜！发布成功")
-    print(f"  📄 标题：{title}")
-    print(f"  🆔 草稿：{draft_id}")
-    print(f"{'⭐' * 30}")
-    return True
-
+# --- 辅助方法 ---
 
 def _download_and_upload_url(url, publisher, prefix="remote"):
-    """下载远程图片到临时文件并上传到微信，返回 URL 或 None"""
     from utils.http_client import build_api_session
     tmp_path = None
     try:
@@ -67,22 +59,14 @@ def _download_and_upload_url(url, publisher, prefix="remote"):
 
 
 def _ensure_deep_images(projects, publisher):
-    """
-    确保单项目有 3+ 张深度配图。
-    所有图片来源并行执行，集满 3 张后自动停止其余任务。
-    """
-    import threading
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
     for p in projects:
         check_cancelled()
 
         urls = []
         urls_lock = threading.Lock()
-        enough = threading.Event()  # 集满 3 张后置位，通知其他任务提前退出
+        enough = threading.Event()
 
         def _try_add(make_fn, label):
-            """尝试生成并添加一张图片。如果已集满则跳过。"""
             if enough.is_set():
                 return None
             check_cancelled()
@@ -102,7 +86,6 @@ def _ensure_deep_images(projects, publisher):
                 print(f"  ⚠️ {label} 未返回有效图片")
             return img_url
 
-        # ---- 诊断：打印项目图片数据 ----
         print(f"  🔍 项目数据: social={bool(p.get('social_preview_url'))}, "
               f"gif={len([u for u in p.get('other_images', []) if u.lower().endswith('.gif')])}, "
               f"homepage={bool(p.get('homepage'))}, "
@@ -110,21 +93,17 @@ def _ensure_deep_images(projects, publisher):
               f"other_images={len(p.get('other_images', []))}, "
               f"SD={SD_ENABLED}")
 
-        # ---- 构建所有图片来源任务 ----
         tasks = []
 
-        # 0. Social Preview 封面图
         social_url = p.get('social_preview_url')
         if social_url:
             tasks.append(("Social Preview", lambda u=social_url: _download_and_upload_url(u, publisher, "social")))
 
-        # 1. GIF 动画（项目实际运行效果）
         other_images = p.get('other_images', [])
         gif_images = [u for u in other_images if u.lower().endswith('.gif')]
-        for gif_url in gif_images[:2]:  # 最多 2 张 GIF
+        for gif_url in gif_images[:2]:
             tasks.append(("GIF 动画", lambda u=gif_url: _download_and_upload_url(u, publisher, "gif")))
 
-        # 2. 在线 Demo UI 截图
         homepage = p.get('homepage')
         if homepage:
             def _make_demo(repo=p['repo'], url=homepage):
@@ -132,20 +111,17 @@ def _ensure_deep_images(projects, publisher):
                 return publisher.upload_news_image(path) if path and os.path.exists(path) else None
             tasks.append(("Demo 截图", _make_demo))
 
-        # 3. README 概览截图
         def _make_readme(repo=p['repo'], fp=p.get('readme_file_path')):
             path = take_github_readme_screenshot(repo, fp)
             return publisher.upload_news_image(path) if path and os.path.exists(path) else None
         tasks.append(("README 截图", _make_readme))
 
-        # 4. SD 艺术配图
         if SD_ENABLED:
             def _make_sd(repo=p['repo'], desc=p.get('desc', ''), lang=p.get('lang', 'Unknown'), topics=p.get('topics', [])):
                 path = download_project_image_for_github(repo_name=repo, description=desc, lang=lang, topics=topics)
                 return publisher.upload_news_image(path) if path else None
             tasks.append(("SD 配图", _make_sd))
 
-        # 5. 代码截图（快速兜底）
         def _make_code(repo=p['repo'], lang=p.get('lang', 'python')):
             code_text, _ = get_repo_code_snippet(repo)
             if code_text:
@@ -154,7 +130,6 @@ def _ensure_deep_images(projects, publisher):
             return None
         tasks.append(("代码截图", _make_code))
 
-        # ---- 并行执行所有任务，集满即止 ----
         print(f"  🚀 并行启动 {len(tasks)} 个配图任务...")
         if not tasks:
             print("  ⚠️ 无可用配图任务（social_url/gif/homepage/SD 均为空）")
@@ -172,7 +147,6 @@ def _ensure_deep_images(projects, publisher):
                         break
             print(f"  📊 并行配图完成: 成功 {len(urls)}/3 张")
 
-        # 6. 兜底：README 中的静态图（不需要下载/上传，直接用远程 URL）
         if len(urls) < 3 and p.get('image_url') and p.get('image_url') not in urls:
             urls.append(p.get('image_url'))
         if len(urls) < 3:
@@ -190,87 +164,132 @@ def _ensure_deep_images(projects, publisher):
             print(f"  ❌ 最终配图: 0 张（所有来源均失败）")
 
 
-def run_github_workflow(publisher):
-    """处理 GitHub 单项目深度推荐抓取和发布流程。"""
-    projects = fetch_one_worthy_project()
-    check_cancelled()
-    if not projects:
-        print("📭 今日暂无获取到 GitHub 热门项目。")
-        return
+# --- 流水线节点定义 ---
 
-    print(f"\n🚀 准备深度解析 GitHub 热门项目: {projects[0]['repo']}")
+class FetchGithubNode(BaseNode):
+    def execute(self, context: dict) -> bool:
+        check_cancelled()
+        plugin = plugin_manager.get_plugin("github_repo")
+        if not plugin:
+            print("❌ Github 插件未加载。")
+            return False
+            
+        projects = plugin.fetch_data()
+        if not projects:
+            print("📭 今日暂无获取到 GitHub 热门项目。")
+            return False
 
-    reset_image_cache()
+        print(f"\n🚀 准备深度解析 GitHub 热门项目: {projects[0]['repo']}")
+        context['projects'] = projects
+        return True
 
-    # 确保项目有深度配图
-    print("\n🖼️  正在为项目生成深度配图（README/UI/SD）...")
-    _ensure_deep_images(projects, publisher)
-    check_cancelled()
+class ProcessGithubImagesNode(BaseNode):
+    def execute(self, context: dict) -> bool:
+        check_cancelled()
+        projects = context['projects']
+        publisher = context['publisher']
+        reset_image_cache()
 
-    article_text, dynamic_title = generate_github_article(projects)
-    check_cancelled()
-    if not article_text or not dynamic_title:
-        print("❌ AI 创作失败，跳过。")
-        return
+        print("\n🖼️  正在为项目生成深度配图（README/UI/SD）...")
+        _ensure_deep_images(projects, publisher)
+        return True
 
-    # 后处理：将旧的占位符统一替换掉
-    for p in projects:
-        if p.get('tree_image_path') and p.get('image_url'):
-            keyword = f"{p['repo'].split('/')[-1]} {p['lang']} project architecture"
-            placeholder = f"【此处插入配图：{keyword}】"
-            if placeholder in article_text:
-                article_text = article_text.replace(
-                    placeholder,
-                    f"【GITHUB配图：{p['image_url']}】"
-                )
+class GenerateGithubArticleNode(BaseNode):
+    def execute(self, context: dict) -> bool:
+        check_cancelled()
+        projects = context['projects']
+        publisher = context['publisher']
 
-    print("\n🎨 正在执行排版优化与配图处理...")
-    final_html, review_data = process_article_content(article_text, publisher)
+        article_text, dynamic_title = generate_github_article(projects)
+        if not article_text or not dynamic_title:
+            print("❌ AI 创作失败，跳过。")
+            return False
 
-    topic = dynamic_title
+        for p in projects:
+            if p.get('tree_image_path') and p.get('image_url'):
+                keyword = f"{p['repo'].split('/')[-1]} {p['lang']} project architecture"
+                placeholder = f"【此处插入配图：{keyword}】"
+                if placeholder in article_text:
+                    article_text = article_text.replace(placeholder, f"【GITHUB配图：{p['image_url']}】")
 
-    # 封面处理：直接使用固定的 GitHub 专题封面
-    thumb_id = publisher.upload_image(GITHUB_FIXED_COVER)
+        print("\n🎨 正在执行排版优化与配图处理...")
+        final_html, review_data = process_article_content(article_text, publisher)
 
-    clean_title, title_warnings = validate_title(topic)
-    for warning in title_warnings:
-        print(f"  ⚠️ 标题警告: {warning}")
+        repo_name = projects[0]['repo'].split('/')[-1]
+        repo_desc = (projects[0].get('desc') or '')[:60]
+        digest = generate_github_digest(repo_name, repo_desc)
 
-    # 动态生成摘要（而非硬编码），提升推送点击率
-    repo_name = projects[0]['repo'].split('/')[-1]
-    repo_desc = (projects[0].get('desc') or '')[:60]
-    digest = generate_github_digest(repo_name, repo_desc)
+        context['article_data'] = {
+            'topic': dynamic_title,
+            'final_html': final_html,
+            'review_data': review_data,
+            'digest': digest
+        }
+        return True
 
-    _print_review_report(
-        title=clean_title,
-        word_count=review_data["word_count"],
-        image_count=review_data["image_count"],
-        sensitive_words=review_data["sensitive_words"],
-        cover_ok=thumb_id is not None,
-        digest=digest,
-    )
+class PublishGithubNode(BaseNode):
+    def execute(self, context: dict) -> bool:
+        check_cancelled()
+        projects = context['projects']
+        publisher = context['publisher']
+        article_data = context['article_data']
 
-    success = _publish_draft_github(publisher, clean_title, final_html, thumb_id, digest)
-    
-    # 发布成功后，将项目记入历史，避免下次重复抓取
-    if success:
+        topic = article_data['topic']
+        final_html = article_data['final_html']
+        review_data = article_data['review_data']
+        digest = article_data['digest']
+
+        thumb_id = publisher.upload_image(GITHUB_FIXED_COVER)
+        clean_title, title_warnings = validate_title(topic)
+        for warning in title_warnings:
+            print(f"  ⚠️ 标题警告: {warning}")
+
+        _print_review_report(
+            title=clean_title,
+            word_count=review_data["word_count"],
+            image_count=review_data["image_count"],
+            sensitive_words=review_data["sensitive_words"],
+            cover_ok=thumb_id is not None,
+            digest=digest,
+        )
+
+        print("\n🚀 正在同步至微信公众号云端草稿箱...")
+        success, result = publisher.publish_and_notify(clean_title, final_html, thumb_id, digest)
+        if not success:
+            print(f"❌ 同步草稿箱失败：{result}")
+            return False
+
+        draft_id = result['media_id']
+        print(f"\n{'⭐' * 30}\n  🎉 恭喜！发布成功\n  📄 标题：{clean_title}\n  🆔 草稿：{draft_id}\n{'⭐' * 30}")
+        
         repo_names = [p['repo'] for p in projects]
         save_github_history(repo_names)
         
         try:
-            import json
-            record_file = "github_publish_records.json"
-            records = []
-            if os.path.exists(record_file):
-                with open(record_file, "r", encoding="utf-8") as f:
-                    records = json.load(f)
-            records.append({
-                "title": clean_title,
-                "repos": repo_names
-            })
-            with open(record_file, "w", encoding="utf-8") as f:
-                json.dump(records[-50:], f, ensure_ascii=False, indent=2)
+            session = db_manager.get_session()
+            ah = ArticleHistory(
+                title=clean_title,
+                source_type="github",
+                publish_date=datetime.now().strftime("%Y-%m-%d"),
+                success_status=True,
+                media_id=draft_id,
+                error_log=None
+            )
+            session.add(ah)
+            session.commit()
         except Exception as e:
             logger.warning("保存 GitHub 发布记录失败: {}", e)
             
         print(f"✅ 已将 {len(repo_names)} 个项目加入历史过滤名单。")
+        return True
+
+# --- 主调度 ---
+
+def run_github_workflow(publisher):
+    engine = PipelineEngine(name="GithubWorkflow")
+    engine.add_node(FetchGithubNode())
+    engine.add_node(ProcessGithubImagesNode())
+    engine.add_node(GenerateGithubArticleNode())
+    engine.add_node(PublishGithubNode())
+    
+    engine.run({"publisher": publisher})

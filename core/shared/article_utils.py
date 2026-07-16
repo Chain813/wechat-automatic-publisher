@@ -8,7 +8,6 @@ from loguru import logger
 
 from config import BRAND_NAME, WECHAT_TITLE_MAX_LEN, ASSET_RETENTION_DAYS
 from core.shared.llm import filter_sensitive, simplify_keyword, call_deepseek_with_retry
-from utils.image_handler import download_image
 
 PLACEHOLDER_PATTERN = re.compile(r"【\s*此处插入配图\s*[：:]\s*(.*?)\s*】")
 GITHUB_IMAGE_PATTERN = re.compile(r"【\s*GITHUB配图\s*[：:]\s*(https?://.*?)\s*】")

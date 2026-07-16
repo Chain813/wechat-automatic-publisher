@@ -1,5 +1,4 @@
 import os
-import json
 import threading
 from flask import Flask, render_template, jsonify, request
 from core.shared.runtime import configure_runtime, log_queue
@@ -7,9 +6,34 @@ from core.engine import run_main
 import queue
 import sys
 from dotenv import load_dotenv, set_key
+from loguru import logger
+
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+from apscheduler.executors.pool import ThreadPoolExecutor as APSThreadPoolExecutor
+from apscheduler.triggers.cron import CronTrigger
+from core.db.manager import db_manager
 
 app = Flask(__name__)
 _start_lock = threading.Lock()
+
+# ---- APScheduler 配置 ----
+_scheduler_jobstores = {
+    'default': SQLAlchemyJobStore(engine=db_manager.engine)
+}
+_scheduler_executors = {
+    'default': APSThreadPoolExecutor(2)
+}
+_scheduler_defaults = {
+    'coalesce': True,
+    'max_instances': 1
+}
+scheduler = BackgroundScheduler(
+    jobstores=_scheduler_jobstores, 
+    executors=_scheduler_executors, 
+    job_defaults=_scheduler_defaults
+)
+scheduler.start()
 
 # ---- 云端模式配置 ----
 CLOUD_MODE = os.getenv("CLOUD_MODE", "").strip() == "1"
@@ -129,6 +153,84 @@ def index():
     return render_template('index.html')
 
 
+# ---- 定时调度 API ----
+
+@app.route('/api/schedule/jobs', methods=['GET'])
+def get_scheduled_jobs():
+    jobs = []
+    for job in scheduler.get_jobs():
+        jobs.append({
+            "id": job.id,
+            "name": job.name,
+            "task_type": job.kwargs.get("task_type", ""),
+            "next_run_time": job.next_run_time.strftime("%Y-%m-%d %H:%M:%S") if job.next_run_time else None,
+            "status": "paused" if job.next_run_time is None else "active"
+        })
+    return jsonify({"status": "success", "jobs": jobs})
+
+@app.route('/api/schedule/add', methods=['POST'])
+def add_scheduled_job():
+    data = request.json or {}
+    task_type = data.get("task_type")
+    cron_expr = data.get("cron_expr")  # e.g., "0 8 * * *" (minute, hour, day, month, day_of_week)
+    
+    if not task_type or not cron_expr:
+        return jsonify({"status": "error", "message": "Missing task_type or cron_expr"}), 400
+        
+    try:
+        trigger = CronTrigger.from_crontab(cron_expr)
+        # 传递 run_workflow_thread 而不是 run_main，以保证其日志和状态被正确捕获
+        job = scheduler.add_job(
+            func=run_workflow_thread,
+            trigger=trigger,
+            kwargs={"task_type": task_type},
+            name=f"Schedule_{task_type}_{cron_expr}",
+            replace_existing=False
+        )
+        return jsonify({"status": "success", "job_id": job.id})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+
+@app.route('/api/schedule/remove', methods=['POST'])
+def remove_scheduled_job():
+    data = request.json or {}
+    job_id = data.get("job_id")
+    if not job_id:
+        return jsonify({"status": "error", "message": "Missing job_id"}), 400
+        
+    try:
+        scheduler.remove_job(job_id)
+        return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+
+@app.route('/api/schedule/pause', methods=['POST'])
+def pause_scheduled_job():
+    data = request.json or {}
+    job_id = data.get("job_id")
+    if not job_id:
+        return jsonify({"status": "error", "message": "Missing job_id"}), 400
+    try:
+        scheduler.pause_job(job_id)
+        return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+
+@app.route('/api/schedule/resume', methods=['POST'])
+def resume_scheduled_job():
+    data = request.json or {}
+    job_id = data.get("job_id")
+    if not job_id:
+        return jsonify({"status": "error", "message": "Missing job_id"}), 400
+    try:
+        scheduler.resume_job(job_id)
+        return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+
+
+
+
 @app.route('/api/start', methods=['POST'])
 def start_process():
     with _start_lock:
@@ -219,8 +321,8 @@ def handle_config():
         if not isinstance(data, dict):
             return jsonify({"status": "error", "message": "Invalid request body"}), 400
         if not os.path.exists(env_file):
-            with open(env_file, 'a') as f:
-                pass
+            import pathlib
+            pathlib.Path(env_file).touch()
         for key in ["WECHAT_APP_ID", "WECHAT_APP_SECRET", "LLM_API_KEY",
                      "QYWECHAT_WEBHOOK", "LLM_MODEL", "GEMINI_API_KEY"]:
             if key in data and "*" not in str(data[key]):
@@ -234,12 +336,34 @@ def handle_config():
 
 @app.route('/api/history', methods=['GET'])
 def get_history():
-    history_file = 'hotspots_history.json'
-    if not os.path.exists(history_file):
-        return jsonify({"history": {}})
     try:
-        with open(history_file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+        from core.db.manager import db_manager
+        from core.db.models import ArticleHistory
+        session = db_manager.get_session()
+        
+        # Get history from the last 7 days
+        from datetime import datetime, timedelta
+        cutoff_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+        
+        records = session.query(ArticleHistory).filter(ArticleHistory.publish_date >= cutoff_date).order_by(ArticleHistory.publish_date.desc(), ArticleHistory.id.desc()).all()
+        
+        data = {}
+        for r in records:
+            date_str = r.publish_date
+            if date_str not in data:
+                data[date_str] = {"topics": [], "results": []}
+            if r.title not in data[date_str]["topics"]:
+                data[date_str]["topics"].append(r.title)
+                
+            if r.success_status or r.error_log:
+                data[date_str]["results"].append({
+                    "topic": r.title,
+                    "success": r.success_status,
+                    "draft_id": r.media_id,
+                    "error": r.error_log,
+                    "time": r.created_at.strftime("%H:%M:%S") if r.created_at else ""
+                })
+        
         return jsonify({"history": data})
     except Exception as e:
         return jsonify({"history": {}, "error": str(e)})

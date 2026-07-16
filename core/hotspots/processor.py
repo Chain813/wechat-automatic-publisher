@@ -2,7 +2,7 @@ import re
 from datetime import datetime
 from loguru import logger
 
-from config import BRAND_NAME, WECHAT_DIGEST_MAX_LEN, WECHAT_TITLE_MAX_LEN
+from config import BRAND_NAME, WECHAT_DIGEST_MAX_LEN
 from core.shared.llm import call_deepseek_with_retry, validate_article_length
 
 SYSTEM_PROMPT = f"""

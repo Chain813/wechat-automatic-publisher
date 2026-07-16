@@ -25,6 +25,9 @@
                 <a href="#" class="nav-item" data-target="sources">
                     <span class="icon">📡</span> Sources
                 </a>
+                <a href="#" class="nav-item" data-target="schedule">
+                    <span class="icon">⏰</span> Schedule
+                </a>
                 <a href="#" class="nav-item" data-target="settings">
                     <span class="icon">⚙️</span> Settings
                 </a>
@@ -113,6 +116,42 @@
                 </header>
                 <div id="sources-content" class="sources-grid">
                     <div class="log-line system">Loading...</div>
+                </div>
+            </section>
+
+            <!-- Schedule -->
+            <section id="schedule" class="view-section">
+                <header class="view-header">
+                    <h2>Schedule</h2>
+                    <p>Automate your publishing tasks</p>
+                </header>
+                
+                <div class="action-panel glass-panel mb-4">
+                    <h3>Add New Task</h3>
+                    <div class="form-group row">
+                        <div class="col">
+                            <label>Task Type</label>
+                            <select id="sched-task-type" class="form-control">
+                                <option value="hotspots">Hotspots</option>
+                                <option value="github">GitHub</option>
+                                <option value="aikepu">AI 科普</option>
+                            </select>
+                        </div>
+                        <div class="col">
+                            <label>Cron Expression</label>
+                            <input type="text" id="sched-cron" class="form-control" placeholder="0 8 * * * (每天早8点)" value="0 8 * * *">
+                        </div>
+                        <div class="col" style="display:flex; align-items:flex-end;">
+                            <button id="btn-add-schedule" class="btn btn-primary glow-effect" style="width:100%">Add</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="glass-panel">
+                    <h3>Active Scheduled Jobs</h3>
+                    <div id="schedule-jobs-list" style="margin-top: 15px;">
+                        <div class="log-line system">Loading jobs...</div>
+                    </div>
                 </div>
             </section>
 

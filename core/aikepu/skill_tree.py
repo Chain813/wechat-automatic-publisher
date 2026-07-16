@@ -81,7 +81,6 @@ def get_available_nodes():
         return []
 
     published_ids = get_published_ids()
-    node_map = {n["id"]: n for n in nodes}
 
     # 计算每个已发布节点的出度（它解锁了多少后继节点）
     def out_degree(node_id):
@@ -223,7 +222,6 @@ def release_reserved(node_id=None):
     - 传 node_id：仅释放指定节点（发布成功后调用）
     - 不传参数：清空全部保留（批次结束时调用）
     """
-    global _reserved_ids
     with _reserved_lock:
         if node_id:
             _reserved_ids.discard(node_id)

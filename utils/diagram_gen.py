@@ -10,6 +10,7 @@ import re
 import time
 import subprocess
 import tempfile
+import requests
 from loguru import logger
 
 from core.shared.llm import call_deepseek_with_retry
@@ -98,37 +99,29 @@ def _sanitize_dot(dot_code: str) -> str:
 
 
 def _render_dot_to_png(dot_code: str, output_path: str) -> bool:
-    """用 Graphviz dot 命令渲染 DOT → PNG"""
+    """用 QuickChart API 渲染 DOT → PNG"""
     try:
-        # 写临时 DOT 文件
-        dot_file = output_path + ".dot"
-        with open(dot_file, "w", encoding="utf-8") as f:
-            f.write(dot_code)
-
-        # 调用 dot 命令
-        result = subprocess.run(
-            ["dot", "-Tpng", f"-Gdpi=150", "-o", output_path, dot_file],
-            capture_output=True, text=True, timeout=30
-        )
-
-        # 清理临时 DOT 文件
-        if os.path.exists(dot_file):
-            os.remove(dot_file)
-
-        if result.returncode == 0 and os.path.exists(output_path):
+        url = "https://quickchart.io/graphviz"
+        payload = {
+            "graph": dot_code,
+            "format": "png"
+        }
+        # 使用 POST 请求以支持长 DOT 代码
+        response = requests.post(url, json=payload, timeout=30)
+        
+        if response.status_code == 200:
+            with open(output_path, "wb") as f:
+                f.write(response.content)
             return True
         else:
-            logger.warning("  Graphviz 渲染失败: {}", result.stderr[:200] if result.stderr else "unknown")
+            logger.warning("  QuickChart 渲染失败: HTTP {} - {}", response.status_code, response.text[:200])
             return False
-
-    except FileNotFoundError:
-        logger.warning("  Graphviz 'dot' 命令未找到，请安装: apt install graphviz 或 brew install graphviz")
-        return False
-    except subprocess.TimeoutExpired:
-        logger.warning("  Graphviz 渲染超时")
+            
+    except requests.exceptions.Timeout:
+        logger.warning("  QuickChart 渲染超时")
         return False
     except Exception as e:
-        logger.warning("  Graphviz 渲染异常: {}", e)
+        logger.warning("  QuickChart 渲染异常: {}", e)
         return False
 
 
