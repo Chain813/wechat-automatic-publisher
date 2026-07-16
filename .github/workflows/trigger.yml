@@ -75,7 +75,7 @@ jobs:
         run: |
           git config user.name "AutoWeChat Bot"
           git config user.email "bot@autowechat.local"
-          git add aikepu_history.json hotspots_history.json github_history.json github_publish_records.json 2>/dev/null || true
+          git add data/aikepu_history.json 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "无变化，跳过提交"
           else

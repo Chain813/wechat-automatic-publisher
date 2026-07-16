@@ -1,3 +1,4 @@
+import os
 import random
 import threading
 from datetime import datetime, timezone, timedelta
@@ -16,7 +17,7 @@ USER_AGENTS = [
 
 _source_health = {}
 _source_health_lock = threading.Lock()
-HTTP_SESSION = build_cached_session("hotspot_cache", HOTSPOT_CACHE_TTL_SECONDS)
+HTTP_SESSION = build_cached_session(os.path.join("data", "hotspot_cache"), HOTSPOT_CACHE_TTL_SECONDS)
 
 def get_source_health_report():
     report = {}

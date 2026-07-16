@@ -22,9 +22,11 @@ def _interruptible_sleep(seconds):
         time.sleep(0.5)
 
 
-def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backoff_base=1.0, timeout=None, max_tokens=None):
-    """带指数退避的 API 调用。timeout/max_tokens 可覆盖全局默认值。支持中断。"""
-    from core.shared.runtime import cancel_event, WorkflowCancelled
+def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backoff_base=1.0, timeout=None, max_tokens=None, model=None):
+    """带指数退避的 API 调用。timeout/max_tokens/model 可覆盖全局默认值。支持中断和暂停。"""
+    from core.shared.runtime import check_cancelled, WorkflowCancelled
+
+    check_cancelled()
 
     if max_retries is None:
         max_retries = LLM_MAX_RETRIES
@@ -32,6 +34,8 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
         timeout = LLM_TIMEOUT
     if max_tokens is None:
         max_tokens = LLM_MAX_TOKENS
+    
+    target_model = model or LLM_MODEL
 
     headers = {
         "Content-Type": "application/json",
@@ -39,13 +43,12 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
     }
 
     for attempt in range(1, max_retries + 1):
-        # 每次重试前检查中断信号
-        if cancel_event.is_set():
-            raise WorkflowCancelled("AI 调用被用户中断")
+        # 每次重试前和调用前检查中断/暂停信号
+        check_cancelled()
 
         try:
             data = {
-                "model": LLM_MODEL,
+                "model": target_model,
                 "messages": [
                     {"role": "system", "content": system_content},
                     {"role": "user", "content": prompt}

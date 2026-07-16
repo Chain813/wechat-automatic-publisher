@@ -104,7 +104,8 @@ def evaluate_image_with_ollama(image_path, purpose="body"):
         return None
 
     try:
-        import base64, requests
+        import base64
+        import requests
 
         if purpose == "cover":
             context = "微信公众号文章封面图（推荐宽屏2.35:1）"
@@ -196,7 +197,6 @@ def evaluate_image_with_gemini(image_path, purpose="body"):
         return None
 
     try:
-        from google import genai
         from google.genai import types
 
         if purpose == "cover":

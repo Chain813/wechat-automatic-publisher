@@ -62,5 +62,5 @@ def fetch_all_hotspots_parallel():
     if not final_text:
         return ""
 
-    logger.info("  成功拉取全网 {} 条热搜聚合数据", len([l for l in all_summary if l and not l.startswith("【")]))
+    logger.info("  成功拉取全网 {} 条热搜聚合数据", len([line for line in all_summary if line and not line.startswith("【")]))
     return final_text

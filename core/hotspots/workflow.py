@@ -59,7 +59,8 @@ def _dedup_topics_against_each_other(topics, threshold=70):
     kept = []
     for topic in topics:
         norm = _normalize_title(topic)
-        if not norm: continue
+        if not norm:
+            continue
         is_similar = False
         for existing in kept:
             norm_existing = _normalize_title(existing)

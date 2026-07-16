@@ -13,11 +13,11 @@ venv/
 .venv/
 
 # Runtime generated
-hotspot_cache.sqlite
+*.sqlite
 data/*.sqlite
-hotspots_history.json
-github_history.json
-github_publish_records.json
+data/previews/
+data/aikepu_history.json
+data/aikepu_history.json.tmp
 assets/
 *.log
 

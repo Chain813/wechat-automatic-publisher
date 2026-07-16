@@ -20,6 +20,11 @@ AutoWeChat 是微信公众号全自动内容生产与发布系统。集成 12 �
 ├── main.py                    # CLI 入口 (--task hotspots/github)
 ├── webui.py                   # Flask Web 管理界面
 ├── config.py                  # 全局配置中心
+├── data/                      # 数据库与运行时配置目录
+│   ├── auto_publish.sqlite    # 标题去重与发布历史 SQLite 数据库
+│   ├── aikepu_skill_tree.json # AI 科普知识点技能树结构文件
+│   ├── aikepu_history.json    # AI 科普已发布节点历史（自动生成）
+│   └── hotspot_cache.sqlite   # 网络请求缓存数据库（自动生成）
 ├── core/
 │   ├── engine.py              # 工作流调度器
 │   ├── hotspots/              # 热点文章模块
@@ -48,9 +53,10 @@ AutoWeChat 是微信公众号全自动内容生产与发布系统。集成 12 �
 
 ### 工作流
 
-1. `run_main()` → `sync_local_history_with_wechat()` → `run_hotspots_workflow()` 或 `run_github_workflow()`
+1. `run_main()` → `sync_local_history_with_wechat()` → `run_hotspots_workflow()`、`run_github_workflow()` 或 `run_aikepu_workflow()`
 2. 热点：`fetch_all_hotspots()` → `filter_tech_hotspots()` → `generate_article()` → `process_article_content()` → `add_draft()`
 3. GitHub：`fetch_one_worthy_project()` → `_ensure_deep_images()`（并行）→ `generate_github_article()` → `process_article_content()` → `add_draft()`
+4. AI科普（三阶段 Map-Reduce 提示词自优化）：`select_next_node()` → Phase 1: `generate_outline()` (生成大纲) → Phase 2: `optimize_prompts()` (LLM 针对大纲每一节做排他、类比和钩子自优化) → Phase 3: `generate_sections_serial()` (串行生成，每节引入前一节末尾 500 字上文) → `process_article_content()` → `add_draft()`
 
 ### 控制信号
 
@@ -63,6 +69,7 @@ AutoWeChat 是微信公众号全自动内容生产与发布系统。集成 12 �
 - 热点发布：外层 `ThreadPoolExecutor` 并行多篇，内层并行（资产 + 摘要）
 - GitHub 配图：`_ensure_deep_images` 用 `ThreadPoolExecutor` 并行 6 种图片来源，集满 3 张即停
 - 封面生成：与文章创作并行（不依赖文章内容）
+- 架构图绘制：`DIAGRAM_PARALLEL_WORKERS` 控制多线程 Chrome/Graphviz 实例的绘图并发度
 - 所有网络调用支持中断（`_interruptible_sleep` + `cancel_event` 检查）
 
 ### 文章格式

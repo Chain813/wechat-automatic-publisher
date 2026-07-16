@@ -33,7 +33,11 @@ This document provides detailed explanations of technical terms, tool names, and
 | **HTML** | HyperText Markup Language, the standard web format. The system converts Markdown articles to HTML with inline styles, adapted to WeChat's rendering engine |
 | **Inline Style** | CSS styles written directly on HTML tags (e.g., `style="color: red;"`). WeChat doesn't support external CSS files, so inline styles are the only way to control article formatting |
 | **Active Title Dedup** | **(NEW)** Pulls both draft and published article titles from WeChat API, matching them with the 4-layer deduplication algorithm to prevent duplicates. |
-| **WeChat Cloud Status Sync** | **(NEW)** Compares local history files with active WeChat titles before running. Purges local records for deleted articles, releasing hot topics/repos. |
+| **WeChat Cloud Status Sync** | **(NEW)** Compares local SQLite history with active WeChat titles before running. Updates `success_status` to `False` in SQLite for deleted articles, releasing hot topics/repos. |
+| **Truthfulness Rule** | **(NEW)** A core constraint that prohibits AI from hallucinating or fabricating data, facts, or code snippets, ensuring all generated content is based on authentic facts and official documentation. |
+| **Three-Phase Map-Reduce Prompt Self-Optimization** | **(NEW)** A large model interaction architecture optimized for generating long educational articles. Phase 1 generates the outline; Phase 2 optimizes the prompts for each section with specific analogies, hooks, and forbidden overlaps to prevent chapter repetitions; Phase 3 generates the sections serially with preceding look-back context. |
+| **Dual-Channel Preview Mechanism** | **(NEW)** WebUI's article preview policy. It prioritizes local HTML preview caches (stored under `data/previews/`) to render article styling, falling back to WeChat Draft Box API. This enables previewing drafts even for failed publishing tasks. |
+| **Real-time Sources Health Polling** | **(NEW)** A synchronization mechanism for the WebUI data source monitoring page. When the Sources tab is active, polls the backend health API every 3 seconds to keep status in sync with workflow progress. |
 
 ---
 

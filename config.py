@@ -122,9 +122,8 @@ SENSITIVE_WORDS = []  # 留空则跳过敏感词过滤
 MAX_TOPICS_PER_RUN = int(os.getenv("MAX_TOPICS_PER_RUN", "3"))      # 每次运行最多发布文章数（热点/GitHub）
 MAX_AIKEPU_PER_RUN = int(os.getenv("MAX_AIKEPU_PER_RUN", "1"))     # AI科普每次最多发布数（默认1篇，技能树逐日推进）
 MAX_TOPIC_CANDIDATES = int(os.getenv("MAX_TOPIC_CANDIDATES", "5"))  # 候选话题上限
-HOTSPOTS_HISTORY_FILE = os.getenv("HOTSPOTS_HISTORY_FILE", "hotspots_history.json")
-GITHUB_HISTORY_FILE = os.getenv("GITHUB_HISTORY_FILE", "github_history.json")
 ASSET_RETENTION_DAYS = int(os.getenv("ASSET_RETENTION_DAYS", "5"))  # 素材保留天数
+DIAGRAM_PARALLEL_WORKERS = int(os.getenv("DIAGRAM_PARALLEL_WORKERS", "5"))  # 图表并行生成线程数（Chrome+API）
 HISTORY_MAX_ENTRIES = int(os.getenv("HISTORY_MAX_ENTRIES", "2000")) # 历史记录最大条数
 
 # 16. GitHub 搜索配置

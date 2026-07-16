@@ -116,11 +116,12 @@ graph TD
 
 基于预设 AI 技能树 DAG，系统化输出从入门到前沿的教育科普文章：
 
-- **融合技能树**：30 个知识点节点覆盖 数学基础 → 深度学习 → Transformer → LLM → Agent 全链路，有明确的先修依赖关系
-- **拓扑排序选题**：自动选择「先修已发布」的节点中出度最高的枢纽节点，确保循序渐进
-- **教育风格文章**：独立的教育风 SYSTEM_PROMPT——类比驱动、图解思维、从 WHY→HOW→WHAT 逐层展开
-- **路线感知**：每篇文章末尾标注在技能树中的位置和下一步学习建议
-- **独立历史追踪**：`aikepu_skill_tree.json` + `aikepu_history.json`，不与热点/GitHub 管线交叉
+- **三阶段 Map-Reduce 提示词自优化** (🆕 v4.2)：系统化生成超长科普文章（≥ 15000字）。大纲生成（Phase 1）→ 提示词自优化（Phase 2，LLM 自主设定每节的类比分工、衔接钩子及排他内容，杜绝跨章节比喻重复或内容“撞车”）→ 串行生成与上文传递（Phase 3，每节引入前一节末尾 500 字，一气呵成）。
+- **融合技能树**：30 个知识点节点覆盖 数学基础 → 深度学习 → Transformer → LLM → Agent 全链路，有明确的先修依赖关系。
+- **拓扑排序选题**：自动选择「先修已发布」的节点中出度最高的枢纽节点，确保循序渐进。
+- **教育风格文章**：独立的教育风 SYSTEM_PROMPT——类比驱动、图解思维、从 WHY→HOW→WHAT 逐层展开。
+- **路线感知**：每篇文章末尾标注在技能树中的位置和下一步学习建议。
+- **独立历史追踪**：使用 SQLite 自动记录发布状态，运行记录完美接入 Web 控制台历史预览。
 
 ```bash
 # CLI 运行
@@ -171,14 +172,14 @@ python main.py --task aikepu
 
 ### Web 管理界面
 
-Flask 暗色主题仪表盘：
+Flask 暗色玻璃拟态主题仪表盘：
 
 | 页面 | 功能说明 |
 |------|---------|
-| **控制台** | 一键启停任务、实时日志流、任务类型选择（热点/GitHub）。支持暂停/恢复/停止 |
-| **历史记录** | 按日期分组，显示发布状态（✓/✗）、时间、草稿 ID、错误信息 |
-| **数据源** | 12 个数据源的健康状态卡片（绿=正常/黄=告警/红=故障） |
-| **设置** | API Key 在线配置，密钥脱敏显示，防注入校验 |
+| **控制台** | 一键启停任务、实时日志流、任务类型选择（热点/GitHub/AI科普）。支持暂停/恢复/停止。 |
+| **历史记录** | 按日期分组展示。**支持离线/在线文章预览** (🆕 v4.2)：每条记录均提供“预览”按钮，点击后可在弹窗中完美渲染文章内容和精美排版。即使发布失败，也可本地浏览失败前的稿件。 |
+| **数据源** | 12 个数据源的健康状态卡片（绿=正常/黄=告警/红=故障）。**支持实时同步** (🆕 v4.2)：在信源 Tab 激活时，每 3 秒自动轮询健康状态，实现与后台采集进度的实时一致。 |
+| **设置** | API Key 在线配置，密钥脱敏显示，防注入校验，支持配置**图表并行生成线程数**（DIAGRAM_PARALLEL_WORKERS）。 |
 
 ### 企业微信集成
 
@@ -224,6 +225,12 @@ wechat_auto_publish/
 ├── requirements.txt           # Python 依赖清单
 ├── run.bat                    # Windows CLI 一键启动脚本
 ├── run_gui.bat                # Windows Web UI 一键启动脚本
+│
+├── data/                      # 数据库与运行时数据配置目录
+│   ├── auto_publish.sqlite    # 标题去重与发布历史 SQLite 数据库
+│   ├── aikepu_skill_tree.json # AI 科普知识点技能树结构文件
+│   ├── aikepu_history.json    # AI 科普已发布节点历史（自动生成）
+│   └── hotspot_cache.sqlite   # 热点采集网络请求缓存数据库（自动生成）
 │
 ├── core/                      # 核心业务逻辑
 │   ├── engine.py              # 工作流调度器，根据任务类型分发到对应工作流
@@ -281,7 +288,7 @@ pip install -r requirements.txt
 
 或直接双击 `run.bat` 自动完成以上步骤。
 
-**额外依赖**：[Graphviz](https://graphviz.org/download/)（架构图生成需要，安装后需添加到系统 PATH）
+**额外依赖**：[Graphviz](https://graphviz.org/download/)（架构图生成需要。在 Windows 系统下，如果安装在默认路径 `C:\Program Files\Graphviz`，系统将自动检测并注入 PATH 环境变量，无需手动配置；若安装在其他路径则需添加到系统 PATH）。
 
 ### 3. 配置环境变量
 
@@ -461,6 +468,7 @@ graph TD
 | `SD_API_URL` | Stable Diffusion WebUI API 地址 | `http://127.0.0.1:7860` |
 | `WECHAT_TITLE_MAX_LEN` | 微信标题最大字数限制 | 64 |
 | `WECHAT_DIGEST_MAX_LEN` | 微信摘要最大字数限制 | 120 |
+| `DIAGRAM_PARALLEL_WORKERS` | 图表并行生成线程数（Chrome + Graphviz） | 5 |
 
 ---
 

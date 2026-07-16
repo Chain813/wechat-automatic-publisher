@@ -15,42 +15,35 @@ from core.aikepu.skill_tree import (
 from core.aikepu.processor import generate_aikepu_article, generate_digest
 from core.shared.article_utils import process_article_content, _print_review_report
 from core.shared.llm import validate_title
-from utils.image_handler import download_cover_image, reset_image_cache
+from utils.image_handler import reset_image_cache
 from core.shared.runtime import check_cancelled
 
 
 def _generate_article_assets(topic_info, publisher):
     """
     为单个选题生成完整文章资产：文章 + 封面 + HTML。
-    复用 hotspots workflow 的并行模式。
     """
     check_cancelled()
     reset_image_cache()
 
-    topic_title = topic_info["title"]
+    import os
+    cover_path = os.path.join("assets", "default_aikepu_cover.jpg")
+    if not os.path.exists(cover_path):
+        cover_path = None
 
-    # 封面生成与文章创作并行
-    with ThreadPoolExecutor(max_workers=1) as cover_pool:
-        cover_future = cover_pool.submit(download_cover_image, topic_title)
+    article_text = generate_aikepu_article(topic_info)
+    if not article_text:
+        print("❌ AI科普文章生成失败，跳过。")
+        return None
 
-        article_text = generate_aikepu_article(topic_info)
-        if not article_text:
-            cover_future.cancel()
-            print("❌ AI科普文章生成失败，跳过。")
-            return None
-
-        print("\n🎨 正在执行排版优化与智能配图 (并行加速)...")
-        final_html, review_data = process_article_content(
-            article_text, publisher, use_ai_first=True
-        )
-        check_cancelled()
-        if not final_html:
-            cover_future.cancel()
-            print("❌ 内容处理后异常，跳过。")
-            return None
-
-        print("\n📸 等待封面图生成...")
-        cover_path = cover_future.result()
+    print("\n🎨 正在执行排版优化与智能配图...")
+    final_html, review_data = process_article_content(
+        article_text, publisher, use_ai_first=True
+    )
+    check_cancelled()
+    if not final_html:
+        print("❌ 内容处理后异常，跳过。")
+        return None
 
     # 封面上传
     thumb_id = None
@@ -68,7 +61,7 @@ def _generate_article_assets(topic_info, publisher):
             except Exception as e:
                 logger.warning("  封面压缩重试失败: {}", e)
     else:
-        print("⚠️ 封面图下载失败，将使用无封面模式发布。")
+        print("⚠️ 默认封面图不存在，将使用无封面模式发布。")
 
     return final_html, review_data, thumb_id, article_text
 
@@ -109,6 +102,7 @@ def _publish_single_topic(topic_info, publisher):
             sensitive_words=review_data["sensitive_words"],
             cover_ok=thumb_id is not None,
             digest=digest_text,
+            is_long_article=True,
         )
 
         # 发布到微信草稿箱
@@ -116,14 +110,54 @@ def _publish_single_topic(topic_info, publisher):
             clean_title, final_html, thumb_id, digest_text
         )
 
+        from datetime import datetime
         if success:
             draft_id = result["media_id"]
             print(f"\n✅ 「{clean_title}」发布成功 → {draft_id}")
+            
+            # 写入 SQLite 数据库以供 WebUI 历史记录和查重使用
+            try:
+                from core.db.manager import db_manager
+                from core.db.models import ArticleHistory
+                session = db_manager.get_session()
+                ah = ArticleHistory(
+                    title=clean_title,
+                    source_type="aikepu",
+                    publish_date=datetime.now().strftime("%Y-%m-%d"),
+                    success_status=True,
+                    media_id=draft_id
+                )
+                session.add(ah)
+                session.commit()
+                db_manager.remove_session()
+            except Exception as db_err:
+                logger.warning("写入 SQLite 历史失败: {}", db_err)
+
             mark_published(node_id, clean_title, draft_id=draft_id)
             return topic_title, True, None, node_id
         else:
             err = result.get("errmsg", "未知错误")
             print(f"❌ 「{clean_title}」发布失败：{err}")
+            
+            # 写入失败的 SQLite 数据库记录
+            try:
+                from core.db.manager import db_manager
+                from core.db.models import ArticleHistory
+                session = db_manager.get_session()
+                ah = ArticleHistory(
+                    title=clean_title,
+                    source_type="aikepu",
+                    publish_date=datetime.now().strftime("%Y-%m-%d"),
+                    success_status=False,
+                    media_id=None,
+                    error_log=err
+                )
+                session.add(ah)
+                session.commit()
+                db_manager.remove_session()
+            except Exception as db_err:
+                logger.warning("写入 SQLite 历史失败: {}", db_err)
+
             release_reserved(node_id)  # 发布失败，释放节点以便重试
             return topic_title, False, err, node_id
 
@@ -146,7 +180,7 @@ def run_aikepu_workflow(publisher):
 
     # 打印技能树统计
     stats = get_skill_tree_stats()
-    print(f"\n🌳 AI 技能树状态:")
+    print("\n🌳 AI 技能树状态:")
     print(f"   总节点: {stats['total']}")
     print(f"   已发布: {stats['published']}")
     print(f"   可发布: {stats['available']}")

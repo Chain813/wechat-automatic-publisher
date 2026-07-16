@@ -16,26 +16,33 @@
                 <span class="badge">v3.0</span>
             </div>
             <nav class="nav-menu">
-                <a href="#" class="nav-item active" data-target="dashboard">
-                    <span class="icon">📊</span> Console
+                <a href="#" class="nav-item active" data-target="dashboard" id="nav-console-link">
+                    <span class="icon">📊</span> <span data-i18n="nav-console">Console</span>
                 </a>
-                <a href="#" class="nav-item" data-target="history">
-                    <span class="icon">📜</span> History
+                <a href="#" class="nav-item" data-target="history" id="nav-history-link">
+                    <span class="icon">📜</span> <span data-i18n="nav-history">History</span>
                 </a>
-                <a href="#" class="nav-item" data-target="sources">
-                    <span class="icon">📡</span> Sources
+                <a href="#" class="nav-item" data-target="sources" id="nav-sources-link">
+                    <span class="icon">📡</span> <span data-i18n="nav-sources">Sources</span>
                 </a>
-                <a href="#" class="nav-item" data-target="schedule">
-                    <span class="icon">⏰</span> Schedule
+                <a href="#" class="nav-item" data-target="schedule" id="nav-schedule-link">
+                    <span class="icon">⏰</span> <span data-i18n="nav-schedule">Schedule</span>
                 </a>
-                <a href="#" class="nav-item" data-target="settings">
-                    <span class="icon">⚙️</span> Settings
+                <a href="#" class="nav-item" data-target="settings" id="nav-settings-link">
+                    <span class="icon">⚙️</span> <span data-i18n="nav-settings">Settings</span>
                 </a>
             </nav>
+            
+            <div class="lang-toggle-container">
+                <button id="btn-lang-toggle" class="lang-btn">
+                    <span class="lang-icon">🌐</span> <span id="lang-btn-text" data-i18n="btn-lang-text">中文</span>
+                </button>
+            </div>
+
             <div class="system-status">
                 <div class="status-indicator">
                     <div class="dot idle" id="status-dot"></div>
-                    <span id="status-text">Idle</span>
+                    <span id="status-text" data-i18n="status-idle">Idle</span>
                 </div>
             </div>
         </aside>
@@ -44,40 +51,40 @@
             <!-- Dashboard -->
             <section id="dashboard" class="view-section active">
                 <header class="view-header">
-                    <h2>Console</h2>
-                    <p>Auto fetch, generate, and publish to WeChat</p>
+                    <h2 data-i18n="console-title">Console</h2>
+                    <p data-i18n="console-subtitle">Auto fetch, generate, and publish to WeChat</p>
                 </header>
                 <div class="action-panel glass-panel">
                     <div class="panel-info">
-                        <h3>Run Workflow</h3>
-                        <p>Scan hotspots, generate articles with DeepSeek, add images, publish to WeChat drafts.</p>
+                        <h3 data-i18n="run-workflow-title">Run Workflow</h3>
+                        <p data-i18n="run-workflow-desc">Scan hotspots, generate articles with DeepSeek, add images, publish to WeChat drafts.</p>
                         <div class="task-selector">
                             <label class="radio-label">
                                 <input type="radio" name="task_type" value="hotspots" checked>
-                                Hotspots
+                                <span data-i18n="task-hotspots">Hotspots</span>
                             </label>
                             <label class="radio-label">
                                 <input type="radio" name="task_type" value="github">
-                                GitHub Trending
+                                <span data-i18n="task-github">GitHub Trending</span>
                             </label>
                             <label class="radio-label">
                                 <input type="radio" name="task_type" value="aikepu">
-                                🎓 AI 科普
+                                <span data-i18n="task-aikepu">🎓 AI 科普</span>
                             </label>
                         </div>
                     </div>
                     <div class="action-buttons">
                         <button id="btn-start" class="btn btn-primary glow-effect">
-                            <span class="btn-icon">▶</span> Start
+                            <span class="btn-icon">▶</span> <span data-i18n="btn-start">Start</span>
                         </button>
                         <button id="btn-pause" class="btn btn-warning" style="display:none;">
-                            <span class="btn-icon">⏸</span> Pause
+                            <span class="btn-icon">⏸</span> <span data-i18n="btn-pause">Pause</span>
                         </button>
                         <button id="btn-resume" class="btn btn-success" style="display:none;">
-                            <span class="btn-icon">▶</span> Resume
+                            <span class="btn-icon">▶</span> <span data-i18n="btn-resume">Resume</span>
                         </button>
                         <button id="btn-stop" class="btn btn-danger" style="display:none;">
-                            <span class="btn-icon">⏹</span> Stop
+                            <span class="btn-icon">⏹</span> <span data-i18n="btn-stop">Stop</span>
                         </button>
                     </div>
                 </div>
@@ -100,8 +107,8 @@
             <!-- History -->
             <section id="history" class="view-section">
                 <header class="view-header">
-                    <h2>History</h2>
-                    <p>Published articles and results</p>
+                    <h2 data-i18n="history-title">History</h2>
+                    <p data-i18n="history-subtitle">Published articles and results</p>
                 </header>
                 <div id="history-content" class="glass-panel history-panel">
                     <div class="log-line system">Loading...</div>
@@ -111,8 +118,8 @@
             <!-- Sources -->
             <section id="sources" class="view-section">
                 <header class="view-header">
-                    <h2>Sources</h2>
-                    <p>News source health status</p>
+                    <h2 data-i18n="sources-title">Sources</h2>
+                    <p data-i18n="sources-subtitle">News source health status</p>
                 </header>
                 <div id="sources-content" class="sources-grid">
                     <div class="log-line system">Loading...</div>
@@ -122,15 +129,15 @@
             <!-- Schedule -->
             <section id="schedule" class="view-section">
                 <header class="view-header">
-                    <h2>Schedule</h2>
-                    <p>Automate your publishing tasks</p>
+                    <h2 data-i18n="schedule-title">Schedule</h2>
+                    <p data-i18n="schedule-subtitle">Automate your publishing tasks</p>
                 </header>
                 
                 <div class="action-panel glass-panel mb-4">
-                    <h3>Add New Task</h3>
+                    <h3 data-i18n="add-new-task">Add New Task</h3>
                     <div class="form-group row">
                         <div class="col">
-                            <label>Task Type</label>
+                            <label data-i18n="sched-task-type-label">Task Type</label>
                             <select id="sched-task-type" class="form-control">
                                 <option value="hotspots">Hotspots</option>
                                 <option value="github">GitHub</option>
@@ -138,17 +145,17 @@
                             </select>
                         </div>
                         <div class="col">
-                            <label>Cron Expression</label>
+                            <label data-i18n="sched-cron-label">Cron Expression</label>
                             <input type="text" id="sched-cron" class="form-control" placeholder="0 8 * * * (每天早8点)" value="0 8 * * *">
                         </div>
                         <div class="col" style="display:flex; align-items:flex-end;">
-                            <button id="btn-add-schedule" class="btn btn-primary glow-effect" style="width:100%">Add</button>
+                            <button id="btn-add-schedule" class="btn btn-primary glow-effect" style="width:100%" data-i18n="sched-add-btn">Add</button>
                         </div>
                     </div>
                 </div>
 
                 <div class="glass-panel">
-                    <h3>Active Scheduled Jobs</h3>
+                    <h3 data-i18n="active-jobs-title">Active Scheduled Jobs</h3>
                     <div id="schedule-jobs-list" style="margin-top: 15px;">
                         <div class="log-line system">Loading jobs...</div>
                     </div>
@@ -158,45 +165,61 @@
             <!-- Settings -->
             <section id="settings" class="view-section">
                 <header class="view-header">
-                    <h2>Settings</h2>
-                    <p>API keys and configuration</p>
+                    <h2 data-i18n="settings-title">Settings</h2>
+                    <p data-i18n="settings-subtitle">API keys and configuration</p>
                 </header>
                 <form id="config-form" class="settings-form glass-panel">
                     <div class="form-group">
-                        <label for="wechat-appid">WeChat AppID</label>
+                        <label for="wechat-appid" data-i18n="label-wechat-appid">WeChat AppID</label>
                         <input type="text" id="wechat-appid" name="WECHAT_APP_ID" class="form-control" placeholder="wxxxxxxxxxxxxxxxx">
                     </div>
                     <div class="form-group">
-                        <label for="wechat-secret">WeChat AppSecret</label>
+                        <label for="wechat-secret" data-i18n="label-wechat-secret">WeChat AppSecret</label>
                         <input type="password" id="wechat-secret" name="WECHAT_APP_SECRET" class="form-control" placeholder="Secret">
                     </div>
                     <div class="form-group">
-                        <label for="llm-apikey">DeepSeek API Key</label>
+                        <label for="llm-apikey" data-i18n="label-llm-apikey">DeepSeek API Key</label>
                         <input type="password" id="llm-apikey" name="LLM_API_KEY" class="form-control" placeholder="sk-xxxx">
                     </div>
                     <div class="form-group">
-                        <label for="gemini-apikey">Gemini API Key (optional)</label>
+                        <label for="gemini-apikey" data-i18n="label-gemini-apikey">Gemini API Key (optional)</label>
                         <input type="password" id="gemini-apikey" name="GEMINI_API_KEY" class="form-control" placeholder="AIzaSy...">
                     </div>
                     <div class="form-group">
-                        <label for="llm-model">LLM Model</label>
+                        <label for="llm-model" data-i18n="label-llm-model">LLM Model</label>
                         <select id="llm-model" name="LLM_MODEL" class="form-control">
                             <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
                             <option value="deepseek-v4-flash">DeepSeek V4 Flash</option>
                         </select>
                     </div>
                     <div class="form-group">
-                        <label for="qywechat-webhook">QYWeChat Webhook (optional)</label>
+                        <label for="qywechat-webhook" data-i18n="label-qywechat-webhook">QYWeChat Webhook (optional)</label>
                         <input type="text" id="qywechat-webhook" name="QYWECHAT_WEBHOOK" class="form-control" placeholder="https://qyapi.weixin.qq.com/...">
                     </div>
+                    <div class="form-group">
+                        <label for="diagram-workers" data-i18n="label-diagram-workers">图表并行线程数</label>
+                        <input type="number" id="diagram-workers" name="DIAGRAM_PARALLEL_WORKERS" class="form-control" min="1" max="8" placeholder="3">
+                    </div>
                     <div class="form-actions">
-                        <button type="submit" class="btn btn-primary glow-effect">Save</button>
+                        <button type="submit" class="btn btn-primary glow-effect" data-i18n="btn-save-settings">Save</button>
                         <span id="save-msg" class="save-message"></span>
                     </div>
                 </form>
             </section>
         </main>
+    <!-- Preview Modal -->
+    <div id="preview-modal" class="modal-overlay">
+        <div class="modal-container glass-panel">
+            <div class="modal-header">
+                <span class="modal-title" id="preview-modal-title" data-i18n="preview-modal-title">Article Preview</span>
+                <button class="modal-close" id="btn-close-preview">&times;</button>
+            </div>
+            <div class="modal-body">
+                <iframe class="modal-iframe" id="preview-iframe" src="about:blank"></iframe>
+            </div>
+        </div>
     </div>
+
     <script src="/static/js/app.js"></script>
 </body>
 </html>

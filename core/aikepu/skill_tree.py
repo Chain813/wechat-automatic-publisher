@@ -10,8 +10,8 @@ import threading
 from datetime import datetime
 from loguru import logger
 
-SKILL_TREE_FILE = os.getenv("AIKEPU_SKILL_TREE", "aikepu_skill_tree.json")
-HISTORY_FILE = os.getenv("AIKEPU_HISTORY", "aikepu_history.json")
+SKILL_TREE_FILE = os.getenv("AIKEPU_SKILL_TREE", os.path.join("data", "aikepu_skill_tree.json"))
+HISTORY_FILE = os.getenv("AIKEPU_HISTORY", os.path.join("data", "aikepu_history.json"))
 
 _tree_cache = None
 _tree_lock = threading.Lock()

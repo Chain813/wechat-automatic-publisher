@@ -10,13 +10,12 @@ from datetime import datetime, timedelta
 from loguru import logger
 from github import Github
 from utils.http_client import build_api_session
+from core.db.manager import db_manager
+from core.db.models import ArticleHistory
 
 from config import GITHUB_SEARCH_STARS_THRESHOLDS, GITHUB_SEARCH_LANGUAGES
 
 HTTP_SESSION = build_api_session()
-
-from core.db.manager import db_manager
-from core.db.models import ArticleHistory
 
 def _load_github_history():
     session = db_manager.get_session()
@@ -302,7 +301,7 @@ def fetch_one_worthy_project():
             if other_images is None:
                 other_images = []
             other_images.insert(0, social_preview_url)
-            logger.info(f"  🖼️ 发现 Social Preview 封面图")
+            logger.info("  🖼️ 发现 Social Preview 封面图")
 
         # 多策略提取 Demo/主页 URL
         homepage_url = _detect_demo_url(best_repo, chinese_readme_excerpt, readme_excerpt)

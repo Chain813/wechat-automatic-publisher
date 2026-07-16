@@ -92,21 +92,28 @@ python main.py --task hotspots
 
 ```
 热点文章：
-  12源采集 → LLM选题 → LLM创作 → 配图下载上传 → 微信草稿
+  12源采集 → LLM选题 → LLM创作 → 配图下载上传 → 微信草稿 + 本地预览缓存
 
 GitHub文章：
-  Search API → LLM评估 → 并行配图(6路) → LLM创作 → 微信草稿
+  Search API → LLM评估 → 并行配图(6路) → LLM创作 → 微信草稿 + 本地预览缓存
+
+AI科普文章（三阶段 Map-Reduce）：
+  DAG技能树选题 → Phase 1:大纲生成 → Phase 2:提示词自优化 → Phase 3:串行生成与上文传递(每步传入前一步末尾500字) → 微信草稿 + 本地预览缓存
 ```
 
 ### 关键设计决策
 
 | 决策 | 理由 |
 |------|------|
-| ThreadPoolExecutor 而非 asyncio | requests 库同步 API，改动成本低 |
-| cancel_event 全局检查点 | 用户可随时中断，无需等待长操作完成 |
-| 配图并行 + 集满即停 | 6 种来源同时跑，最快 3 个胜出 |
-| LLM 提示词在 processor.py | 集中管理，方便调优 |
-| 微信 API 封装在 publisher.py | Token 自动刷新、线程安全、标题去重 |
+| ThreadPoolExecutor 而非 asyncio | requests 库同步 API，改动成本低。 |
+| cancel_event 全局检查点 | 用户可随时中断，无需等待长操作完成。 |
+| 配图并行 + 集满即停 | 6 种来源同时跑，最快 3 个胜出。 |
+| Map-Reduce 提示词自优化 | 专门用于超长科普文生成。用第2步的大纲优化逻辑，设定排他规则和衔接钩子，消除多章节内容“失忆”和比喻重复。 |
+| 双通道预览机制 | `/api/preview/<preview_id>` 接口优先读取本地 `data/previews/*.html` 静态缓存，若不存在则回退请求微信 API。不仅提供离线预览，还支持了“发布失败”任务的稿件排版预览。 |
+| 实时信源健康轮询 | 前端信源 Tab 激活后，启动 3 秒一次的定时轮询 (`setInterval`)，实现无刷新健康状态同步，切换离开时自动销毁。 |
+| Graphviz Windows PATH 自动注入 | 在 `utils/lite_render.py` 中，如果检测到 Windows 平台且默认安装路径 `C:\Program Files\Graphviz\bin` 存在但未加入系统 PATH，运行时会自动将其动态添加到 `os.environ["PATH"]`，极大降低了本地部署和运行难度。 |
+| LLM 提示词在 processor.py | 集中管理，方便调优。 |
+| 微信 API 封装在 publisher.py | Token 自动刷新、线程安全、标题去重。 |
 
 ---
 
@@ -407,12 +414,12 @@ grep -i "error\|fail\|exception" run.log
 ### 重置状态
 
 ```bash
-# 清理历史记录（重新开始）
-rm hotspots_history.json github_history.json github_publish_records.json
+# 重置 SQLite 数据库（重新开始）
+rm data/auto_publish.sqlite
 
 # 清理图片缓存
 rm -rf assets/
 
-# 清理热点缓存
-rm hotspot_cache.sqlite
+# 清理热点缓存及 AI 科普历史
+rm data/hotspot_cache.sqlite data/aikepu_history.json
 ```

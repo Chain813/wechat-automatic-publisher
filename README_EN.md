@@ -92,9 +92,11 @@ graph TD
 **Multi-Source Hotspot Aggregation** — Parallel scraping from 12 platforms (Weibo, IT Home, 36Kr, Baidu, Zhihu, CSDN, RSS, Politics, Toutiao, The Paper, Huxiu, Douyin). Fully modularized via `PluginManager` with source-level health monitoring and automatic degradation.
 
 **🎓 AI Kepu (Knowledge Popularization)** — Systematic educational article generation driven by a predefined DAG (Directed Acyclic Graph) Skill Tree:
+- **Three-Phase Map-Reduce Prompt Self-Optimization** (🆕 v4.2): Specifically optimized for long-form educational articles (≥ 15,000 words). Outlining (Phase 1) → Prompt Self-Optimization (Phase 2, where LLM dynamically designs specific analogies, hooks, and forbidden overlaps for each section to prevent repetitive analogies across chapters) → Serial Generation & Context Passing (Phase 3, injecting the tail 500 words of the previous section to ensure smooth transitions).
 - **Skill Tree Integration**: 30 knowledge nodes covering Math -> Deep Learning -> Transformer -> LLM -> Agents, with strict prerequisites.
 - **Topological Selection**: Automatically selects hub nodes from unlocked prerequisites to ensure a step-by-step learning curve.
 - **Educational Persona**: Uses analogies, visual thinking, and a WHY -> HOW -> WHAT structure.
+- **Independent History Tracking**: Integrated with SQLite to record publication history and render them seamlessly inside the Web Console.
 
 **AI Deep Creation** — DeepSeek-powered 2500-3500 word analysis articles.
 - **Personalized Writer Personas (v4.1)**: Both hotspot and GitHub writers have full personality profiles — background, thinking patterns, expression principles, worldview. No more "AI-style" writing.
@@ -118,7 +120,11 @@ graph TD
 
 **Safety & Compliance** — 4-strategy title dedup (exact/fuzzy/keyword/AI semantic). Cross-topic internal dedup. Draft box audit to prevent duplicates.
 
-**Web Management UI** — Flask dark-theme dashboard with one-click task start/stop, real-time log streaming, article history, source health monitoring, online configuration.
+**Web Management UI** — Flask glassmorphism dark-theme dashboard:
+- **Console**: One-click control (Start/Pause/Resume/Stop) and real-time streaming logs.
+- **History Preview** (🆕 v4.2): Supports online and offline article previews. Click "Preview" next to any record to inspect draft style/content. Offline HTML cache files (saved under `data/previews/`) allow inspecting drafts even for failed tasks.
+- **Sources Health** (🆕 v4.2): Features 12 source status cards. When the tab is active, polls the health API every 3 seconds to keep status in sync with workflow progress.
+- **Settings**: Online configurations for API keys, models, and **Diagram Parallel Workers** (`DIAGRAM_PARALLEL_WORKERS`).
 
 **WeChat Integration** — Auto-push notifications to WeChat group bots after publishing.
 
@@ -149,6 +155,11 @@ wechat_auto_publish/
 ├── requirements.txt           # Dependencies
 ├── run.bat                    # CLI launch script
 ├── run_gui.bat                # Web UI launch script
+├── data/                      # Database & runtime configuration directory
+│   ├── auto_publish.sqlite    # SQLite database for title deduplication and history
+│   ├── aikepu_skill_tree.json # AI science popularization skill tree configuration
+│   ├── aikepu_history.json    # AI science popularization publish history (auto-generated)
+│   └── hotspot_cache.sqlite   # Network hotspot request cache database (auto-generated)
 ├── core/
 │   ├── engine.py              # Workflow dispatcher
 │   ├── hotspots/
@@ -346,6 +357,7 @@ Adjustable in `config.py` or `.env`:
 | `GITHUB_TOKEN` | GitHub API token (optional) | token-based |
 | `SD_ENABLED` | Enable local Stable Diffusion | `True` |
 | `SD_API_URL` | SD WebUI API address | `http://127.0.0.1:7860` |
+| `DIAGRAM_PARALLEL_WORKERS` | Parallel diagram generation threads (Chrome + Graphviz) | 5 |
 
 ---
 
@@ -369,7 +381,7 @@ Covers: Technical Terms | Image Terms | GitHub Terms | WeChat Terms
 ## 📋 Requirements
 
 - Python 3.8+
-- [Graphviz](https://graphviz.org/download/) (for architecture diagram generation, add to PATH)
+- [Graphviz](https://graphviz.org/download/) (for architecture diagram generation. On Windows, if installed at the default `C:\Program Files\Graphviz` path, the system will automatically inject it into the PATH environment variable without manual setup; otherwise, add it to system PATH manually)
 - Chrome browser (for Selenium fallback scraping)
 - Optional: [Ollama](https://ollama.com) for local vision AI
 - Optional: [Stable Diffusion](https://github.com/AUTOMATIC1111/stable-diffusion-webui) (WebUI with `--api` enabled)

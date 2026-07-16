@@ -125,7 +125,6 @@ def run_workflow_thread(task_type="hotspots"):
         except queue.Full:
             logger.warning("日志队列已满，丢弃消息")
     except Exception as e:
-        from loguru import logger
         logger.error(f"Workflow failed: {e}")
         try:
             log_queue.put_nowait(f"SYSTEM | Workflow crashed: {e}\n")
@@ -303,6 +302,20 @@ def get_status():
     })
 
 
+_publisher_instance = None
+_publisher_lock = threading.Lock()
+
+def _get_publisher():
+    global _publisher_instance
+    if _publisher_instance is None:
+        with _publisher_lock:
+            if _publisher_instance is None:
+                from config import WECHAT_APP_ID, WECHAT_APP_SECRET
+                from core.shared.publisher import WeChatPublisher
+                _publisher_instance = WeChatPublisher(WECHAT_APP_ID, WECHAT_APP_SECRET)
+    return _publisher_instance
+
+
 @app.route('/api/config', methods=['GET', 'POST'])
 def handle_config():
     env_file = '.env'
@@ -315,6 +328,7 @@ def handle_config():
             "QYWECHAT_WEBHOOK": os.getenv("QYWECHAT_WEBHOOK", ""),
             "LLM_MODEL": os.getenv("LLM_MODEL", "deepseek-v4-pro"),
             "GEMINI_API_KEY": _mask_secret(os.getenv("GEMINI_API_KEY", "")),
+            "DIAGRAM_PARALLEL_WORKERS": os.getenv("DIAGRAM_PARALLEL_WORKERS", "5"),
         })
     else:
         data = request.json
@@ -324,28 +338,45 @@ def handle_config():
             import pathlib
             pathlib.Path(env_file).touch()
         for key in ["WECHAT_APP_ID", "WECHAT_APP_SECRET", "LLM_API_KEY",
-                     "QYWECHAT_WEBHOOK", "LLM_MODEL", "GEMINI_API_KEY"]:
+                     "QYWECHAT_WEBHOOK", "LLM_MODEL", "GEMINI_API_KEY",
+                     "DIAGRAM_PARALLEL_WORKERS"]:
             if key in data and "*" not in str(data[key]):
                 value = str(data[key]).strip()
                 if len(value) > 500 or '\n' in value or '\r' in value:
-                    continue  # 防止 .env 注入和异常大值
+                    continue  # 防止 .env 注入 and 异常大值
                 set_key(env_file, key, value)
         load_dotenv(env_file, override=True)
+        
+        # 重置全局缓存以使新配置生效
+        global _publisher_instance
+        _publisher_instance = None
+        
         return jsonify({"status": "success", "message": "Config saved"})
 
 
 @app.route('/api/history', methods=['GET'])
 def get_history():
     try:
-        from core.db.manager import db_manager
         from core.db.models import ArticleHistory
+        import re
         session = db_manager.get_session()
         
-        # Get history from the last 7 days
-        from datetime import datetime, timedelta
-        cutoff_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+        # 读取本地的所有记录
+        records = session.query(ArticleHistory).order_by(ArticleHistory.publish_date.desc(), ArticleHistory.id.desc()).all()
         
-        records = session.query(ArticleHistory).filter(ArticleHistory.publish_date >= cutoff_date).order_by(ArticleHistory.publish_date.desc(), ArticleHistory.id.desc()).all()
+        # 获取微信上已发表的标题列表，用来判断是否已发送（即公众号群发出来的意思）
+        published_titles = []
+        try:
+            pub = _get_publisher()
+            if pub and pub.access_token:
+                published_titles = pub.get_published_titles(count=100)
+        except Exception as e:
+            logger.warning("获取已发表标题失败: {}", e)
+
+        def clean_t(t):
+            return re.sub(r'[^\w\u4e00-\u9fff]', '', t).lower() if t else ""
+
+        published_titles_clean = {clean_t(pt) for pt in published_titles if pt}
         
         data = {}
         for r in records:
@@ -356,17 +387,105 @@ def get_history():
                 data[date_str]["topics"].append(r.title)
                 
             if r.success_status or r.error_log:
+                is_published = False
+                if r.success_status and r.title:
+                    is_published = clean_t(r.title) in published_titles_clean
+
+                import hashlib
+                title_hash = hashlib.md5(r.title.encode('utf-8')).hexdigest()
+                preview_id = r.media_id if r.success_status else f"fail_{title_hash}"
+
                 data[date_str]["results"].append({
                     "topic": r.title,
                     "success": r.success_status,
+                    "is_published": is_published,
                     "draft_id": r.media_id,
+                    "preview_id": preview_id,
                     "error": r.error_log,
                     "time": r.created_at.strftime("%H:%M:%S") if r.created_at else ""
                 })
         
         return jsonify({"history": data})
     except Exception as e:
+        logger.exception("获取历史记录失败: {}", e)
         return jsonify({"history": {}, "error": str(e)})
+
+
+@app.route('/api/preview/<preview_id>', methods=['GET'])
+def preview_draft(preview_id):
+    # 1. 尝试从本地 previews 文件夹读取
+    local_path = os.path.join("data", "previews", f"{preview_id}.html")
+    if os.path.exists(local_path):
+        try:
+            with open(local_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            return content
+        except Exception as e:
+            logger.warning("读取本地预览文件失败: {}", e)
+
+    # 2. 如果本地不存在且不是以 'fail_' 开头，尝试从微信 API 获取（兼容历史已上传草稿）
+    if not preview_id.startswith("fail_"):
+        try:
+            pub = _get_publisher()
+            if pub and pub.access_token:
+                url = f"https://api.weixin.qq.com/cgi-bin/draft/get?access_token={pub.access_token}"
+                res = pub.session.post(url, json={"media_id": preview_id}, timeout=10).json()
+                if "news_item" in res and len(res["news_item"]) > 0:
+                    item = res["news_item"][0]
+                    title = item.get("title", "")
+                    body = item.get("content", "")
+                    
+                    preview_html = f"""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta charset="utf-8">
+                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                        <title>{title}</title>
+                        <style>
+                            body {{
+                                font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
+                                padding: 20px;
+                                max-width: 677px;
+                                margin: 0 auto;
+                                color: #333;
+                                line-height: 1.6;
+                                background-color: #fff;
+                            }}
+                            img {{
+                                max-width: 100%;
+                                height: auto;
+                                display: block;
+                                margin: 10px auto;
+                            }}
+                            blockquote {{
+                                border-left: 4px solid #ddd;
+                                padding-left: 15px;
+                                color: #777;
+                                margin: 10px 0;
+                            }}
+                        </style>
+                    </head>
+                    <body>
+                        <h1 style="font-size: 24px; margin-bottom: 20px;">{title}</h1>
+                        <div class="content">
+                            {body}
+                        </div>
+                    </body>
+                    </html>
+                    """
+                    # 缓存到本地以便下次快速载入
+                    try:
+                        os.makedirs(os.path.join("data", "previews"), exist_ok=True)
+                        with open(local_path, "w", encoding="utf-8") as f:
+                            f.write(preview_html)
+                    except Exception:
+                        pass
+                    return preview_html
+        except Exception as e:
+            logger.warning("从微信接口获取草稿失败: {}", e)
+
+    return f"<h3>未找到该文章的预览内容</h3><p>可能由于该任务运行在旧版本上（本地未缓存），或者微信端草稿已被群发/发布/删除。</p>", 404
 
 
 @app.route('/api/sources', methods=['GET'])
@@ -389,10 +508,10 @@ if __name__ == '__main__':
     if CLOUD_MODE:
         host = "0.0.0.0"
         port = int(os.getenv("PORT", "5000"))
-        print(f"☁️  AutoWeChat Cloud Mode")
+        print("☁️  AutoWeChat Cloud Mode")
         print(f"   Listening on: http://0.0.0.0:{port}")
         if WEBUI_TOKEN:
-            print(f"   Token auth: enabled")
+            print("   Token auth: enabled")
     else:
         host = "127.0.0.1"
         port = 5000

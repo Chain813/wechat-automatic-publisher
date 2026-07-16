@@ -35,9 +35,12 @@ def _download_and_upload_url(url, publisher, prefix="remote"):
             return None
 
         ext = ".jpg"
-        if ".png" in url.lower(): ext = ".png"
-        elif ".gif" in url.lower(): ext = ".gif"
-        elif ".webp" in url.lower(): ext = ".webp"
+        if ".png" in url.lower():
+            ext = ".png"
+        elif ".gif" in url.lower():
+            ext = ".gif"
+        elif ".webp" in url.lower():
+            ext = ".webp"
         tmp_path = os.path.join("assets", f"{prefix}_{int(time.time()*1000)}{ext}")
         os.makedirs("assets", exist_ok=True)
         with open(tmp_path, 'wb') as f:
@@ -161,7 +164,7 @@ def _ensure_deep_images(projects, publisher):
             p['image_url'] = urls[0]
             print(f"  📸 最终配图: {len(urls)} 张 — {[u[:60]+'...' for u in urls]}")
         else:
-            print(f"  ❌ 最终配图: 0 张（所有来源均失败）")
+            print("  ❌ 最终配图: 0 张（所有来源均失败）")
 
 
 # --- 流水线节点定义 ---

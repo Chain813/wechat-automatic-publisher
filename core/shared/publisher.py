@@ -73,21 +73,57 @@ def _keyword_overlap_ratio(keywords_a, keywords_b):
     return len(intersection) / min_size if min_size > 0 else 0.0
 
 
+def _select_semantic_candidates(new_title, existing_titles, max_candidates=15):
+    """
+    基于本地关键词重叠和低阈值字符模糊匹配，筛选出最可能相似的候选标题，
+    避免将成百上千个不相关标题全部传给大模型，节省 token 费用并提高速度。
+    """
+    new_keywords = _extract_keywords(new_title)
+    candidates_with_score = []
+
+    for old in existing_titles:
+        old_keywords = _extract_keywords(old)
+        intersection = new_keywords & old_keywords
+        score = len(intersection)
+
+        # 辅助计算粗略字符相似度 (0-100)
+        norm_new = _normalize_title(new_title)
+        norm_old = _normalize_title(old)
+        if fuzz is not None:
+            ratio = fuzz.ratio(norm_new, norm_old)
+        else:
+            ratio = int(SequenceMatcher(None, norm_new, norm_old).ratio() * 100)
+
+        # 如果有关键词交集，或者字符相似度达到 20%+，或者是极短的标题
+        if score > 0 or ratio >= 20 or len(new_title) < 8 or len(old) < 8:
+            candidates_with_score.append((old, score, ratio))
+
+    # 排序：优先按关键词交集数量，其次按相似度比例，均降序
+    candidates_with_score.sort(key=lambda x: (x[1], x[2]), reverse=True)
+
+    return [item[0] for item in candidates_with_score[:max_candidates]]
+
+
 # ---- AI 语义查重 (轻量，约 300 tokens) ----
 def _ai_semantic_check(new_title, existing_titles):
     """
     调用 DeepSeek 判断新标题是否与已有标题覆盖同一议题。
-    仅在本地策略无法确定时使用，token 消耗极低 (~300 tokens)。
+    使用本地粗筛机制降低输入给大模型的标题规模，提升响应速度并节省 token 资源。
     返回 (is_duplicate: bool, matched_title: str or None)
     """
-    if not existing_titles:
+    # 1. 本地粗筛最相关的候选标题
+    candidates = _select_semantic_candidates(new_title, existing_titles, max_candidates=15)
+    if not candidates:
+        logger.info("  [AI查重粗筛] 未发现任何存在潜在交集的候选标题，直接判定为【不重复】")
         return False, None
+
     try:
         from core.shared.llm import call_deepseek_with_retry
     except ImportError:
         return False, None
 
-    titles_text = "\n".join(f"{i+1}. {t}" for i, t in enumerate(existing_titles))
+    logger.info("  [AI查重粗筛] 筛选出 {} 个可能相关的历史标题送审 AI 语义查重", len(candidates))
+    titles_text = "\n".join(f"{i+1}. {t}" for i, t in enumerate(candidates))
     prompt = (
         f"已发布文章标题列表：\n{titles_text}\n\n"
         f"待发布话题：「{new_title}」\n\n"
@@ -97,12 +133,19 @@ def _ai_semantic_check(new_title, existing_titles):
         "如果不重复，请回答：不重复\n"
         "只输出上面的格式，不要有其他文字。"
     )
+    
+    # 强制将 AI 语义查重重载为轻量级 flash 模型（例如将 deepseek-v4-pro 降级为 deepseek-v4-flash）
+    from config import LLM_MODEL
+    semantic_model = LLM_MODEL.replace("-pro", "-flash").replace("pro", "flash")
+    logger.info("  [AI查重] 使用轻量级模型 {} 进行快速判定...", semantic_model)
+
     try:
         result = call_deepseek_with_retry(
             prompt,
             system_content="你是一个标题去重审核员。只按指定格式输出，不要解释。",
             max_retries=1,
             backoff_base=0.5,
+            model=semantic_model
         )
         if not result:
             return False, None
@@ -112,12 +155,12 @@ def _ai_semantic_check(new_title, existing_titles):
             if len(parts) >= 2:
                 try:
                     idx = int(parts[1].strip()) - 1
-                    if 0 <= idx < len(existing_titles):
-                        return True, existing_titles[idx]
+                    if 0 <= idx < len(candidates):
+                        return True, candidates[idx]
                 except (ValueError, IndexError):
                     pass
             # 格式不标准但确认重复
-            return True, existing_titles[0]
+            return True, candidates[0]
         return False, None
     except Exception as exc:
         logger.debug("AI 语义查重异常: {}", exc)
@@ -163,19 +206,42 @@ class WeChatPublisher:
                     self._refresh_token()
 
     def upload_image(self, image_path):
-        """上传素材，返回 media_id"""
+        """上传素材，返回 media_id（优先使用永久素材接口以适配草稿箱封面要求）"""
         self._ensure_valid_token()
         if not self.access_token or not image_path or not os.path.exists(image_path):
             return None
-        url = f"https://api.weixin.qq.com/cgi-bin/material/add_material?access_token={self.access_token}&type=image"
+
+        # 1. 优先尝试永久素材接口 (草稿箱封面必须为永久素材，临时素材会报 invalid media_id)
+        url_perm = f"https://api.weixin.qq.com/cgi-bin/material/add_material?access_token={self.access_token}&type=thumb"
         try:
             with open(image_path, 'rb') as f:
                 files = {'media': (os.path.basename(image_path), f, 'image/jpeg')}
-                res = self.session.post(url, files=files, timeout=WECHAT_API_TIMEOUT).json()
-            return res.get("media_id")
+                res = self.session.post(url_perm, files=files, timeout=WECHAT_API_TIMEOUT).json()
+            if "media_id" in res:
+                return res.get("media_id")
+            elif "thumb_media_id" in res:
+                return res.get("thumb_media_id")
+            else:
+                logger.debug("  微信永久素材上传响应: {}", res)
         except Exception as e:
-            logger.warning("  upload_image 失败: {} - {}", image_path, e)
-            return None
+            logger.warning("  微信永久素材上传异常: {}", e)
+
+        # 2. 降级尝试临时素材接口
+        url_temp = f"https://api.weixin.qq.com/cgi-bin/media/upload?access_token={self.access_token}&type=thumb"
+        try:
+            with open(image_path, 'rb') as f:
+                files = {'media': (os.path.basename(image_path), f, 'image/jpeg')}
+                res = self.session.post(url_temp, files=files, timeout=WECHAT_API_TIMEOUT).json()
+            if "thumb_media_id" in res:
+                return res.get("thumb_media_id")
+            elif "media_id" in res:
+                return res.get("media_id")
+            else:
+                logger.warning("  微信临时素材上传失败: {}", res)
+        except Exception as e:
+            logger.warning("  微信临时素材上传异常: {}", e)
+
+        return None
 
     def upload_news_image(self, image_path):
         """上传内容插图，返回 URL"""
@@ -227,16 +293,28 @@ class WeChatPublisher:
         return titles
 
     def get_all_active_titles(self):
-        """获取草稿箱和已发布的标题集合（缓存），用于查重"""
+        """合并拉取微信草稿箱、最近发布记录以及本地 SQLite 历史发布记录，做全量标题查重"""
         if self._draft_titles_cache is not None:
             return self._draft_titles_cache
         
         drafts = self.get_draft_titles()
         published = self.get_published_titles()
         
-        all_titles = drafts + published
+        db_titles = []
+        try:
+            from core.db.manager import db_manager
+            from core.db.models import ArticleHistory
+            session = db_manager.get_session()
+            records = session.query(ArticleHistory).filter(ArticleHistory.success_status.is_(True)).all()
+            db_titles = [r.title for r in records if r.title]
+            db_manager.remove_session()
+        except Exception as e:
+            logger.warning("从本地数据库获取历史发布标题失败: {}", e)
+            
+        all_titles = list(set(drafts + published + db_titles))
         self._draft_titles_cache = all_titles
-        logger.info("微信活跃标题缓存已建立，共 {} 条 (草稿 {}/已发布 {})", len(all_titles), len(drafts), len(published))
+        logger.info("微信+本地查重标题缓存已建立，共 {} 条 (微信草稿 {}，已发布 {}，本地数据库历史 {})", 
+                    len(all_titles), len(drafts), len(published), len(db_titles))
         return all_titles
 
     def _title_similarity(self, title_a, title_b):
@@ -364,6 +442,16 @@ class WeChatPublisher:
         if "media_id" in result:
             draft_id = result["media_id"]
             logger.info("发布成功: {} → {}", title, draft_id)
+            
+            # 保存本地成功草稿预览文件
+            try:
+                os.makedirs(os.path.join("data", "previews"), exist_ok=True)
+                preview_path = os.path.join("data", "previews", f"{draft_id}.html")
+                with open(preview_path, "w", encoding="utf-8") as f:
+                    f.write(html_content)
+            except Exception as pe:
+                logger.warning("  保存本地预览 HTML 失败: {}", pe)
+
             try:
                 from config import QYWECHAT_WEBHOOK, BRAND_NAME
                 send_to_qywechat(QYWECHAT_WEBHOOK, f"【{BRAND_NAME}】《{title}》已就绪，请审核发布。")
@@ -371,7 +459,20 @@ class WeChatPublisher:
                 logger.debug("  企微通知发送失败（非关键）: {}", e)
             return True, result
         else:
-            logger.warning("发布失败: {} → {}", title, result.get("errmsg", "未知错误"))
+            err_msg = result.get("errmsg", "未知错误")
+            logger.warning("发布失败: {} → {}", title, err_msg)
+            
+            # 保存本地失败草稿预览文件 (使用 title 的 md5 作为 ID)
+            import hashlib
+            title_hash = hashlib.md5(title.encode('utf-8')).hexdigest()
+            try:
+                os.makedirs(os.path.join("data", "previews"), exist_ok=True)
+                preview_path = os.path.join("data", "previews", f"fail_{title_hash}.html")
+                with open(preview_path, "w", encoding="utf-8") as f:
+                    f.write(html_content)
+            except Exception as pe:
+                logger.warning("  保存本地失败预览 HTML 失败: {}", pe)
+                
             return False, result
 
 _qywechat_session = None

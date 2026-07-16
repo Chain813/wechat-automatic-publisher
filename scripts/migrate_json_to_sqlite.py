@@ -1,7 +1,6 @@
 import os
 import json
 import sys
-from datetime import datetime
 
 # Add project root to sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -91,7 +90,8 @@ def migrate_github():
         title = record.get("title")
         date_str = record.get("date", "2026-01-01")
         draft_id = record.get("draft_id")
-        if not title: continue
+        if not title:
+            continue
         
         existing = session.query(ArticleHistory).filter_by(title=title, source_type="github").first()
         if not existing:

@@ -104,6 +104,8 @@ def _replace_placeholder(html_body, keyword, replacement):
     return pattern.sub(replacement, html_body)
 
 def process_article_content(article_text, publisher, use_ai_first=False):
+    from core.shared.runtime import check_cancelled
+    check_cancelled()
     if not article_text:
         return "", {"word_count": 0, "image_count": 0, "sensitive_words": []}
 
@@ -196,6 +198,7 @@ def process_article_content(article_text, publisher, use_ai_first=False):
 
     image_results = {}
     if placeholders:
+        check_cancelled()
         logger.info("启动并行图片下载+上传引擎 ({} 张)...", len(placeholders))
         with ThreadPoolExecutor(max_workers=min(3, len(placeholders))) as executor:
             futures = {executor.submit(_download_and_upload, kw, publisher, use_ai_first): kw for kw in placeholders}
@@ -225,6 +228,7 @@ def process_article_content(article_text, publisher, use_ai_first=False):
 
     # GitHub 配图并行下载上传
     if github_images:
+        check_cancelled()
         def _process_gh_image(gh_url):
             tmp_path = None
             try:
@@ -377,7 +381,7 @@ def _print_banner():
     print(f"  🚀 「{BRAND_NAME}」全自动 AI 内容工厂 v6.0")
     print("=" * 60 + "\n")
 
-def _print_review_report(title, word_count, image_count, sensitive_words, cover_ok, digest):
+def _print_review_report(title, word_count, image_count, sensitive_words, cover_ok, digest, is_long_article=False):
     print(f"\n{'─' * 50}")
     print("  📋 发布前审核报告")
     print(f"{'─' * 50}")
@@ -386,7 +390,11 @@ def _print_review_report(title, word_count, image_count, sensitive_words, cover_
     title_icon = "✅" if title_ok else "⚠️"
     print(f"  标题：{title} ({len(title)} 字 {title_icon})")
 
-    wc_icon = "✅" if 2000 <= word_count <= 4000 else "⚠️"
+    if is_long_article:
+        wc_ok = word_count >= 15000
+    else:
+        wc_ok = 2000 <= word_count <= 4000
+    wc_icon = "✅" if wc_ok else "⚠️"
     print(f"  字数：{word_count:,} 字 ({wc_icon})")
 
     image_icon = "✅" if image_count >= 3 else "⚠️"
@@ -402,7 +410,7 @@ def _print_review_report(title, word_count, image_count, sensitive_words, cover_
     if digest:
         print(f"  摘要：{digest[:80]}{'...' if len(digest) > 80 else ''}")
 
-    all_ok = title_ok and (2000 <= word_count <= 4000) and image_count >= 3 and not sensitive_words and cover_ok
+    all_ok = title_ok and wc_ok and image_count >= 3 and not sensitive_words and cover_ok
     print(f"{'─' * 50}")
     print("  🎉 审核通过，可以发布！" if all_ok else "  ⚠️ 存在警告项，请手动检查后再发布。")
     print(f"{'─' * 50}\n")
