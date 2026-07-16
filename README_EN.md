@@ -41,28 +41,28 @@ graph TD
     classDef wechat fill:#27AE60,stroke:#2ECC71,stroke-width:3px,color:#fff,rx:15px
     classDef db fill:#F39C12,stroke:#F1C40F,stroke-width:2px,color:#fff,rx:5px
 
-    subgraph User Interface
+    subgraph UI ["User Interface"]
         A1["💻 Web UI (Flask)"]:::ui
         A2["⌨️ CLI (Command Line)"]:::ui
     end
 
-    subgraph Core Dispatcher
+    subgraph Core ["Core Dispatcher"]
         B{"⚙️ Core Engine"}:::engine
         C[["🔌 Plugin Manager"]]:::plugin
     end
 
-    subgraph Content Workflows
+    subgraph Workflows ["Content Workflows"]
         D["🌐 12 Hotspot Sources"]:::plugin
         E["🐙 GitHub PyGithub+Rich"]:::plugin
         F["🎓 AI Kepu Skill Tree DAG"]:::plugin
     end
 
-    subgraph AI Engines
+    subgraph AIEngines ["AI Engines"]
         G{"🧠 DeepSeek LLM\n(Text Generation)"}:::llm
         H{"👁️ Gemini/Ollama\n(Vision AI)"}:::vision
     end
 
-    subgraph Publishing & Storage
+    subgraph Publishing ["Publishing & Storage"]
         J["📝 Publisher Module"]:::ui
         DB[("🗄️ SQLite Database\n(Dedup & History)")]:::db
         K(("💬 WeChat Official Account\n(Draft API)")):::wechat
@@ -291,22 +291,22 @@ graph TD
     classDef process fill:#27AE60,stroke:#2ECC71,stroke-width:2px,color:#fff,rx:5px
     classDef final fill:#16A085,stroke:#1ABC9C,stroke-width:3px,color:#fff,rx:15px
 
-    subgraph Phase 1: Candidate Pool
+    subgraph Phase1 ["Phase 1: Candidate Pool"]
         A["🖼️ Raw Image Candidates"]:::pool
     end
 
-    subgraph Phase 2: CV 6-Dim Scoring
+    subgraph Phase2 ["Phase 2: CV 6-Dim Scoring"]
         B{"📊 Base CV Evaluation\nResolution | Aspect Ratio | Clarity\nOCR Density | Color | Size"}:::scoring
     end
 
-    subgraph Phase 3: Vision AI (Top 3)
+    subgraph Phase3 ["Phase 3: Vision AI (Top 3)"]
         C{"🤖 AI Selection Engine"}:::ai
         D["☁️ Gemini Flash 2.0 (Cloud)"]:::ai
         E["🖥️ Gemma 3 4B (Local)"]:::ai
         F["📉 Pure CV Fallback"]:::scoring
     end
 
-    subgraph Phase 4: Formatting & Dedup
+    subgraph Phase4 ["Phase 4: Formatting & Dedup"]
         G["✂️ Smart Cropping\n(900x383 / 900x500)"]:::process
         H["🔍 pHash Perceptual Hash\n(Duplicate Prevention)"]:::process
     end

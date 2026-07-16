@@ -43,28 +43,28 @@ graph TD
     classDef wechat fill:#27AE60,stroke:#2ECC71,stroke-width:3px,color:#fff,rx:15px
     classDef db fill:#F39C12,stroke:#F1C40F,stroke-width:2px,color:#fff,rx:5px
 
-    subgraph 用户入口 (User Interface)
+    subgraph UI ["用户入口 (User Interface)"]
         A1["💻 Web UI (Flask)"]:::ui
         A2["⌨️ CLI (命令行)"]:::ui
     end
 
-    subgraph 核心调度引擎 (Core Dispatcher)
+    subgraph Core ["核心调度引擎 (Core Dispatcher)"]
         B{"⚙️ Core Engine"}:::engine
         C[["🔌 Plugin Manager"]]:::plugin
     end
 
-    subgraph 动态工作流插件 (Workflows)
+    subgraph Workflows ["动态工作流插件 (Workflows)"]
         D["🌐 12 大全网热点源"]:::plugin
         E["🐙 GitHub 趋势挖掘"]:::plugin
         F["🎓 AI 科普技能树 DAG"]:::plugin
     end
 
-    subgraph 人工智能引擎 (AI Engines)
+    subgraph AIEngines ["人工智能引擎 (AI Engines)"]
         G{"🧠 DeepSeek LLM\n(深度长文生成)"}:::llm
         H{"👁️ Gemini / Ollama\n(视觉质量评估)"}:::vision
     end
 
-    subgraph 持久化与发布模块 (Publishing)
+    subgraph Publishing ["持久化与发布模块 (Publishing)"]
         J["📝 Publisher 渲染器"]:::ui
         DB[("🗄️ SQLite Database\n(标题去重与历史记录)")]:::db
         K(("💬 微信公众号\n(云端草稿箱同步)")):::wechat
@@ -402,22 +402,22 @@ graph TD
     classDef process fill:#27AE60,stroke:#2ECC71,stroke-width:2px,color:#fff,rx:5px
     classDef final fill:#16A085,stroke:#1ABC9C,stroke-width:3px,color:#fff,rx:15px
 
-    subgraph 阶段一: 生成候选池
+    subgraph Phase1 ["阶段一: 生成候选池"]
         A["🖼️ 原始图片池 (AI生图/图库爬虫)"]:::pool
     end
 
-    subgraph 阶段二: 传统机器视觉筛选
+    subgraph Phase2 ["阶段二: 传统机器视觉筛选"]
         B{"📊 6 维 CV 初筛\n分辨率 | 宽高比 | 清晰度\nOCR 文字密度 | 色彩直方图 | 压缩大小"}:::scoring
     end
 
-    subgraph 阶段三: 深度视觉大模型仲裁 (Top 3)
+    subgraph Phase3 ["阶段三: 深度视觉大模型仲裁 (Top 3)"]
         C{"🤖 AI 择优引擎"}:::ai
         D["☁️ Gemini Flash 2.0 (首选)"]:::ai
         E["🖥️ Gemma 3 4B (本地替代)"]:::ai
         F["📉 纯 CV 分数 (无AI兜底)"]:::scoring
     end
 
-    subgraph 阶段四: 后期处理与合规
+    subgraph Phase4 ["阶段四: 后期处理与合规"]
         G["✂️ 智能画幅裁切\n(900x383 或 900x500)"]:::process
         H["🔍 pHash 感知哈希\n(防止视觉重复发布)"]:::process
     end
