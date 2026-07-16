@@ -14,6 +14,7 @@ venv/
 
 # Runtime generated
 hotspot_cache.sqlite
+data/*.sqlite
 hotspots_history.json
 github_history.json
 github_publish_records.json

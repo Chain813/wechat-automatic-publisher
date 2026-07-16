@@ -13,6 +13,8 @@ Fully automated WeChat public account content production and publishing system. 
 
 ## Table of Contents
 
+- [Architecture Overview](#architecture-overview)
+
 - [Features](#features)
 - [Tech Stack](#tech-stack)
 - [Project Structure](#project-structure)
@@ -27,20 +29,53 @@ Fully automated WeChat public account content production and publishing system. 
 - [License](#license)
 - [Disclaimer](#disclaimer)
 
+## Architecture Overview
+
+```mermaid
+graph TD
+    A[Web UI / CLI] -->|Trigger| B(Core Engine)
+    B -->|Task Dispatch| C{Plugin Manager}
+    
+    C -->|Hotspots| D[12 Source Plugins]
+    C -->|GitHub| E[PyGithub + rich]
+    C -->|AI Kepu| F[Skill Tree DAG]
+    
+    D --> G[DeepSeek LLM]
+    E --> G
+    F --> G
+    
+    G -->|Content| H(Image Engine)
+    H -->|SD / Pexels| I[6-Dim Filter & Vision AI]
+    
+    I -->|HTML Render| J[Publisher]
+    J -->|Title Dedup| DB[(SQLite)]
+    J -->|Draft API| K((WeChat Official Account))
+    
+    style B fill:#2b2d42,stroke:#8d99ae,stroke-width:2px,color:#fff
+    style G fill:#03045e,stroke:#0077b6,stroke-width:2px,color:#fff
+    style K fill:#2a9d8f,stroke:#264653,stroke-width:2px,color:#fff
+```
+
 ---
 
 ## Features
 
-**Multi-Source Hotspot Aggregation** — Parallel scraping from 12 platforms (Weibo, IT Home, 36Kr, Baidu, Zhihu, CSDN, RSS, Politics, Toutiao, The Paper, Huxiu, Douyin). Source-level health monitoring with automatic degradation.
+**Multi-Source Hotspot Aggregation** — Parallel scraping from 12 platforms (Weibo, IT Home, 36Kr, Baidu, Zhihu, CSDN, RSS, Politics, Toutiao, The Paper, Huxiu, Douyin). Fully modularized via `PluginManager` with source-level health monitoring and automatic degradation.
+
+**🎓 AI Kepu (Knowledge Popularization)** — Systematic educational article generation driven by a predefined DAG (Directed Acyclic Graph) Skill Tree:
+- **Skill Tree Integration**: 30 knowledge nodes covering Math -> Deep Learning -> Transformer -> LLM -> Agents, with strict prerequisites.
+- **Topological Selection**: Automatically selects hub nodes from unlocked prerequisites to ensure a step-by-step learning curve.
+- **Educational Persona**: Uses analogies, visual thinking, and a WHY -> HOW -> WHAT structure.
 
 **AI Deep Creation** — DeepSeek-powered 2500-3500 word analysis articles.
 - **Personalized Writer Personas (v4.1)**: Both hotspot and GitHub writers have full personality profiles — background, thinking patterns, expression principles, worldview. No more "AI-style" writing.
 - **Tiered Bold Formatting**: Red bold (`**{{core conclusion}}`**, 3-5 per article) + black bold (key data/concepts, 1-2 per paragraph). Auto-fallback if LLM doesn't produce enough bold text.
 - **API Truncation Detection**: Auto-detects if the LLM API silently truncated the article (incomplete ending). Retries automatically, preventing broken articles from being published.
 - **Smart Retry**: When the first draft fails validation, passes it back to the LLM for targeted fixes (instead of rewriting from scratch), preserving good content.
-- **Active Title Dedup (v4.0)**: 4 strategies (exact/fuzzy/keyword/AI semantic) to prevent duplicates.
+- **Active Title Dedup (v4.0)**: 4 strategies (exact/fuzzy/keyword/AI semantic) to prevent duplicates, combined with Dual-end checks (local SQLite database + WeChat Cloud Draft Box sync).
 - **Cloud Status Sync (v4.0)**: Auto-syncs local history with WeChat. Deleted cloud content releases local history.
 - **Three-Tier Topic Selection**: AI+Politics (High) → Hardcore AI (Medium) → Finance+Politics (Low).
+- **SQLite Database**: Migrated from JSON to a robust SQLite database for safe parallel writing and efficient querying.
 
 **Intelligent Image Selection** — Multi-source image retrieval (Pollinations AI generation -> Pexels free stock -> Bing/Baidu crawling). 
 - **LLM Keyword Optimization**: Uses LLM to transform abstract terms into visual search queries (e.g., "Regulation" -> "Tech Balance Scale") when standard searches fail.
@@ -219,14 +254,21 @@ GitHub workflow has been upgraded to a **single-project deep-dive mode**. It aut
 
 Each image is evaluated on 6 dimensions, then optionally re-evaluated by vision AI:
 
-```
-CV 6-dim scoring -> Top 3 candidates -> Vision AI re-evaluation
-                         |
-                   Gemini available? -> Gemini Flash 2.0 (60% weight)
-                         | No
-                   Ollama available? -> Gemma 3 4B local (60% weight)
-                         | No
-                   Pure CV scoring fallback
+```mermaid
+graph TD
+    A[Image Candidates] --> B(Step 1: CV 6-Dim Scoring)
+    B -->|Resolution/Aspect Ratio/Clarity<br>OCR Density/Color/Size| C{Step 2: Vision AI}
+    
+    C -->|Gemini available| D[Gemini Flash 2.0 Eval]
+    C -->|Ollama available| E[Gemma 3 4B Local Eval]
+    C -->|None available| F[Pure CV Scoring]
+    
+    D --> G(Step 3: Crop & Dedup)
+    E --> G
+    F --> G
+    
+    G -->|Crop to 900x383/900x500| H[pHash Perceptual Hash]
+    H --> I[Upload to WeChat]
 ```
 
 ---
