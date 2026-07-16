@@ -107,6 +107,10 @@ SD_TIMEOUT = int(os.getenv("SD_TIMEOUT", "120"))        # 单次生图超时秒�
 SD_STEPS = int(os.getenv("SD_STEPS", "15"))              # 采样步数（15 兼顾速度与质量）
 SD_MAX_RETRIES = int(os.getenv("SD_MAX_RETRIES", "2"))   # 最大重试次数（不含首次）
 
+# 12b. 免费图源 API Key（选填，SD 不可用时自动降级）
+PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")
+UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY", "")
+
 # 13. Ollama 本地视觉模型配置
 OLLAMA_DEFAULT_MODEL = os.getenv("OLLAMA_DEFAULT_MODEL", "gemma4:e2b-it-q4_K_M")
 OLLAMA_VISION_MODEL = os.getenv("OLLAMA_VISION_MODEL", "gemma3:4b")
@@ -128,3 +132,7 @@ GITHUB_SEARCH_LANGUAGES = ["Python", "JavaScript", "TypeScript", "Go", "Rust", "
 
 # 17. 专题固定封面
 GITHUB_FIXED_COVER = os.path.join("static", "images", "github_fixed_cover.png")
+
+# 18. 云端部署配置
+CLOUD_MODE = os.getenv("CLOUD_MODE", "").strip() == "1"
+WEBUI_TOKEN = os.getenv("WEBUI_TOKEN", "").strip()

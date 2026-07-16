@@ -11,6 +11,41 @@ from dotenv import load_dotenv, set_key
 app = Flask(__name__)
 _start_lock = threading.Lock()
 
+# ---- 云端模式配置 ----
+CLOUD_MODE = os.getenv("CLOUD_MODE", "").strip() == "1"
+WEBUI_TOKEN = os.getenv("WEBUI_TOKEN", "").strip()
+
+
+# ---- Token 认证中间件（云端模式） ----
+@app.before_request
+def _check_auth():
+    """云端模式下的简单 token 认证"""
+    if not CLOUD_MODE or not WEBUI_TOKEN:
+        return None  # 本地模式或无 token → 跳过认证
+
+    # 允许健康检查和 API status（用于 Render 健康检查 + GitHub Actions 触发）
+    if request.path == "/api/status":
+        return None
+
+    # /api/start 允许通过 ?token=xxx 参数验证（GitHub Actions curl 用）
+    if request.path == "/api/start" and request.method == "POST":
+        token = request.args.get("token", "")
+        if token == WEBUI_TOKEN:
+            return None
+
+    # 其他页面检查 Cookie 或 Authorization header
+    token = request.cookies.get("aw_token", "")
+    if not token:
+        token = request.headers.get("Authorization", "").replace("Bearer ", "")
+
+    if token != WEBUI_TOKEN:
+        # 如果是浏览器请求 / 且无 token，显示登录页
+        if request.path == "/" and request.method == "GET":
+            return render_template("login.html") if os.path.exists("templates/login.html") else ("🔒 AutoWeChat Cloud — 需要 token 认证", 401)
+        return jsonify({"status": "error", "message": "Unauthorized"}), 401
+
+    return None
+
 
 class ProcessState:
     is_running = False
@@ -101,7 +136,7 @@ def start_process():
             return jsonify({"status": "error", "message": "Task already running"}), 400
         data = request.json or {}
         task_type = data.get("task_type", "hotspots")
-        if task_type not in ("hotspots", "github"):
+        if task_type not in ("hotspots", "github", "aikepu"):
             return jsonify({"status": "error", "message": f"Invalid task_type: {task_type}"}), 400
         ProcessState.thread = threading.Thread(target=run_workflow_thread, args=(task_type,), daemon=True)
         ProcessState.thread.start()
@@ -225,11 +260,23 @@ if __name__ == '__main__':
     import logging
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
-    print("Web UI started: http://127.0.0.1:5000")
-    
-    # 延迟 1 秒后自动打开浏览器，确保 Flask 服务已完全启动
-    import webbrowser
-    from threading import Timer
-    Timer(1.0, lambda: webbrowser.open("http://127.0.0.1:5000")).start()
-    
-    app.run(host='127.0.0.1', port=5000, debug=False)
+
+    # 云端模式：绑 0.0.0.0 + 使用 $PORT
+    if CLOUD_MODE:
+        host = "0.0.0.0"
+        port = int(os.getenv("PORT", "5000"))
+        print(f"☁️  AutoWeChat Cloud Mode")
+        print(f"   Listening on: http://0.0.0.0:{port}")
+        if WEBUI_TOKEN:
+            print(f"   Token auth: enabled")
+    else:
+        host = "127.0.0.1"
+        port = 5000
+        print(f"Web UI started: http://127.0.0.1:{port}")
+
+        # 本地模式：自动打开浏览器
+        import webbrowser
+        from threading import Timer
+        Timer(1.0, lambda: webbrowser.open(f"http://127.0.0.1:{port}")).start()
+
+    app.run(host=host, port=port, debug=False)

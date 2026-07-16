@@ -1,0 +1,250 @@
+{
+  "meta": {
+    "name": "AI 全栈技能树",
+    "description": "从数学基础到 Multi-Agent 的完整 AI 学习路线，按依赖关系拓扑排序",
+    "version": "1.0",
+    "created": "2025-01-01"
+  },
+  "nodes": [
+    {
+      "id": "math-basics",
+      "title": "AI 必备数学基础：线性代数、概率论与梯度下降",
+      "tags": ["数学", "基础"],
+      "prerequisites": [],
+      "difficulty": 1,
+      "summary": "从向量矩阵到概率分布，一文讲清 AI 最核心的数学工具箱"
+    },
+    {
+      "id": "ml-basics",
+      "title": "机器学习入门：从线性回归到过拟合",
+      "tags": ["机器学习", "基础"],
+      "prerequisites": ["math-basics"],
+      "difficulty": 1,
+      "summary": "损失函数、正则化、偏差方差权衡——机器学习的第一性原理"
+    },
+    {
+      "id": "python-toolchain",
+      "title": "AI 开发工具链：PyTorch、Jupyter 与 GPU 环境搭建",
+      "tags": ["工具", "Python", "基础"],
+      "prerequisites": [],
+      "difficulty": 1,
+      "summary": "从零搭建深度学习开发环境，了解 PyTorch 核心抽象"
+    },
+    {
+      "id": "nn-basics",
+      "title": "神经网络原理：从感知机到深度网络",
+      "tags": ["深度学习", "神经网络"],
+      "prerequisites": ["ml-basics"],
+      "difficulty": 2,
+      "summary": "激活函数、隐藏层、万能逼近定理——神经网络为什么能工作"
+    },
+    {
+      "id": "backprop",
+      "title": "反向传播算法：深度学习的心脏",
+      "tags": ["深度学习", "优化"],
+      "prerequisites": ["nn-basics"],
+      "difficulty": 2,
+      "summary": "链式法则、计算图、自动微分——理解模型到底如何学习"
+    },
+    {
+      "id": "cnn",
+      "title": "卷积神经网络：计算机视觉的基石",
+      "tags": ["深度学习", "CV"],
+      "prerequisites": ["nn-basics"],
+      "difficulty": 2,
+      "summary": "卷积核、池化、感受野——从 LeNet 到 ResNet 的核心思想"
+    },
+    {
+      "id": "rnn-lstm",
+      "title": "RNN 与 LSTM：序列模型的黄金时代",
+      "tags": ["深度学习", "NLP"],
+      "prerequisites": ["nn-basics"],
+      "difficulty": 2,
+      "summary": "循环网络、长短期记忆、门控机制——Transformer 之前的主流方案"
+    },
+    {
+      "id": "attention",
+      "title": "注意力机制：从 Seq2Seq 到 Self-Attention",
+      "tags": ["深度学习", "Transformer", "注意力"],
+      "prerequisites": ["nn-basics", "rnn-lstm"],
+      "difficulty": 3,
+      "summary": "Query/Key/Value 三部曲，理解模型如何「关注」重要信息"
+    },
+    {
+      "id": "transformer",
+      "title": "Transformer 架构详解：Attention Is All You Need",
+      "tags": ["Transformer", "LLM", "核心"],
+      "prerequisites": ["attention"],
+      "difficulty": 3,
+      "summary": "多头注意力、残差连接、LayerNorm——现代大模型的统一底座"
+    },
+    {
+      "id": "pos-encoding",
+      "title": "位置编码：让 Transformer 感知顺序",
+      "tags": ["Transformer", "LLM"],
+      "prerequisites": ["transformer"],
+      "difficulty": 3,
+      "summary": "正弦编码、可学习编码、RoPE——大模型如何理解词语顺序"
+    },
+    {
+      "id": "tokenizer",
+      "title": "Tokenizer 原理：从 BPE 到 SentencePiece",
+      "tags": ["LLM", "NLP"],
+      "prerequisites": ["transformer"],
+      "difficulty": 2,
+      "summary": "分词、子词、词表构建——大模型理解文本的第一步"
+    },
+    {
+      "id": "gpt-series",
+      "title": "GPT 家族进化史：从 GPT-1 到 GPT-4",
+      "tags": ["LLM", "GPT"],
+      "prerequisites": ["transformer"],
+      "difficulty": 2,
+      "summary": "解码器架构、规模定律、涌现能力——大语言模型的发展脉络"
+    },
+    {
+      "id": "pretraining",
+      "title": "预训练揭秘：大模型的海量数据学习",
+      "tags": ["LLM", "训练"],
+      "prerequisites": ["gpt-series"],
+      "difficulty": 3,
+      "summary": "数据清洗、分布式训练、Scaling Law——数千 GPU 如何协同训练"
+    },
+    {
+      "id": "finetuning",
+      "title": "微调实战：让大模型适配你的业务",
+      "tags": ["LLM", "微调"],
+      "prerequisites": ["pretraining"],
+      "difficulty": 3,
+      "summary": "全参微调 vs 高效微调，SFT 数据准备与训练技巧"
+    },
+    {
+      "id": "lora",
+      "title": "LoRA 与 QLoRA：低秩适配的高效微调",
+      "tags": ["LLM", "微调", "高效"],
+      "prerequisites": ["finetuning"],
+      "difficulty": 3,
+      "summary": "矩阵分解、量化、单卡微调 7B 模型——高效微调最佳实践"
+    },
+    {
+      "id": "embeddings",
+      "title": "文本嵌入：从 Word2Vec 到现代 Embedding 模型",
+      "tags": ["LLM", "NLP", "RAG"],
+      "prerequisites": ["transformer"],
+      "difficulty": 2,
+      "summary": "向量表示、语义相似度、嵌入模型选型——RAG 的前置知识"
+    },
+    {
+      "id": "prompt-eng",
+      "title": "Prompt Engineering 完全指南",
+      "tags": ["LLM", "Prompt", "应用"],
+      "prerequisites": ["gpt-series"],
+      "difficulty": 2,
+      "summary": "Few-shot、Chain-of-Thought、结构化输出——与大模型高效对话的艺术"
+    },
+    {
+      "id": "rag",
+      "title": "RAG 检索增强生成：原理与架构",
+      "tags": ["LLM", "RAG", "应用"],
+      "prerequisites": ["prompt-eng", "embeddings"],
+      "difficulty": 3,
+      "summary": "向量数据库、文档分块、检索策略——让大模型拥有外部知识库"
+    },
+    {
+      "id": "vector-db",
+      "title": "向量数据库选型：Chroma、Milvus 与 Pinecone",
+      "tags": ["RAG", "工具", "数据库"],
+      "prerequisites": ["rag"],
+      "difficulty": 3,
+      "summary": "ANN 索引、HNSW 算法、性能对比——为你的 RAG 选对存储引擎"
+    },
+    {
+      "id": "agent",
+      "title": "AI Agent 核心原理：感知、规划与行动",
+      "tags": ["Agent", "LLM", "核心"],
+      "prerequisites": ["rag", "prompt-eng"],
+      "difficulty": 4,
+      "summary": "ReAct、思维树、任务分解——让大模型从「聊天」进化为「干活」"
+    },
+    {
+      "id": "func-calling",
+      "title": "Function Calling：大模型与外部工具的桥梁",
+      "tags": ["Agent", "LLM", "工具"],
+      "prerequisites": ["agent"],
+      "difficulty": 4,
+      "summary": "工具定义、JSON Schema、并行调用——让 AI 操作 API 和数据库"
+    },
+    {
+      "id": "multi-agent",
+      "title": "Multi-Agent 协作：AI 团队的构建与编排",
+      "tags": ["Agent", "协作"],
+      "prerequisites": ["agent"],
+      "difficulty": 4,
+      "summary": "角色分工、消息传递、任务调度——多个 AI Agent 如何组队作战"
+    },
+    {
+      "id": "rlhf",
+      "title": "RLHF：让模型对齐人类偏好",
+      "tags": ["LLM", "训练", "安全"],
+      "prerequisites": ["pretraining"],
+      "difficulty": 4,
+      "summary": "奖励模型、PPO、DPO——从「能说话」到「说人话」的关键技术"
+    },
+    {
+      "id": "ai-safety",
+      "title": "AI 安全与对齐：大模型的护栏设计",
+      "tags": ["安全", "对齐", "LLM"],
+      "prerequisites": ["rlhf"],
+      "difficulty": 4,
+      "summary": "红队测试、越狱防御、内容审核——构建安全的 AI 系统"
+    },
+    {
+      "id": "eval",
+      "title": "大模型评估：Benchmark 与人类偏好",
+      "tags": ["LLM", "评估"],
+      "prerequisites": ["gpt-series"],
+      "difficulty": 3,
+      "summary": "MMLU、HumanEval、Chatbot Arena——如何科学地评判模型能力"
+    },
+    {
+      "id": "inference-opt",
+      "title": "推理优化：量化、KV Cache 与投机解码",
+      "tags": ["LLM", "优化", "部署"],
+      "prerequisites": ["transformer", "pretraining"],
+      "difficulty": 4,
+      "summary": "INT4/INT8 量化、Flash Attention、vLLM——让大模型跑得更快更省"
+    },
+    {
+      "id": "multimodal",
+      "title": "多模态大模型：视觉与语言的融合",
+      "tags": ["多模态", "LLM", "前沿"],
+      "prerequisites": ["transformer", "cnn"],
+      "difficulty": 4,
+      "summary": "视觉编码器、跨模态对齐、GPT-4V 架构推演——AI 的「眼」与「脑」"
+    },
+    {
+      "id": "open-source",
+      "title": "开源大模型生态：Llama、DeepSeek 与 Mistral",
+      "tags": ["LLM", "开源", "生态"],
+      "prerequisites": ["gpt-series"],
+      "difficulty": 2,
+      "summary": "开源 vs 闭源、模型选型、社区生态——选择适合你的开源大模型"
+    },
+    {
+      "id": "ai-coding",
+      "title": "AI 编程助手：Cursor、Copilot 与 Aider 深度使用",
+      "tags": ["工具", "编程", "应用"],
+      "prerequisites": ["gpt-series"],
+      "difficulty": 2,
+      "summary": "代码补全、重构、测试生成——AI 如何改变软件开发的日常工作流"
+    },
+    {
+      "id": "agent-practice",
+      "title": "AI Agent 实战：从零搭建你的第一个智能助手",
+      "tags": ["Agent", "实战"],
+      "prerequisites": ["agent", "func-calling"],
+      "difficulty": 4,
+      "summary": "完整项目：LangChain/LlamaIndex 搭建可调用工具、查数据库的 AI Agent"
+    }
+  ]
+}

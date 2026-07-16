@@ -1,0 +1,33 @@
+# Render Blueprint — AutoWeChat 云端部署
+# 文档: https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: autowechat
+    runtime: docker
+    repo: https://github.com/YOUR_USERNAME/autowechat
+    branch: main
+    plan: free
+    healthCheckPath: /api/status
+    envVars:
+      - key: CLOUD_MODE
+        value: "1"
+      - key: SD_ENABLED
+        value: "False"
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: WECHAT_APP_ID
+        sync: false
+      - key: WECHAT_APP_SECRET
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: WEBUI_TOKEN
+        sync: false
+      - key: PEXELS_API_KEY
+        sync: false
+      - key: UNSPLASH_ACCESS_KEY
+        sync: false
+    autoDeploy: true

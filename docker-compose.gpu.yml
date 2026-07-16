@@ -1,0 +1,13 @@
+# ============================================
+#  本地 GPU 模式：保留 SD + Ollama，完整功能
+#  启动：docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+# ============================================
+version: "3.8"
+services:
+  autowechat:
+    environment:
+      - CLOUD_MODE=0
+      - SD_ENABLED=True
+    # 暴露宿主机 GPU 服务（SD: 7860, Ollama: 11434）
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

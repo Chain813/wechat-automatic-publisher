@@ -1,0 +1,84 @@
+name: "🚀 AutoWeChat 定时发布"
+
+on:
+  # 定时触发 (UTC 时间，北京时间 = UTC+8)
+  schedule:
+    # 每天早上 8:00 (北京时间) = 00:00 UTC
+    - cron: "0 0 * * *"
+
+  # 手动触发（GitHub 手机 App 或网页 → Actions → Run workflow）
+  workflow_dispatch:
+    inputs:
+      task_type:
+        description: "任务类型"
+        required: true
+        type: choice
+        default: "aikepu"
+        options:
+          - hotspots
+          - github
+          - aikepu
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: "📥 拉取代码"
+        uses: actions/checkout@v4
+
+      - name: "🐍 安装 Python"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: "📦 安装依赖"
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq graphviz
+          pip install -r requirements.txt
+
+      - name: "🎓 运行 AI科普"
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.task_type == 'aikepu' }}
+        env:
+          WECHAT_APP_ID: ${{ secrets.WECHAT_APP_ID }}
+          WECHAT_APP_SECRET: ${{ secrets.WECHAT_APP_SECRET }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SD_ENABLED: "False"
+        run: python main.py --task aikepu
+
+      - name: "📡 运行 热点发布"
+        if: ${{ github.event.inputs.task_type == 'hotspots' }}
+        env:
+          WECHAT_APP_ID: ${{ secrets.WECHAT_APP_ID }}
+          WECHAT_APP_SECRET: ${{ secrets.WECHAT_APP_SECRET }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SD_ENABLED: "False"
+        run: python main.py --task hotspots
+
+      - name: "🐙 运行 GitHub Trending"
+        if: ${{ github.event.inputs.task_type == 'github' }}
+        env:
+          WECHAT_APP_ID: ${{ secrets.WECHAT_APP_ID }}
+          WECHAT_APP_SECRET: ${{ secrets.WECHAT_APP_SECRET }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          SD_ENABLED: "False"
+        run: python main.py --task github
+
+      - name: "💾 保存历史记录"
+        if: always()
+        run: |
+          git config user.name "AutoWeChat Bot"
+          git config user.email "bot@autowechat.local"
+          git add aikepu_history.json hotspots_history.json github_history.json github_publish_records.json 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "无变化，跳过提交"
+          else
+            git commit -m "📝 自动更新发布历史"
+            git push
+          fi

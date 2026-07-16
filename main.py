@@ -8,7 +8,7 @@ from core.engine import run_main
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="AutoWeChat AI 内容工厂")
-    parser.add_argument("--task", choices=["hotspots", "github"], default="hotspots",
+    parser.add_argument("--task", choices=["hotspots", "github", "aikepu"], default="hotspots",
                         help="任务类型: hotspots (热点发布) 或 github (GitHub Trending)")
     args = parser.parse_args()
 

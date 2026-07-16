@@ -5,6 +5,7 @@ from core.shared.publisher import WeChatPublisher
 from core.shared.article_utils import _print_banner, cleanup_old_assets
 from core.hotspots.workflow import run_hotspots_workflow
 from core.github.workflow import run_github_workflow
+from core.aikepu.workflow import run_aikepu_workflow
 from utils.image_filter import ollama_startup, ollama_shutdown
 from core.shared.runtime import check_cancelled, WorkflowCancelled
 
@@ -118,6 +119,10 @@ def run_main(task_type="hotspots"):
 
         if task_type == "hotspots":
             run_hotspots_workflow(publisher)
+            return
+
+        if task_type == "aikepu":
+            run_aikepu_workflow(publisher)
             return
 
         print(f"❌ 未知的任务类型: {task_type}")

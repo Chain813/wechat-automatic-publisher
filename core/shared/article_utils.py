@@ -188,6 +188,12 @@ def process_article_content(article_text, publisher, use_ai_first=False):
         html_body,
         flags=re.DOTALL
     )
+    html_body = re.sub(
+        r'<p>\s*(【\s*此处绘制图表\s*[：:].*?\s*】)\s*</p>',
+        r'\1',
+        html_body,
+        flags=re.DOTALL
+    )
 
     image_results = {}
     if placeholders:
@@ -259,6 +265,18 @@ def process_article_content(article_text, publisher, use_ai_first=False):
                 logger.info("  GitHub 配图已成功嵌入文章")
             else:
                 html_body = pattern.sub("", html_body)
+
+    # ---- 技术图表处理（AI科普等教育类文章） ----
+    try:
+        from utils.diagram_gen import process_diagram_placeholders
+        html_body, diagram_count = process_diagram_placeholders(html_body, publisher)
+        if diagram_count > 0:
+            image_count += diagram_count
+            logger.info("  📐 图表生成完成: {} 张", diagram_count)
+    except ImportError:
+        logger.debug("  diagram_gen 模块不可用，跳过图表生成")
+    except Exception as e:
+        logger.warning("  图表生成失败: {}", e)
 
     # 统一增加段落缩进和间距
     html_body = html_body.replace(

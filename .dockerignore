@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+
+# Environment (keep .env.example only)
+.env
+.env.*
+
+# Runtime
+hotspot_cache.sqlite
+assets/
+*.log
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# Dev
+scratch/
+.codegraph/
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Docker
+node_modules/

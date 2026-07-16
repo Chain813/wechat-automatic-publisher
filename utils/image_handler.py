@@ -376,11 +376,229 @@ def _sanitize_path(text):
 
 
 # ==========================================
+#  免费图源降级层 (SD 不可用时自动启用)
+# ==========================================
+def _save_image_from_url(img_url, target_dir, prefix="free", timeout=15):
+    """从 URL 下载图片并保存，返回路径或 None"""
+    import requests
+    try:
+        resp = requests.get(img_url, timeout=timeout, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        })
+        if resp.status_code == 200 and len(resp.content) > 1024:
+            ext = ".jpg"
+            ct = resp.headers.get("Content-Type", "")
+            if "png" in ct:
+                ext = ".png"
+            elif "webp" in ct:
+                ext = ".webp"
+            save_path = os.path.join(target_dir, f"{prefix}_{int(time.time())}{ext}")
+            with open(save_path, "wb") as f:
+                f.write(resp.content)
+            # Validate image
+            from PIL import Image
+            try:
+                img = Image.open(save_path)
+                img.verify()
+                img = Image.open(save_path)
+                if img.width >= 200 and img.height >= 150:
+                    logger.info("  免费图源下载成功: {} ({}x{})", os.path.basename(save_path), img.width, img.height)
+                    return save_path
+                else:
+                    os.remove(save_path)
+            except Exception:
+                if os.path.exists(save_path):
+                    os.remove(save_path)
+    except Exception as e:
+        logger.debug("  免费图源下载失败 ({}): {}", img_url[:60], e)
+    return None
+
+
+def _try_unsplash_source(keyword, width, height):
+    """尝试 Unsplash Source 直接 URL（无需 API Key）"""
+    import requests
+    try:
+        # Unsplash Source — 直接返回一张匹配图片（可能已停止服务）
+        url = f"https://source.unsplash.com/{width}x{height}/?{keyword.replace(' ', ',')}"
+        resp = requests.head(url, timeout=8, allow_redirects=True)
+        final_url = resp.url
+        if "unsplash.com" in final_url and "source" not in final_url:
+            return final_url
+    except Exception:
+        pass
+    return None
+
+
+def _try_pexels_api(keyword, width, height):
+    """尝试 Pexels API（需 PEXELS_API_KEY 环境变量）"""
+    import requests
+    from config import PEXELS_API_KEY
+    if not PEXELS_API_KEY:
+        return None
+    try:
+        resp = requests.get("https://api.pexels.com/v1/search", params={
+            "query": keyword, "per_page": 3, "orientation": "landscape"
+        }, headers={"Authorization": PEXELS_API_KEY}, timeout=10)
+        if resp.status_code == 200:
+            photos = resp.json().get("photos", [])
+            for photo in photos:
+                src = photo.get("src", {}).get("large") or photo.get("src", {}).get("original")
+                if src:
+                    return src
+    except Exception as e:
+        logger.debug("  Pexels API 失败: {}", e)
+    return None
+
+
+def _try_unsplash_api(keyword, width, height):
+    """尝试 Unsplash 官方 API（需 UNSPLASH_ACCESS_KEY 环境变量）"""
+    import requests
+    from config import UNSPLASH_ACCESS_KEY
+    if not UNSPLASH_ACCESS_KEY:
+        return None
+    try:
+        resp = requests.get("https://api.unsplash.com/search/photos", params={
+            "query": keyword, "per_page": 3, "orientation": "landscape"
+        }, headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"}, timeout=10)
+        if resp.status_code == 200:
+            results = resp.json().get("results", [])
+            for r in results:
+                raw_url = r.get("urls", {}).get("raw")
+                if raw_url:
+                    return f"{raw_url}&w={width}&h={height}&fit=crop"
+    except Exception as e:
+        logger.debug("  Unsplash API 失败: {}", e)
+    return None
+
+
+def _try_icrawler_bing(keyword, target_dir, max_images=3):
+    """通过 icrawler 从 Bing 搜索下载图片（无需 API Key）"""
+    try:
+        from icrawler.builtin import BingImageCrawler
+        import tempfile
+
+        tmp_dir = tempfile.mkdtemp(prefix="aw_img_")
+        downloaded = []
+
+        # 用 icrawler 下载到临时目录
+        crawler = BingImageCrawler(
+            feeder_threads=1,
+            parser_threads=1,
+            downloader_threads=2,
+            storage={"root_dir": tmp_dir}
+        )
+
+        # 重写下载完成回调，收集路径
+        original_download = crawler.downloader.download
+
+        def tracking_download(task, *args, **kwargs):
+            result = original_download(task, *args, **kwargs)
+            if result:
+                downloaded.append(result)
+            return result
+
+        crawler.downloader.download = tracking_download
+
+        crawler.crawl(
+            keyword=keyword,
+            max_num=min(max_images, 2),
+            min_size=(200, 150),
+            file_idx_offset=0
+        )
+
+        # 找到下载的图片
+        for root, dirs, files in os.walk(tmp_dir):
+            for f in files:
+                if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
+                    src = os.path.join(root, f)
+                    # 移到目标目录
+                    dst = os.path.join(target_dir, f"bing_{int(time.time())}_{f}")
+                    os.rename(src, dst)
+                    # 验证图片有效
+                    from PIL import Image
+                    try:
+                        img = Image.open(dst)
+                        img.verify()
+                        img = Image.open(dst)
+                        if img.width >= 200 and img.height >= 150:
+                            logger.info("  icrawler Bing 下载成功: {} ({}x{})", os.path.basename(dst), img.width, img.height)
+                            return dst
+                        else:
+                            os.remove(dst)
+                    except Exception:
+                        if os.path.exists(dst):
+                            os.remove(dst)
+
+        # 清理临时目录
+        import shutil
+        try:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+    except ImportError:
+        logger.debug("  icrawler 不可用")
+    except Exception as e:
+        logger.debug("  icrawler Bing 下载失败: {}", e)
+
+    return None
+
+
+def _download_free_image(keyword, save_dir, purpose="body"):
+    """
+    免费图源降级下载（SD 不可用时自动启用）。
+    优先级：Unsplash API → Pexels API → Unsplash Source → Bing 搜索
+    """
+    if not keyword or not keyword.strip():
+        return None
+
+    if purpose == "cover":
+        width, height = 900, 383
+    else:
+        width, height = 900, 500
+
+    clean_kw = _sanitize_path(keyword)
+    target_dir = os.path.join(save_dir, clean_kw)
+    os.makedirs(target_dir, exist_ok=True)
+
+    logger.info("🖼️  免费图源下载 '{}' ...", keyword)
+
+    # 1. Unsplash 官方 API（需 UNSPLASH_ACCESS_KEY）
+    img_url = _try_unsplash_api(keyword, width, height)
+    if img_url:
+        path = _save_image_from_url(img_url, target_dir, prefix="unsplash")
+        if path:
+            return path
+
+    # 2. Pexels 官方 API（需 PEXELS_API_KEY）
+    img_url = _try_pexels_api(keyword, width, height)
+    if img_url:
+        path = _save_image_from_url(img_url, target_dir, prefix="pexels")
+        if path:
+            return path
+
+    # 3. Unsplash Source 直接 URL（无需 API Key，可能不稳定）
+    img_url = _try_unsplash_source(keyword, width, height)
+    if img_url:
+        path = _save_image_from_url(img_url, target_dir, prefix="unsplash_src")
+        if path:
+            return path
+
+    # 4. icrawler Bing 搜索（无需 API Key，最终降级）
+    path = _try_icrawler_bing(keyword, target_dir)
+    if path:
+        return path
+
+    logger.warning("  ⚠️ 所有免费图源均失败，'{}' 无配图", keyword)
+    return None
+
+
+# ==========================================
 #  核心下载函数
 # ==========================================
 def download_image(keyword, save_dir="assets"):
     """
-    使用本地 Stable Diffusion 生成配图（唯一图源）
+    下载正文配图：优先本地 SD，不可用时自动降级到免费图源。
     """
     if not keyword or not keyword.strip():
         return None
@@ -393,16 +611,26 @@ def download_image(keyword, save_dir="assets"):
     if not os.path.exists(specific_dir):
         os.makedirs(specific_dir)
 
+    # 优先尝试本地 SD
     logger.info("正在为 '{}' 调用本地 SD 生图...", keyword)
-
     best = _try_local_sd(keyword, specific_dir, width=1024, height=576)
+    if best:
+        best = _finalize_image(best, "body")
+        if best:
+            return best
+
+    # SD 不可用 → 降级到免费图源
+    logger.info("SD 不可用，降级到免费图源...")
+    best = _download_free_image(keyword, save_dir, purpose="body")
     if best:
         best = _finalize_image(best, "body")
     return best
 
 
 def download_cover_image(keyword, save_dir="assets"):
-    """封面专用下载（本地 SD 生图）"""
+    """
+    下载封面图：优先本地 SD，不可用时自动降级到免费图源。
+    """
     if not keyword or not keyword.strip():
         return None
 
@@ -411,9 +639,17 @@ def download_cover_image(keyword, save_dir="assets"):
     if not os.path.exists(specific_dir):
         os.makedirs(specific_dir)
 
+    # 优先尝试本地 SD
     logger.info("正在为封面 '{}' 调用本地 SD 生图...", keyword)
-
     best = _try_local_sd(keyword, specific_dir, width=1280, height=545)
+    if best:
+        best = _finalize_image(best, "cover")
+        if best:
+            return best
+
+    # SD 不可用 → 降级到免费图源
+    logger.info("SD 不可用，封面降级到免费图源...")
+    best = _download_free_image(keyword, save_dir, purpose="cover")
     if best:
         best = _finalize_image(best, "cover")
     return best

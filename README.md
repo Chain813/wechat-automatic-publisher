@@ -23,6 +23,7 @@
 - [名词解释](GLOSSARY.md)
 - [开发工作流](DEVELOPMENT.md)
 - [Claude Code 指南](CLAUDE.md)
+- [☁️ 云端部署](#云端部署零成本)
 - [环境要求](#环境要求)
 - [许可证](#许可证)
 - [免责声明](#免责声明)
@@ -51,6 +52,23 @@
 | 抖音热点 | 短视频 | 短视频平台热点趋势 |
 
 每个数据源独立健康监控（绿/黄/红状态），故障时自动降级，不影响其他源。
+
+### 🎓 AI 知识普及（技能树驱动）
+
+基于预设 AI 技能树 DAG，系统化输出从入门到前沿的教育科普文章：
+
+- **融合技能树**：30 个知识点节点覆盖 数学基础 → 深度学习 → Transformer → LLM → Agent 全链路，有明确的先修依赖关系
+- **拓扑排序选题**：自动选择「先修已发布」的节点中出度最高的枢纽节点，确保循序渐进
+- **教育风格文章**：独立的教育风 SYSTEM_PROMPT——类比驱动、图解思维、从 WHY→HOW→WHAT 逐层展开
+- **路线感知**：每篇文章末尾标注在技能树中的位置和下一步学习建议
+- **独立历史追踪**：`aikepu_skill_tree.json` + `aikepu_history.json`，不与热点/GitHub 管线交叉
+
+```bash
+# CLI 运行
+python main.py --task aikepu
+
+# 或 WebUI 中选择 "🎓 AI 科普"
+```
 
 ### AI 深度创作
 
@@ -378,6 +396,70 @@ GitHub 专题升级为 **单项目深度拆解模式**。配图管线 **全部�
 |------|------|
 | **[DEVELOPMENT.md](DEVELOPMENT.md)** | 开发工作流：环境搭建、代码规范、测试方法、发布流程、调试技巧、故障排查 |
 | **[CLAUDE.md](CLAUDE.md)** | Claude Code 项目指南：架构概览、核心模块、编码规范、常见开发任务 |
+
+---
+
+## ☁️ 云端部署（零成本）
+
+无需本地 GPU，通过 Render + GitHub Actions 实现全自动云端运行。
+
+### 架构
+
+```
+GitHub Actions (cron 定时 / 手动触发)
+       │  POST /api/start?token=xxx
+       ▼
+Render (Flask, free tier)
+       │
+       ├── DeepSeek API ──── 选题 + 文章生成
+       ├── Gemini API ────── 图片评分（免费层）
+       ├── 免费图源 ──────── 封面 + 配图（SD 不可用时自动降级）
+       └── 微信 API ──────── 发布草稿箱
+```
+
+### 部署步骤
+
+1. **Fork 本仓库到 GitHub**
+
+2. **Render 部署**
+   - 访问 [render.com](https://render.com)，注册免费账号
+   - 新建 Web Service，连接 GitHub 仓库
+   - 选择 `Docker` 运行时，Render 自动读取 `render.yaml`
+   - 在 Environment Variables 中设置：
+     ```
+     WECHAT_APP_ID=你的公众号AppID
+     WECHAT_APP_SECRET=你的公众号AppSecret
+     LLM_API_KEY=你的DeepSeek API Key
+     GEMINI_API_KEY=你的Gemini API Key（免费层即可）
+     WEBUI_TOKEN=你自定义的访问密码
+     ```
+   - 部署完成后获得 URL：`https://autowechat-xxxx.onrender.com`
+
+3. **GitHub Actions 配置**
+   - 在仓库 Settings → Secrets 中添加：
+     - `RENDER_URL`：你的 Render 服务 URL
+     - `WEBUI_TOKEN`：与上一步相同的访问密码
+   - 定时触发默认每天 8:00 AM（北京时间），可在 `.github/workflows/trigger.yml` 中修改 cron
+   - 手动触发：GitHub 仓库 → Actions → "AutoWeChat 定时发布" → Run workflow → 选择任务类型
+
+4. **一键运行**
+   - 手机打开 `https://你的域名/?token=你的密码` → 选择任务类型 → Start
+   - 或 GitHub 手机 App → Actions → 手动触发
+
+### 图片降级策略
+
+云端无 SD 时，系统按以下优先级自动降级：
+1. Unsplash API（需 `UNSPLASH_ACCESS_KEY`，免费 50次/小时）
+2. Pexels API（需 `PEXELS_API_KEY`，免费 200次/小时）
+3. Unsplash Source 直接 URL（无需 Key）
+4. Bing 图片搜索（icrawler，无需 Key）
+
+### 本地 Docker 测试
+
+```bash
+docker compose up -d
+# 访问 http://localhost:5000
+```
 
 ---
 
