@@ -11,54 +11,83 @@ Fully automated WeChat public account content production and publishing system. 
 
 ---
 
-## Table of Contents
+## 📋 Table of Contents
 
-- [Architecture Overview](#architecture-overview)
+- [🏗️ Architecture Overview](#🏗️-architecture-overview)
 
-- [Features](#features)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [Quick Start](#quick-start)
-- [Web UI](#web-ui-v30)
-- [Image Selection Strategy](#image-selection-strategy)
-- [Core Configuration](#core-configuration)
-- [Glossary](GLOSSARY_EN.md)
-- [Development Workflow](DEVELOPMENT.md)
+- [✨ Features](#✨-features)
+- [🛠️ Tech Stack](#🛠️-tech-stack)
+- [📁 Project Structure](#📁-project-structure)
+- [🚀 Quick Start](#🚀-quick-start)
+- [💻 Web UI](#💻-web-ui-v30)
+- [🖼️ Image Selection Strategy](#🖼️-image-selection-strategy)
+- [⚙️ Core Configuration](#⚙️-core-configuration)
+- [📚 Glossary](GLOSSARY_EN.md)
+- [👨‍💻 Development Workflow](DEVELOPMENT.md)
 - [Claude Code Guide](CLAUDE.md)
-- [Requirements](#requirements)
-- [License](#license)
-- [Disclaimer](#disclaimer)
+- [📋 Requirements](#📋-requirements)
+- [📄 License](#📄-license)
+- [⚠️ Disclaimer](#⚠️-disclaimer)
 
-## Architecture Overview
+## 🏗️ Architecture Overview
 
 ```mermaid
 graph TD
-    A[Web UI / CLI] -->|Trigger| B(Core Engine)
-    B -->|Task Dispatch| C{Plugin Manager}
+    classDef ui fill:#1E1E1E,stroke:#4CAF50,stroke-width:2px,color:#fff,rx:5px
+    classDef engine fill:#2C3E50,stroke:#3498DB,stroke-width:2px,color:#fff,rx:10px
+    classDef plugin fill:#8E44AD,stroke:#9B59B6,stroke-width:2px,color:#fff,rx:10px
+    classDef llm fill:#E67E22,stroke:#D35400,stroke-width:2px,color:#fff,rx:5px
+    classDef vision fill:#16A085,stroke:#1ABC9C,stroke-width:2px,color:#fff,rx:5px
+    classDef wechat fill:#27AE60,stroke:#2ECC71,stroke-width:3px,color:#fff,rx:15px
+    classDef db fill:#F39C12,stroke:#F1C40F,stroke-width:2px,color:#fff,rx:5px
+
+    subgraph User Interface
+        A1["💻 Web UI (Flask)"]:::ui
+        A2["⌨️ CLI (Command Line)"]:::ui
+    end
+
+    subgraph Core Dispatcher
+        B{"⚙️ Core Engine"}:::engine
+        C[["🔌 Plugin Manager"]]:::plugin
+    end
+
+    subgraph Content Workflows
+        D["🌐 12 Hotspot Sources"]:::plugin
+        E["🐙 GitHub PyGithub+Rich"]:::plugin
+        F["🎓 AI Kepu Skill Tree DAG"]:::plugin
+    end
+
+    subgraph AI Engines
+        G{"🧠 DeepSeek LLM\n(Text Generation)"}:::llm
+        H{"👁️ Gemini/Ollama\n(Vision AI)"}:::vision
+    end
+
+    subgraph Publishing & Storage
+        J["📝 Publisher Module"]:::ui
+        DB[("🗄️ SQLite Database\n(Dedup & History)")]:::db
+        K(("💬 WeChat Official Account\n(Draft API)")):::wechat
+    end
+
+    A1 -->|Trigger| B
+    A2 -->|Trigger| B
+    B -->|Route Task| C
+    C -->|Fetch| D
+    C -->|Fetch| E
+    C -->|Fetch| F
     
-    C -->|Hotspots| D[12 Source Plugins]
-    C -->|GitHub| E[PyGithub + rich]
-    C -->|AI Kepu| F[Skill Tree DAG]
+    D -->|Raw Data| G
+    E -->|Raw Data| G
+    F -->|Raw Data| G
     
-    D --> G[DeepSeek LLM]
-    E --> G
-    F --> G
-    
-    G -->|Content| H(Image Engine)
-    H -->|SD / Pexels| I[6-Dim Filter & Vision AI]
-    
-    I -->|HTML Render| J[Publisher]
-    J -->|Title Dedup| DB[(SQLite)]
-    J -->|Draft API| K((WeChat Official Account))
-    
-    style B fill:#2b2d42,stroke:#8d99ae,stroke-width:2px,color:#fff
-    style G fill:#03045e,stroke:#0077b6,stroke-width:2px,color:#fff
-    style K fill:#2a9d8f,stroke:#264653,stroke-width:2px,color:#fff
+    G -->|Draft Article| H
+    H -->|Select Cover & Images| J
+    J -->|Check Title| DB
+    J -->|Upload HTML| K
 ```
 
 ---
 
-## Features
+## ✨ Features
 
 **Multi-Source Hotspot Aggregation** — Parallel scraping from 12 platforms (Weibo, IT Home, 36Kr, Baidu, Zhihu, CSDN, RSS, Politics, Toutiao, The Paper, Huxiu, Douyin). Fully modularized via `PluginManager` with source-level health monitoring and automatic degradation.
 
@@ -95,7 +124,7 @@ graph TD
 
 ---
 
-## Tech Stack
+## 🛠️ Tech Stack
 
 - **Language**: Python 3.8+
 - **LLM**: DeepSeek Chat / Reasoner
@@ -110,7 +139,7 @@ graph TD
 
 ---
 
-## Project Structure
+## 📁 Project Structure
 
 ```
 wechat_auto_publish/
@@ -147,7 +176,7 @@ wechat_auto_publish/
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
 ### 1. Clone
 
@@ -216,7 +245,7 @@ Visit http://127.0.0.1:5000
 
 ---
 
-## Web UI (v3.0)
+## 💻 Web UI (v3.0)
 
 The dark-themed dashboard provides:
 
@@ -229,7 +258,7 @@ The dark-themed dashboard provides:
 
 ---
 
-## Image Selection Strategy
+## 🖼️ Image Selection Strategy
 
 ### Hotspot Articles (AI-first)
 
@@ -256,24 +285,51 @@ Each image is evaluated on 6 dimensions, then optionally re-evaluated by vision 
 
 ```mermaid
 graph TD
-    A[Image Candidates] --> B(Step 1: CV 6-Dim Scoring)
-    B -->|Resolution/Aspect Ratio/Clarity<br>OCR Density/Color/Size| C{Step 2: Vision AI}
+    classDef pool fill:#2980B9,stroke:#3498DB,stroke-width:2px,color:#fff,rx:5px
+    classDef scoring fill:#8E44AD,stroke:#9B59B6,stroke-width:2px,color:#fff,rx:5px
+    classDef ai fill:#D35400,stroke:#E67E22,stroke-width:2px,color:#fff,rx:5px
+    classDef process fill:#27AE60,stroke:#2ECC71,stroke-width:2px,color:#fff,rx:5px
+    classDef final fill:#16A085,stroke:#1ABC9C,stroke-width:3px,color:#fff,rx:15px
+
+    subgraph Phase 1: Candidate Pool
+        A["🖼️ Raw Image Candidates"]:::pool
+    end
+
+    subgraph Phase 2: CV 6-Dim Scoring
+        B{"📊 Base CV Evaluation\nResolution | Aspect Ratio | Clarity\nOCR Density | Color | Size"}:::scoring
+    end
+
+    subgraph Phase 3: Vision AI (Top 3)
+        C{"🤖 AI Selection Engine"}:::ai
+        D["☁️ Gemini Flash 2.0 (Cloud)"]:::ai
+        E["🖥️ Gemma 3 4B (Local)"]:::ai
+        F["📉 Pure CV Fallback"]:::scoring
+    end
+
+    subgraph Phase 4: Formatting & Dedup
+        G["✂️ Smart Cropping\n(900x383 / 900x500)"]:::process
+        H["🔍 pHash Perceptual Hash\n(Duplicate Prevention)"]:::process
+    end
+
+    I(("📤 Upload to WeChat Media")):::final
+
+    A --> B
+    B -->|Top 3 Pass| C
+    C -->|Preferred| D
+    C -->|Secondary| E
+    C -->|Unavailable| F
     
-    C -->|Gemini available| D[Gemini Flash 2.0 Eval]
-    C -->|Ollama available| E[Gemma 3 4B Local Eval]
-    C -->|None available| F[Pure CV Scoring]
-    
-    D --> G(Step 3: Crop & Dedup)
+    D --> G
     E --> G
     F --> G
     
-    G -->|Crop to 900x383/900x500| H[pHash Perceptual Hash]
-    H --> I[Upload to WeChat]
+    G --> H
+    H --> I
 ```
 
 ---
 
-## Core Configuration
+## ⚙️ Core Configuration
 
 Adjustable in `config.py` or `.env`:
 
@@ -293,7 +349,7 @@ Adjustable in `config.py` or `.env`:
 
 ---
 
-## Glossary
+## 📚 Glossary
 
 Detailed explanations of technical terms, tool names, and concepts used in this project: **[GLOSSARY_EN.md](GLOSSARY_EN.md)**
 
@@ -301,7 +357,7 @@ Covers: Technical Terms | Image Terms | GitHub Terms | WeChat Terms
 
 ---
 
-## Development Docs
+## 👨‍💻 Development Docs
 
 | Document | Description |
 |----------|-------------|
@@ -310,7 +366,7 @@ Covers: Technical Terms | Image Terms | GitHub Terms | WeChat Terms
 
 ---
 
-## Requirements
+## 📋 Requirements
 
 - Python 3.8+
 - [Graphviz](https://graphviz.org/download/) (for architecture diagram generation, add to PATH)
@@ -321,12 +377,12 @@ Covers: Technical Terms | Image Terms | GitHub Terms | WeChat Terms
 
 ---
 
-## License
+## 📄 License
 
 [MIT License](LICENSE)
 
 ---
 
-## Disclaimer
+## ⚠️ Disclaimer
 
 This tool is for technical research and content creation assistance only. Please comply with WeChat official account operating guidelines and relevant laws. AI-generated content should be reviewed by a human before publishing.

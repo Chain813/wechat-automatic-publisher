@@ -11,55 +11,85 @@
 
 ---
 
-## 目录
+## 📋 目录
 
-- [架构概览](#架构概览)
+- [🏗️ 架构概览](#🏗️-架构概览)
+- [✨ 功能特性](#✨-功能特性)
+- [🛠️ 技术栈](#🛠️-技术栈)
+- [📁 项目结构](#📁-项目结构)
+- [🚀 快速开始](#🚀-快速开始)
+- [💻 Web 管理界面](#💻-web-管理界面)
+- [🖼️ 配图策略](#🖼️-配图策略)
+- [⚙️ 核心配置](#⚙️-核心配置)
+- [📚 名词解释](GLOSSARY.md)
+- [👨‍💻 开发文档](DEVELOPMENT.md)
+- [☁️ 云端部署](#☁️-云端部署零成本)
+- [📋 环境要求](#📋-环境要求)
+- [📄 许可证](#📄-许可证)
+- [⚠️ 免责声明](#⚠️-免责声明)
 
-- [功能特性](#功能特性)
-- [技术栈](#技术栈)
-- [项目结构](#项目结构)
-- [快速开始](#快速开始)
-- [Web 管理界面](#web-管理界面)
-- [配图策略](#配图策略)
-- [核心配置](#核心配置)
-- [名词解释](GLOSSARY.md)
-- [开发工作流](DEVELOPMENT.md)
-- [Claude Code 指南](CLAUDE.md)
-- [☁️ 云端部署](#云端部署零成本)
-- [环境要求](#环境要求)
-- [许可证](#许可证)
-- [免责声明](#免责声明)
+---
 
-## 架构概览
+## 🏗️ 架构概览
 
 ```mermaid
 graph TD
-    A[Web UI / CLI] -->|触发任务| B(调度引擎 Core Engine)
-    B -->|任务分发| C{插件管理器 Plugin Manager}
+    %% 定义样式类
+    classDef ui fill:#1E1E1E,stroke:#4CAF50,stroke-width:2px,color:#fff,rx:5px
+    classDef engine fill:#2C3E50,stroke:#3498DB,stroke-width:2px,color:#fff,rx:10px
+    classDef plugin fill:#8E44AD,stroke:#9B59B6,stroke-width:2px,color:#fff,rx:10px
+    classDef llm fill:#E67E22,stroke:#D35400,stroke-width:2px,color:#fff,rx:5px
+    classDef vision fill:#16A085,stroke:#1ABC9C,stroke-width:2px,color:#fff,rx:5px
+    classDef wechat fill:#27AE60,stroke:#2ECC71,stroke-width:3px,color:#fff,rx:15px
+    classDef db fill:#F39C12,stroke:#F1C40F,stroke-width:2px,color:#fff,rx:5px
+
+    subgraph 用户入口 (User Interface)
+        A1["💻 Web UI (Flask)"]:::ui
+        A2["⌨️ CLI (命令行)"]:::ui
+    end
+
+    subgraph 核心调度引擎 (Core Dispatcher)
+        B{"⚙️ Core Engine"}:::engine
+        C[["🔌 Plugin Manager"]]:::plugin
+    end
+
+    subgraph 动态工作流插件 (Workflows)
+        D["🌐 12 大全网热点源"]:::plugin
+        E["🐙 GitHub 趋势挖掘"]:::plugin
+        F["🎓 AI 科普技能树 DAG"]:::plugin
+    end
+
+    subgraph 人工智能引擎 (AI Engines)
+        G{"🧠 DeepSeek LLM\n(深度长文生成)"}:::llm
+        H{"👁️ Gemini / Ollama\n(视觉质量评估)"}:::vision
+    end
+
+    subgraph 持久化与发布模块 (Publishing)
+        J["📝 Publisher 渲染器"]:::ui
+        DB[("🗄️ SQLite Database\n(标题去重与历史记录)")]:::db
+        K(("💬 微信公众号\n(云端草稿箱同步)")):::wechat
+    end
+
+    A1 -->|触发启动| B
+    A2 -->|触发启动| B
+    B -->|流转配置| C
+    C -->|拉取数据| D
+    C -->|拉取数据| E
+    C -->|依赖遍历| F
     
-    C -->|全网热点| D[12 个数据源插件]
-    C -->|GitHub| E[PyGithub + rich]
-    C -->|AI 科普| F[技能树拓扑排序 DAG]
+    D -->|加工清洗| G
+    E -->|翻译精炼| G
+    F -->|教育风格| G
     
-    D --> G[DeepSeek 大模型]
-    E --> G
-    F --> G
-    
-    G -->|深度长文| H(智能配图引擎)
-    H -->|SD/图库| I[6维过滤 & 视觉 AI 评估]
-    
-    I -->|HTML 渲染| J[发布模块 Publisher]
-    J -->|标题去重| DB[(SQLite)]
-    J -->|API 提交| K((微信公众号草稿箱))
-    
-    style B fill:#2b2d42,stroke:#8d99ae,stroke-width:2px,color:#fff
-    style G fill:#03045e,stroke:#0077b6,stroke-width:2px,color:#fff
-    style K fill:#2a9d8f,stroke:#264653,stroke-width:2px,color:#fff
+    G -->|图文组装| H
+    H -->|选取封图与配图| J
+    J -->|双端验重| DB
+    J -->|API 提交| K
 ```
 
 ---
 
-## 功能特性
+## ✨ 功能特性
 
 ### 多源热点聚合
 
@@ -156,7 +186,7 @@ Flask 暗色主题仪表盘：
 
 ---
 
-## 技术栈
+## 🛠️ 技术栈
 
 | 类别 | 技术 | 用途 |
 |------|------|------|
@@ -183,7 +213,7 @@ Flask 暗色主题仪表盘：
 
 ---
 
-## 项目结构
+## 📁 项目结构
 
 ```
 wechat_auto_publish/
@@ -227,7 +257,7 @@ wechat_auto_publish/
 
 ---
 
-## 快速开始
+## 🚀 快速开始
 
 ### 1. 克隆仓库
 
@@ -333,7 +363,7 @@ python webui.py
 
 ---
 
-## 配图策略
+## 🖼️ 配图策略
 
 ### 热点文章配图（AI 生图优先）
 
@@ -366,24 +396,51 @@ GitHub 专题升级为 **单项目深度拆解模式**。配图管线 **全部�
 
 ```mermaid
 graph TD
-    A[候选图片池] --> B(第一步：6 维 CV 评分)
-    B -->|分辨率/宽高比/清晰度<br>文字密度/色彩/文件大小| C{第二步：视觉 AI 二次评估}
+    classDef pool fill:#2980B9,stroke:#3498DB,stroke-width:2px,color:#fff,rx:5px
+    classDef scoring fill:#8E44AD,stroke:#9B59B6,stroke-width:2px,color:#fff,rx:5px
+    classDef ai fill:#D35400,stroke:#E67E22,stroke-width:2px,color:#fff,rx:5px
+    classDef process fill:#27AE60,stroke:#2ECC71,stroke-width:2px,color:#fff,rx:5px
+    classDef final fill:#16A085,stroke:#1ABC9C,stroke-width:3px,color:#fff,rx:15px
+
+    subgraph 阶段一: 生成候选池
+        A["🖼️ 原始图片池 (AI生图/图库爬虫)"]:::pool
+    end
+
+    subgraph 阶段二: 传统机器视觉筛选
+        B{"📊 6 维 CV 初筛\n分辨率 | 宽高比 | 清晰度\nOCR 文字密度 | 色彩直方图 | 压缩大小"}:::scoring
+    end
+
+    subgraph 阶段三: 深度视觉大模型仲裁 (Top 3)
+        C{"🤖 AI 择优引擎"}:::ai
+        D["☁️ Gemini Flash 2.0 (首选)"]:::ai
+        E["🖥️ Gemma 3 4B (本地替代)"]:::ai
+        F["📉 纯 CV 分数 (无AI兜底)"]:::scoring
+    end
+
+    subgraph 阶段四: 后期处理与合规
+        G["✂️ 智能画幅裁切\n(900x383 或 900x500)"]:::process
+        H["🔍 pHash 感知哈希\n(防止视觉重复发布)"]:::process
+    end
+
+    I(("📤 上传至微信永久素材库")):::final
+
+    A --> B
+    B -->|选出前三名| C
+    C -->|云端链路通畅| D
+    C -->|拥有本地 GPU| E
+    C -->|均不可用| F
     
-    C -->|Gemini 可用| D[Gemini Flash 2.0 评估]
-    C -->|Ollama 可用| E[Gemma 3 4B 本地评估]
-    C -->|都不用| F[纯 CV 评分兜底]
-    
-    D --> G(第三步：尺寸适配与去重)
+    D --> G
     E --> G
     F --> G
     
-    G -->|裁剪 900x383/900x500| H[pHash 感知哈希查重]
-    H --> I[上传至微信素材库]
+    G --> H
+    H --> I
 ```
 
 ---
 
-## 核心配置
+## ⚙️ 核心配置
 
 在 `config.py` 或 `.env` 中调整：
 
@@ -407,7 +464,7 @@ graph TD
 
 ---
 
-## 名词解释
+## 📚 名词解释
 
 项目涉及的技术术语、工具名称和专业概念的详细解释，请参阅 **[GLOSSARY.md](GLOSSARY.md)**。
 
@@ -415,7 +472,7 @@ graph TD
 
 ---
 
-## 开发文档
+## 👨‍💻 开发文档
 
 | 文档 | 说明 |
 |------|------|
@@ -488,7 +545,7 @@ docker compose up -d
 
 ---
 
-## 环境要求
+## 📋 环境要求
 
 | 依赖 | 说明 | 是否必须 |
 |------|------|---------|
@@ -501,12 +558,12 @@ docker compose up -d
 
 ---
 
-## 许可证
+## 📄 许可证
 
 [MIT License](LICENSE)
 
 ---
 
-## 免责声明
+## ⚠️ 免责声明
 
 本工具仅供技术研究和内容创作辅助使用。请遵守微信公众号运营规范及相关法律法规。AI 生成内容需人工审核后发布。使用者应自行承担因使用本工具产生的一切法律责任。
