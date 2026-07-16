@@ -7,10 +7,10 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from loguru import logger
 
-from config import BRAND_NAME, MAX_TOPICS_PER_RUN
+from config import BRAND_NAME, MAX_AIKEPU_PER_RUN
 from core.aikepu.skill_tree import (
     select_next_topic, mark_published, get_skill_tree_stats,
-    reset_tree_cache
+    reset_tree_cache, release_reserved
 )
 from core.aikepu.processor import generate_aikepu_article, generate_digest
 from core.shared.article_utils import process_article_content, _print_review_report
@@ -125,10 +125,12 @@ def _publish_single_topic(topic_info, publisher):
         else:
             err = result.get("errmsg", "未知错误")
             print(f"❌ 「{clean_title}」发布失败：{err}")
+            release_reserved(node_id)  # 发布失败，释放节点以便重试
             return topic_title, False, err, node_id
 
     except Exception as exc:
         logger.warning("  AI科普发布异常: {}", exc)
+        release_reserved(topic_info.get("node_id", ""))  # 异常时释放节点
         return topic_info.get("title", "未知"), False, str(exc), topic_info.get("node_id", "")
 
 
@@ -159,9 +161,9 @@ def run_aikepu_workflow(publisher):
             print(f"\n📭 当前无可用节点（{stats['total'] - stats['published']} 个节点的先修条件未满足）")
         return
 
-    # 选择 N 个选题（每次最多 MAX_TOPICS_PER_RUN 篇）
+    # 选择 N 个选题（每次最多 MAX_AIKEPU_PER_RUN 篇，默认 1）
     topics = []
-    for _ in range(MAX_TOPICS_PER_RUN):
+    for _ in range(MAX_AIKEPU_PER_RUN):
         topic = select_next_topic()
         if topic:
             topics.append(topic)

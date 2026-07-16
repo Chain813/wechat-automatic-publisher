@@ -16,6 +16,10 @@ HISTORY_FILE = os.getenv("AIKEPU_HISTORY", "aikepu_history.json")
 _tree_cache = None
 _tree_lock = threading.Lock()
 
+# 当前批次已选中但尚未发布的节点（防止同批次重复选题）
+_reserved_ids = set()
+_reserved_lock = threading.Lock()
+
 
 def load_skill_tree():
     """加载技能树 JSON，返回 {nodes: [...], meta: {...}}"""
@@ -95,6 +99,11 @@ def get_available_nodes():
         if node_id in published_ids:
             continue
 
+        # 跳过当前批次已选中但尚未发布
+        with _reserved_lock:
+            if node_id in _reserved_ids:
+                continue
+
         # 检查先修条件
         prereqs = node.get("prerequisites", [])
         all_prereqs_met = all(pid in published_ids for pid in prereqs)
@@ -129,6 +138,11 @@ def select_next_topic():
         print(f"  {i+1}. [{tags_str}] {node['title']}  (先修: {prereq_str})")
 
     selected = available[0]
+
+    # 加入当前批次保留集，防止同一批次重复选中
+    with _reserved_lock:
+        _reserved_ids.add(selected["id"])
+
     print(f"\n🎯 选中枢纽节点: {selected['title']}")
     print(f"   标签: {', '.join(selected.get('tags', []))}")
     print(f"   解锁后续: {sum(1 for n in load_skill_tree()['nodes'] if selected['id'] in n.get('prerequisites', []))} 个节点")
@@ -203,8 +217,23 @@ def get_skill_tree_stats():
     }
 
 
+def release_reserved(node_id=None):
+    """
+    释放保留的节点。
+    - 传 node_id：仅释放指定节点（发布成功后调用）
+    - 不传参数：清空全部保留（批次结束时调用）
+    """
+    global _reserved_ids
+    with _reserved_lock:
+        if node_id:
+            _reserved_ids.discard(node_id)
+        else:
+            _reserved_ids.clear()
+
+
 def reset_tree_cache():
     """强制重新加载技能树（用于测试或热更新）"""
     global _tree_cache
     with _tree_lock:
         _tree_cache = None
+    release_reserved()  # 同时清空保留集

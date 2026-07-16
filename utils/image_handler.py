@@ -544,10 +544,42 @@ def _try_icrawler_bing(keyword, target_dir, max_images=3):
     return None
 
 
+def _enhance_search_keyword(keyword):
+    """将抽象中文概念转为更适合图片搜索的英文关键词"""
+    # 常见 AI 术语中英映射
+    ai_term_map = {
+        "注意力机制": "attention mechanism neural network diagram",
+        "Transformer": "transformer architecture deep learning",
+        "神经网络": "neural network visualization",
+        "深度学习": "deep learning artificial intelligence",
+        "机器学习": "machine learning data science",
+        "反向传播": "backpropagation neural network",
+        "梯度下降": "gradient descent optimization",
+        "大模型": "large language model AI",
+        "RAG": "retrieval augmented generation architecture",
+        "Agent": "AI agent autonomous",
+        "嵌入": "word embedding vector representation",
+        "Token": "tokenization natural language processing",
+        "微调": "fine tuning machine learning",
+        "预训练": "pretraining language model",
+        "多模态": "multimodal AI vision language",
+        "量化": "model quantization optimization",
+        "推理": "AI inference engine",
+        "卷积": "convolutional neural network",
+        "编码器": "encoder transformer architecture",
+        "解码器": "decoder transformer architecture",
+    }
+    for cn, en in ai_term_map.items():
+        if cn in keyword:
+            return en
+    return keyword
+
+
 def _download_free_image(keyword, save_dir, purpose="body"):
     """
     免费图源降级下载（SD 不可用时自动启用）。
     优先级：Unsplash API → Pexels API → Unsplash Source → Bing 搜索
+    自动将中文 AI 术语翻译为英文搜索词以提高匹配度。
     """
     if not keyword or not keyword.strip():
         return None
@@ -561,31 +593,38 @@ def _download_free_image(keyword, save_dir, purpose="body"):
     target_dir = os.path.join(save_dir, clean_kw)
     os.makedirs(target_dir, exist_ok=True)
 
+    # 增强搜索关键词（中→英，AI术语映射）
+    search_keyword = _enhance_search_keyword(keyword)
+    if search_keyword != keyword:
+        logger.info("🖼️  免费图源: '{}' → 搜索 '{}'", keyword, search_keyword)
+
     logger.info("🖼️  免费图源下载 '{}' ...", keyword)
 
     # 1. Unsplash 官方 API（需 UNSPLASH_ACCESS_KEY）
-    img_url = _try_unsplash_api(keyword, width, height)
+    img_url = _try_unsplash_api(search_keyword, width, height)
     if img_url:
         path = _save_image_from_url(img_url, target_dir, prefix="unsplash")
         if path:
             return path
 
     # 2. Pexels 官方 API（需 PEXELS_API_KEY）
-    img_url = _try_pexels_api(keyword, width, height)
+    img_url = _try_pexels_api(search_keyword, width, height)
     if img_url:
         path = _save_image_from_url(img_url, target_dir, prefix="pexels")
         if path:
             return path
 
-    # 3. Unsplash Source 直接 URL（无需 API Key，可能不稳定）
-    img_url = _try_unsplash_source(keyword, width, height)
+    # 3. Unsplash Source 直接 URL（无需 API Key）
+    img_url = _try_unsplash_source(search_keyword, width, height)
     if img_url:
         path = _save_image_from_url(img_url, target_dir, prefix="unsplash_src")
         if path:
             return path
 
-    # 4. icrawler Bing 搜索（无需 API Key，最终降级）
-    path = _try_icrawler_bing(keyword, target_dir)
+    # 4. icrawler Bing 搜索（首次用增强词，失败后用原词）
+    path = _try_icrawler_bing(search_keyword, target_dir)
+    if not path and search_keyword != keyword:
+        path = _try_icrawler_bing(keyword, target_dir)
     if path:
         return path
 
