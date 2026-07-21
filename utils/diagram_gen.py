@@ -126,6 +126,11 @@ def _extract_code_block(text):
     if m:
         return "json", m.group(1).strip()
 
+    # archify / d2
+    m = re.search(r'```(?:archify|d2)\s*\n(.*?)\n```', text, re.DOTALL | re.IGNORECASE)
+    if m:
+        return "archify", m.group(1).strip()
+
     # mermaid
     m = re.search(r'```mermaid\s*\n(.*?)\n```', text, re.DOTALL | re.IGNORECASE)
     if m:
@@ -191,6 +196,12 @@ def _try_lite_render(description, save_dir):
 
     output_path = os.path.join(save_dir, f"diagram_{int(time.time() * 1000)}.png")
     os.makedirs(save_dir, exist_ok=True)
+
+    # Archify 架构图
+    if dtype == "archify":
+        from utils.lite_render import render_archify_diagram
+        if render_archify_diagram(code, output_path):
+            return output_path
 
     # Graphviz 流程图
     if dtype == "graphviz":

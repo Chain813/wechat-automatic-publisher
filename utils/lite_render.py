@@ -305,3 +305,73 @@ def render_text_card(title, bullet_points, output_path="card.png"):
     except Exception as e:
         logger.warning("  [matplotlib] 要点卡片渲染失败: {}", e)
         return False
+
+
+# ==========================================
+#  Archify 架构图渲染
+# ==========================================
+def render_archify_diagram(archify_code, output_path):
+    """
+    使用 Archify / D2 渲染系统架构图，若系统未安装 Archify，自动平滑转译为 Graphviz 高颜值架构图。
+    """
+    import shutil
+    import subprocess
+
+    # 1. 检查命令行工具 archify / d2
+    archify_cli = shutil.which("archify") or shutil.which("d2")
+    if archify_cli:
+        try:
+            cmd = [archify_cli, "-", output_path]
+            p = subprocess.run(cmd, input=archify_code.encode("utf-8"), stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
+            if p.returncode == 0 and os.path.exists(output_path):
+                logger.info("  [archify] CLI 原生渲染成功: {}", os.path.basename(output_path))
+                return True
+        except Exception as e:
+            logger.warning("  [archify] CLI 渲染异常，降级平滑转译: {}", e)
+
+    # 2. 降级：自动将 Archify 架构描述转译为 Graphviz 优雅架构图
+    try:
+        lines = [line.strip() for line in archify_code.strip().splitlines() if line.strip() and not line.strip().startswith("#")]
+        edges = []
+        nodes = set()
+
+        for line in lines:
+            # 匹配 NodeA -> NodeB 或 NodeA -> NodeB: Label
+            if "->" in line:
+                parts = line.split("->", 1)
+                src = parts[0].strip().strip("[]()")
+                target_part = parts[1].strip()
+                label = ""
+                if ":" in target_part:
+                    tgt_sub, label = target_part.split(":", 1)
+                    dst = tgt_sub.strip().strip("[]()")
+                    label = label.strip()
+                else:
+                    dst = target_part.strip().strip("[]()")
+                
+                nodes.add(src)
+                nodes.add(dst)
+                if label:
+                    edges.append(f'    "{src}" -> "{dst}" [label="{label}", color="#3b82f6", fontcolor="#93c5fd"];')
+                else:
+                    edges.append(f'    "{src}" -> "{dst}" [color="#3b82f6"];')
+
+        dot_lines = [
+            'digraph Architecture {',
+            '    rankdir=LR;',
+            '    bgcolor="#0b0e14";',
+            '    node [shape=box, style="filled,rounded", fillcolor="#1e293b", color="#3b82f6", fontcolor="#f8fafc", fontname="Microsoft YaHei", fontsize=11, height=0.5, margin="0.2,0.1"];',
+            '    edge [penwidth=1.5, fontname="Microsoft YaHei", fontsize=9];'
+        ]
+        for node in nodes:
+            dot_lines.append(f'    "{node}" [label="{node}"];')
+        dot_lines.extend(edges)
+        dot_lines.append('}')
+
+        converted_dot = "\n".join(dot_lines)
+        return render_graphviz(converted_dot, output_path)
+
+    except Exception as e:
+        logger.warning("  [archify] 平滑转译渲染失败: {}", e)
+        return False
+
