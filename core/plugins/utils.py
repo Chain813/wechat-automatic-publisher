@@ -20,12 +20,24 @@ _source_health_lock = threading.Lock()
 HTTP_SESSION = build_cached_session(os.path.join("data", "hotspot_cache"), HOTSPOT_CACHE_TTL_SECONDS)
 
 def get_source_health_report():
+    from config import NEWS_SOURCES
     report = {}
     with _source_health_lock:
+        # 预先用配置的信源初始化健康状态，避免初始状态为空
+        for src in NEWS_SOURCES:
+            if src not in _source_health:
+                _source_health[src] = {"failures": 0, "disabled": False}
+                
         for k, v in _source_health.items():
+            if v["disabled"]:
+                status = "disabled"
+            elif v["failures"] > 0:
+                status = "degraded"
+            else:
+                status = "healthy"
             report[k] = {
                 "failures": v["failures"],
-                "status": "Disabled" if v["disabled"] else "Healthy"
+                "status": status
             }
     return report
 
@@ -91,7 +103,7 @@ def _get_current_date_str():
 
 def _is_title_fresh(title):
     current_year = datetime.now().year
-    old_year_match = re.findall(r'(20[12]\d)年', title)
+    old_year_match = re.findall(r'(20\d{2})年', title)
     for y in old_year_match:
         if int(y) < current_year:
             return False

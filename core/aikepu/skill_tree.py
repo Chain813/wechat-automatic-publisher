@@ -51,23 +51,192 @@ def _node_by_id(tree, node_id):
     return None
 
 
-def get_published_ids():
-    """从历史记录中获取已发布的节点 id 列表"""
+def reconcile_history_file():
+    """
+    根据 SQLite 数据库和微信线上已发表列表，自动清理 data/aikepu_history.json 中被用户完全删除的废弃/草稿记录，
+    以保证技能树进度与真实发布/保存状态 100% 对齐。
+    """
     if not os.path.exists(HISTORY_FILE):
-        return []
+        return
     try:
+        # 1. 加载 JSON 历史
         with open(HISTORY_FILE, "r", encoding="utf-8") as f:
             history = json.load(f)
-        published = []
+        
+        # 2. 查询 SQLite 中的所有 AI 科普记录
+        db_titles = set()
+        from core.db.manager import db_manager
+        from core.db.models import ArticleHistory
+        try:
+            session = db_manager.get_session()
+            records = session.query(ArticleHistory).filter(ArticleHistory.source_type == 'aikepu').all()
+            for r in records:
+                if r.title:
+                    db_titles.add(r.title.strip())
+            db_manager.remove_session()
+        except Exception as e:
+            logger.debug("reconcile_history_file: 读取 SQLite 失败: {}", e)
+            return  # 数据库异常时不执行清理，防止误删
+
+        # 如果数据库中完全没有 AI 科普的记录，说明可能是纯 legacy 模式或初次部署，不清理历史
+        if not db_titles:
+            return
+
+        # 3. 查询微信线上已发表标题
+        wechat_titles = set()
+        try:
+            from config import WECHAT_APP_ID, WECHAT_APP_SECRET
+            if WECHAT_APP_ID and WECHAT_APP_SECRET:
+                from core.shared.publisher import WeChatPublisher
+                pub = WeChatPublisher(WECHAT_APP_ID, WECHAT_APP_SECRET)
+                titles = pub.get_published_titles(count=100)
+                if titles:
+                    for t in titles:
+                        if t:
+                            wechat_titles.add(t.strip())
+        except Exception as e:
+            logger.debug("reconcile_history_file: 读取微信已发表失败: {}", e)
+
+        # 4. 执行过滤
+        modified = False
+        new_history = {}
+        
+        import re
+        def _clean(t):
+            return re.sub(r'[^\w\u4e00-\u9fff]', '', t or '').lower()
+
+        clean_valid_titles = {_clean(t) for t in (db_titles | wechat_titles)}
+
         for date_key, entries in history.items():
-            if isinstance(entries, list):
-                for entry in entries:
-                    if isinstance(entry, dict) and entry.get("node_id"):
-                        published.append(entry["node_id"])
-        return list(set(published))
+            if not isinstance(entries, list):
+                new_history[date_key] = entries
+                continue
+            
+            filtered = []
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    filtered.append(entry)
+                    continue
+                
+                title = entry.get("title")
+                if not title:
+                    filtered.append(entry)
+                    continue
+                
+                clean_t = _clean(title)
+                # 检查该文章是否依然存在于数据库或微信公众号已发表中
+                exists = False
+                for valid_t in clean_valid_titles:
+                    if clean_t in valid_t or valid_t in clean_t:
+                        exists = True
+                        break
+                
+                if exists:
+                    filtered.append(entry)
+                else:
+                    modified = True
+                    logger.info("发现已被完全删除的文章记录，已从技能树历史自动同步清除: {} (ID: {})", title, entry.get("node_id"))
+            
+            if filtered:
+                new_history[date_key] = filtered
+            else:
+                modified = True
+
+        if modified:
+            tmp = HISTORY_FILE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(new_history, f, ensure_ascii=False, indent=2)
+            import shutil
+            shutil.move(tmp, HISTORY_FILE)
+            global _tree_cache
+            _tree_cache = None
     except Exception as e:
-        logger.warning("读取 AI科普历史失败: {}", e)
-        return []
+        logger.warning("技能树历史自动对齐清理失败: {}", e)
+
+
+def get_published_ids():
+    """
+    从三个源动态计算已发表的 AI 科普节点 id 列表：
+    1. 本地 JSON 历史 (data/aikepu_history.json)
+    2. SQLite 数据库 (ArticleHistory 表中 is_published == True 的记录)
+    3. 微信公众号 API 线上真实群发已发表的文章标题列表
+    """
+    # 自动对齐和清洗废弃/被完全删除的历史记录
+    reconcile_history_file()
+
+    published = set()
+
+    # 1. 从传统 JSON 历史读取
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                history = json.load(f)
+            for date_key, entries in history.items():
+                if isinstance(entries, list):
+                    for entry in entries:
+                        if isinstance(entry, dict) and entry.get("node_id"):
+                            published.add(entry["node_id"])
+        except Exception as e:
+            logger.warning("读取 AI科普历史 JSON 失败: {}", e)
+
+    # 2. 从技能树中建立节点标题与 ID 的规则对照表
+    tree = load_skill_tree()
+    nodes = tree.get("nodes", [])
+    if not nodes:
+        return list(published)
+
+    import re
+    def _clean_title(t):
+        return re.sub(r'[^\w\u4e00-\u9fff]', '', t or '').lower()
+
+    node_title_map = {}
+    for node in nodes:
+        nid = node.get("id")
+        ntitle = node.get("title", "")
+        if nid and ntitle:
+            node_title_map[nid] = _clean_title(ntitle)
+
+    # 3. 从 SQLite 数据库 (ArticleHistory) 获取被标记为 is_published == True 的记录
+    db_published_titles = []
+    try:
+        from core.db.manager import db_manager
+        from core.db.models import ArticleHistory
+        session = db_manager.get_session()
+        records = session.query(ArticleHistory).filter(ArticleHistory.is_published.is_(True)).all()
+        for r in records:
+            if r.title:
+                db_published_titles.append(_clean_title(r.title))
+        db_manager.remove_session()
+    except Exception as e:
+        logger.debug("读取 SQLite 数据库已发表状态失败: {}", e)
+
+    # 4. 从微信公众号 API 线上查询真实群发已发表的标题
+    wechat_published_titles = []
+    try:
+        from config import WECHAT_APP_ID, WECHAT_APP_SECRET
+        if WECHAT_APP_ID and WECHAT_APP_SECRET:
+            from core.shared.publisher import WeChatPublisher
+            pub = WeChatPublisher(WECHAT_APP_ID, WECHAT_APP_SECRET)
+            titles = pub.get_published_titles(count=100)
+            if titles:
+                wechat_published_titles = [_clean_title(t) for t in titles if t]
+    except Exception as e:
+        logger.debug("获取微信线上已发表标题跳过: {}", e)
+
+    all_published_clean = set(db_published_titles + wechat_published_titles)
+
+    # 匹配节点
+    for nid, clean_ntitle in node_title_map.items():
+        if nid in published:
+            continue
+        for clean_pub_t in all_published_clean:
+            if not clean_pub_t:
+                continue
+            if clean_ntitle in clean_pub_t or clean_pub_t in clean_ntitle:
+                published.add(nid)
+                break
+
+    return list(published)
 
 
 def get_available_nodes():
@@ -130,11 +299,11 @@ def select_next_topic():
         return None
 
     # 打印可发布节点概览
-    print("\n📋 AI技能树 — 可发布节点:")
+    logger.info("AI技能树 — 可发布节点 ({} 个)", len(available))
     for i, node in enumerate(available[:5]):
         prereq_str = ", ".join(node.get("prerequisites", [])) or "无"
         tags_str = " · ".join(node.get("tags", []))
-        print(f"  {i+1}. [{tags_str}] {node['title']}  (先修: {prereq_str})")
+        logger.info("  {}. [{}] {} (先修: {})", i+1, tags_str, node['title'], prereq_str)
 
     selected = available[0]
 
@@ -142,9 +311,9 @@ def select_next_topic():
     with _reserved_lock:
         _reserved_ids.add(selected["id"])
 
-    print(f"\n🎯 选中枢纽节点: {selected['title']}")
-    print(f"   标签: {', '.join(selected.get('tags', []))}")
-    print(f"   解锁后续: {sum(1 for n in load_skill_tree()['nodes'] if selected['id'] in n.get('prerequisites', []))} 个节点")
+    logger.info("选中枢纽节点: {}", selected['title'])
+    logger.info("   标签: {}", ', '.join(selected.get('tags', [])))
+    logger.info("   解锁后续: {} 个节点", sum(1 for n in load_skill_tree()['nodes'] if selected['id'] in n.get('prerequisites', [])))
 
     return {
         "node_id": selected["id"],
@@ -235,3 +404,69 @@ def reset_tree_cache():
     with _tree_lock:
         _tree_cache = None
     release_reserved()  # 同时清空保留集
+
+
+def remove_node_from_history(node_id=None, title=None):
+    """
+    从本地 json 历史记录中移除指定节点 ID 或标题的文章记录，实现进度回滚/重置
+    """
+    if not os.path.exists(HISTORY_FILE):
+        return False
+    try:
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            history = json.load(f)
+        
+        modified = False
+        new_history = {}
+        
+        import re
+        def _clean(t):
+            return re.sub(r'[^\w\u4e00-\u9fff]', '', t or '').lower()
+
+        target_title_clean = _clean(title) if title else None
+
+        for date_key, entries in history.items():
+            if not isinstance(entries, list):
+                new_history[date_key] = entries
+                continue
+            
+            filtered_entries = []
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    filtered_entries.append(entry)
+                    continue
+                
+                match_id = (node_id and entry.get("node_id") == node_id)
+                
+                entry_title_clean = _clean(entry.get("title")) if entry.get("title") else None
+                match_title = False
+                if target_title_clean and entry_title_clean:
+                    match_title = (target_title_clean in entry_title_clean or entry_title_clean in target_title_clean)
+
+                if match_id or match_title:
+                    modified = True
+                    logger.info("已从技能树 JSON 历史中移出文章记录: {} (ID: {})", entry.get("title"), entry.get("node_id"))
+                    
+                    # 释放保留的节点
+                    if entry.get("node_id"):
+                        release_reserved(entry.get("node_id"))
+                    continue
+                
+                filtered_entries.append(entry)
+            
+            if filtered_entries:
+                new_history[date_key] = filtered_entries
+            else:
+                modified = True  # 该日期的记录已空，移除日期键
+
+        if modified:
+            tmp = HISTORY_FILE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(new_history, f, ensure_ascii=False, indent=2)
+            import shutil
+            shutil.move(tmp, HISTORY_FILE)
+            reset_tree_cache()
+            return True
+    except Exception as e:
+        logger.warning("回滚 AI科普历史记录失败: {}", e)
+    return False

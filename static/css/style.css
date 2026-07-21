@@ -458,3 +458,89 @@ body {
     height: 100%;
     border: none;
 }
+
+/* History Tabs & Actions */
+.history-header-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.2rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+.history-tabs {
+    display: flex;
+    gap: 8px;
+}
+.history-tab {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    padding: 6px 16px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.history-tab:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+.history-tab.active {
+    background: rgba(0, 240, 255, 0.15);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    box-shadow: 0 0 10px rgba(0, 240, 255, 0.2);
+}
+.btn-delete-batch {
+    background-color: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #EF4444 !important;
+}
+.btn-delete-batch:hover:not(:disabled) {
+    background-color: #EF4444;
+    color: #fff !important;
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+}
+
+.history-select-all-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    padding: 6px 8px;
+    border-bottom: 1px dashed var(--border-color);
+    margin-bottom: 8px;
+}
+
+.history-select-checkbox {
+    cursor: pointer;
+    width: 14px;
+    height: 14px;
+    accent-color: var(--accent-primary);
+}
+
+.btn-delete-single {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #EF4444 !important;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+}
+.btn-delete-single:hover:not(:disabled) {
+    background: #EF4444;
+    color: #fff !important;
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+}
+.btn-delete-single:disabled, .btn-delete-batch:disabled, .history-select-checkbox:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+

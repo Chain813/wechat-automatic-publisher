@@ -44,6 +44,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
             max-width: 100%;
             box-sizing: border-box;
+            {container_style}
         }}
         /* 自定义 Mermaid 样式 */
         .mermaid {{
@@ -101,8 +102,12 @@ def render_html_to_png(html_body: str, output_path: str, width: int = 700) -> bo
     Returns:
         bool: 渲染是否成功
     """
+    # 自动识别是否为自包含卡片，防止双重背景和边框嵌套
+    is_card = any(x in html_body for x in ["w-[", "bg-", "rounded-", "border-"])
+    container_style = "background-color:transparent;border:none;padding:0;box-shadow:none;border-radius:0;" if is_card else ""
+
     # 组合为完整 HTML
-    full_html = HTML_TEMPLATE.format(content=html_body)
+    full_html = HTML_TEMPLATE.format(content=html_body, container_style=container_style)
     
     temp_file = None
     browser = None

@@ -61,7 +61,7 @@ def _is_edge_installed():
     return False
 
 
-def _build_common_options(headless: bool):
+def _build_common_options(headless: bool, user_data_dir: str | None = None, download_dir: str | None = None):
     """构建通用浏览器选项"""
     from selenium.webdriver.chrome.options import Options as ChromeOptions
 
@@ -76,23 +76,33 @@ def _build_common_options(headless: bool):
     options.page_load_strategy = 'eager'
     if headless:
         options.add_argument("--headless=new")
+    if user_data_dir:
+        options.add_argument(f"--user-data-dir={user_data_dir}")
+    if download_dir:
+        prefs = {
+            "download.default_directory": os.path.abspath(download_dir),
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "safebrowsing.enabled": True
+        }
+        options.add_experimental_option("prefs", prefs)
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
     return options
 
 
-def _try_chrome(headless: bool):
+def _try_chrome(headless: bool, user_data_dir: str | None = None, download_dir: str | None = None):
     """启动 Chrome"""
     from selenium import webdriver
     from selenium.webdriver.chrome.service import Service
     from webdriver_manager.chrome import ChromeDriverManager
 
-    options = _build_common_options(headless)
+    options = _build_common_options(headless, user_data_dir, download_dir)
     service = Service(ChromeDriverManager().install())
     return webdriver.Chrome(service=service, options=options)
 
 
-def _try_edge(headless: bool):
+def _try_edge(headless: bool, user_data_dir: str | None = None, download_dir: str | None = None):
     """启动 Edge"""
     from selenium import webdriver
     from selenium.webdriver.edge.options import Options as EdgeOptions
@@ -110,6 +120,16 @@ def _try_edge(headless: bool):
     options.page_load_strategy = 'eager'
     if headless:
         options.add_argument("--headless=new")
+    if user_data_dir:
+        options.add_argument(f"--user-data-dir={user_data_dir}")
+    if download_dir:
+        prefs = {
+            "download.default_directory": os.path.abspath(download_dir),
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "safebrowsing.enabled": True
+        }
+        options.add_experimental_option("prefs", prefs)
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
 
@@ -117,19 +137,18 @@ def _try_edge(headless: bool):
     return webdriver.Edge(service=service, options=options)
 
 
-def build_stealth_browser(headless: bool = False):
+def build_stealth_browser(headless: bool = False, user_data_dir: str | None = None, download_dir: str | None = None):
     """
     创建隐身浏览器实例，自动检测已安装的浏览器。
-    优先级：Chrome → Edge（只尝试已安装的浏览器）。
+    支持传入 user_data_dir 保持已登录的 Cookie 会话。
     """
     logger.info("初始化 Selenium 隐身浏览器...")
 
-    # 只尝试已安装的浏览器，避免下载驱动后发现浏览器不存在
     candidates = []
     if _is_chrome_installed():
-        candidates.append(("Chrome", _try_chrome))
+        candidates.append(("Chrome", lambda h: _try_chrome(h, user_data_dir, download_dir)))
     if _is_edge_installed():
-        candidates.append(("Edge", _try_edge))
+        candidates.append(("Edge", lambda h: _try_edge(h, user_data_dir, download_dir)))
 
     if not candidates:
         raise RuntimeError("未找到 Chrome 或 Edge 浏览器，请安装其中之一。")

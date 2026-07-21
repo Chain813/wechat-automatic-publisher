@@ -50,6 +50,9 @@ document.addEventListener('DOMContentLoaded', () => {
             "status-running": "运行中",
             "status-paused": "暂停",
             "btn-lang-text": "English",
+            "nav-image-studio": "图片工作台",
+            "image-studio-title": "图片工作台",
+            "image-studio-subtitle": "生成 Imagen 3 提示词，通过拖拽方式直观配置推文插图"
         },
         en: {
             "nav-console": "Console",
@@ -100,6 +103,9 @@ document.addEventListener('DOMContentLoaded', () => {
             "status-running": "Running",
             "status-paused": "Paused",
             "btn-lang-text": "中文",
+            "nav-image-studio": "Image Studio",
+            "image-studio-title": "Image Studio",
+            "image-studio-subtitle": "Generate Imagen 3 prompts and drag-drop images directly into placeholders"
         }
     };
 

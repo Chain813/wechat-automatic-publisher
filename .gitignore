@@ -16,9 +16,12 @@ venv/
 *.sqlite
 data/*.sqlite
 data/previews/
+data/gemini_chrome_profile/
+data/gemini_session/
 data/aikepu_history.json
 data/aikepu_history.json.tmp
 assets/
+assets/manual_images/
 *.log
 
 # IDE

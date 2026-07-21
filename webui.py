@@ -378,37 +378,155 @@ def get_history():
 
         published_titles_clean = {clean_t(pt) for pt in published_titles if pt}
         
-        data = {}
-        for r in records:
-            date_str = r.publish_date
-            if date_str not in data:
-                data[date_str] = {"topics": [], "results": []}
-            if r.title not in data[date_str]["topics"]:
-                data[date_str]["topics"].append(r.title)
-                
-            if r.success_status or r.error_log:
-                is_published = False
-                if r.success_status and r.title:
-                    is_published = clean_t(r.title) in published_titles_clean
-
-                import hashlib
-                title_hash = hashlib.md5(r.title.encode('utf-8')).hexdigest()
-                preview_id = r.media_id if r.success_status else f"fail_{title_hash}"
-
-                data[date_str]["results"].append({
-                    "topic": r.title,
-                    "success": r.success_status,
-                    "is_published": is_published,
-                    "draft_id": r.media_id,
-                    "preview_id": preview_id,
-                    "error": r.error_log,
-                    "time": r.created_at.strftime("%H:%M:%S") if r.created_at else ""
-                })
+        sent_list = []
+        unsent_list = []
         
-        return jsonify({"history": data})
+        for r in records:
+            is_published = bool(getattr(r, 'is_published', False))
+            if not is_published and r.success_status and r.title:
+                is_published = clean_t(r.title) in published_titles_clean
+
+            import hashlib
+            title_hash = hashlib.md5(r.title.encode('utf-8')).hexdigest()
+            preview_id = r.media_id if r.success_status else f"fail_{title_hash}"
+
+            item_data = {
+                "id": r.id,
+                "topic": r.title,
+                "success": bool(r.success_status),
+                "is_published": is_published,
+                "draft_id": r.media_id,
+                "preview_id": preview_id,
+                "error": r.error_log,
+                "source_type": r.source_type,
+                "date": r.publish_date,
+                "time": r.created_at.strftime("%H:%M:%S") if r.created_at else ""
+            }
+            
+            if r.success_status and is_published:
+                sent_list.append(item_data)
+            else:
+                unsent_list.append(item_data)
+        
+        return jsonify({"sent": sent_list, "unsent": unsent_list})
     except Exception as e:
         logger.exception("获取历史记录失败: {}", e)
-        return jsonify({"history": {}, "error": str(e)})
+        return jsonify({"sent": [], "unsent": [], "error": str(e)})
+
+
+@app.route('/api/history/mark_published', methods=['POST'])
+def mark_published():
+    data = request.json or {}
+    record_id = data.get("id")
+    is_published = data.get("is_published", True)
+    if not record_id:
+        return jsonify({"status": "error", "message": "缺少文章 ID"}), 400
+    try:
+        from core.db.models import ArticleHistory
+        session = db_manager.get_session()
+        record = session.query(ArticleHistory).filter(ArticleHistory.id == record_id).first()
+        if not record:
+            return jsonify({"status": "error", "message": "记录不存在"}), 404
+        record.is_published = is_published
+        session.commit()
+        return jsonify({"status": "success", "message": "标记更新成功"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/system/llm_cache_stats', methods=['GET'])
+def get_llm_cache_stats():
+    try:
+        from core.shared.llm import cache_metrics
+        return jsonify(cache_metrics.get_stats())
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
+@app.route('/api/system/warmup_cache', methods=['POST'])
+def trigger_warmup():
+    try:
+        from core.shared.llm import warmup_deepseek_cache
+        success = warmup_deepseek_cache()
+        return jsonify({"status": "success" if success else "error"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+@app.route('/api/aikepu/tree_stats', methods=['GET'])
+def get_aikepu_tree_stats():
+    try:
+        from core.aikepu.skill_tree import get_skill_tree_stats, get_available_nodes
+        stats = get_skill_tree_stats()
+        available = get_available_nodes()
+        stats["available_nodes"] = [
+            {
+                "id": n.get("id"),
+                "title": n.get("title"),
+                "tags": n.get("tags", []),
+                "difficulty": n.get("difficulty", 1)
+            }
+            for n in available[:5]
+        ]
+        return jsonify({"status": "success", "stats": stats})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+@app.route('/api/history/delete', methods=['POST'])
+def delete_history():
+    # 检查当前运行状态：如果是运行中且未暂停，禁止删除以防冲突
+    is_running, is_paused = ProcessState.get_state()
+    if is_running and not is_paused:
+        return jsonify({"status": "error", "message": "任务运行中且未暂停，禁止删除"}), 400
+        
+    data = request.json or {}
+    record_ids = data.get("ids", [])
+    single_id = data.get("id")
+    
+    # 兼容单选和多选
+    ids_to_delete = list(record_ids)
+    if single_id and single_id not in ids_to_delete:
+        ids_to_delete.append(single_id)
+        
+    if not ids_to_delete:
+        return jsonify({"status": "error", "message": "缺少文章 ID"}), 400
+        
+    try:
+        from core.db.models import ArticleHistory
+        session = db_manager.get_session()
+        
+        # 批量查询并删除
+        records = session.query(ArticleHistory).filter(ArticleHistory.id.in_(ids_to_delete)).all()
+        deleted_count = 0
+        
+        for record in records:
+            # 同时也尝试清理本地的预览 HTML 缓存文件
+            import hashlib
+            title_hash = hashlib.md5(record.title.encode('utf-8')).hexdigest()
+            preview_id = record.media_id if record.success_status else f"fail_{title_hash}"
+            local_path = os.path.join("data", "previews", f"{preview_id}.html")
+            if os.path.exists(local_path):
+                try:
+                    os.remove(local_path)
+                except Exception:
+                    pass
+            
+            if record.source_type == "aikepu" or getattr(record, 'source_type', '') == 'aikepu':
+                try:
+                    from core.aikepu.skill_tree import remove_node_from_history
+                    remove_node_from_history(title=record.title)
+                except Exception as ex:
+                    logger.warning("删除历史记录时移除 AI科普节点失败: {}", ex)
+
+            session.delete(record)
+            deleted_count += 1
+            
+        session.commit()
+        return jsonify({"status": "success", "message": f"成功删除 {deleted_count} 条推文记录"})
+    except Exception as e:
+        logger.exception("删除文章记录失败: {}", e)
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route('/api/preview/<preview_id>', methods=['GET'])
@@ -485,7 +603,70 @@ def preview_draft(preview_id):
         except Exception as e:
             logger.warning("从微信接口获取草稿失败: {}", e)
 
-    return f"<h3>未找到该文章的预览内容</h3><p>可能由于该任务运行在旧版本上（本地未缓存），或者微信端草稿已被群发/发布/删除。</p>", 404
+    fallback_html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>草稿预览说明</title>
+        <style>
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background-color: #0f172a;
+                color: #f8fafc;
+                padding: 40px 20px;
+                text-align: center;
+                margin: 0;
+            }}
+            .card {{
+                max-width: 500px;
+                margin: 0 auto;
+                background: rgba(30, 41, 59, 0.7);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 16px;
+                padding: 30px;
+                box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+                backdrop-filter: blur(10px);
+            }}
+            .icon {{
+                font-size: 48px;
+                margin-bottom: 16px;
+            }}
+            h3 {{
+                margin-top: 0;
+                color: #38bdf8;
+                font-size: 20px;
+            }}
+            p {{
+                color: #94a3b8;
+                font-size: 14px;
+                line-height: 1.6;
+            }}
+            .badge {{
+                display: inline-block;
+                background: rgba(56, 189, 248, 0.15);
+                color: #38bdf8;
+                padding: 4px 12px;
+                border-radius: 20px;
+                font-size: 12px;
+                margin-top: 15px;
+                border: 1px solid rgba(56, 189, 248, 0.3);
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <div class="icon">📰</div>
+            <h3>微信远端草稿提示</h3>
+            <p>该文章记录创建时间较早，或对应微信草稿已被发布/删除/转移。</p>
+            <p>系统出于安全保护，未在本地留下额外静态缓存。</p>
+            <div class="badge">AutoWeChat 智能防护机制</div>
+        </div>
+    </body>
+    </html>
+    """
+    return fallback_html, 404
 
 
 @app.route('/api/sources', methods=['GET'])
@@ -496,6 +677,140 @@ def get_sources():
         return jsonify({"sources": report})
     except Exception as e:
         return jsonify({"sources": {}, "error": str(e)})
+
+
+@app.route('/api/sources/test', methods=['POST', 'GET'])
+def test_sources():
+    try:
+        from core.plugins.manager import plugin_manager
+        from core.plugins.utils import _mark_source_success, _mark_source_failure, get_source_health_report
+        import concurrent.futures
+        
+        plugins = plugin_manager.get_all_plugins()
+        def check_plugin(source_id, plugin):
+            try:
+                data = plugin.fetch_data()
+                if data:
+                    _mark_source_success(source_id)
+                else:
+                    _mark_source_failure(source_id)
+            except Exception:
+                _mark_source_failure(source_id)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(plugins), 12)) as executor:
+            futures = [executor.submit(check_plugin, sid, p) for sid, p in plugins.items()]
+            concurrent.futures.wait(futures, timeout=10)
+            
+        report = get_source_health_report()
+        return jsonify({"status": "success", "sources": report})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/system/sd_status', methods=['GET'])
+def get_sd_status():
+    try:
+        from utils.image_handler import detect_sd_api_url
+        sd_url = detect_sd_api_url()
+        if sd_url:
+            return jsonify({
+                "connected": True,
+                "url": sd_url,
+                "mode": "Stable Diffusion WebUI",
+                "message": f"已自动连通本地 SD 服务 ({sd_url})"
+            })
+        else:
+            return jsonify({
+                "connected": False,
+                "url": None,
+                "mode": "科技风文字卡片兜底",
+                "message": "未检测到本地 SD 服务，已自动激活极速文字卡片兜底系统"
+            })
+    except Exception as e:
+        return jsonify({"connected": False, "error": str(e)})
+
+
+# ---- 图片工作台 API ----
+
+@app.route('/api/image-studio/prompts', methods=['POST'])
+def generate_prompts():
+    """接收文章文本，提取占位符并生成 Imagen 3 英文 Prompt"""
+    data = request.json or {}
+    article_text = data.get("article_text", "")
+    article_title = data.get("article_title", "AI Article")
+
+    if not article_text.strip():
+        return jsonify({"status": "error", "message": "article_text is empty"}), 400
+
+    try:
+        from utils.image_prompt_gen import extract_placeholders, generate_image_prompts
+        placeholders = extract_placeholders(article_text)
+        if not placeholders:
+            return jsonify({"status": "success", "prompts": [], "message": "No image placeholders found"})
+
+        prompts = generate_image_prompts(article_title, placeholders)
+        return jsonify({"status": "success", "prompts": prompts})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/image-studio/upload', methods=['POST'])
+def upload_studio_image():
+    """接收拖拽上传的图片文件，保存到本地并返回可访问路径"""
+    if 'image' not in request.files:
+        return jsonify({"status": "error", "message": "No image file provided"}), 400
+
+    file = request.files['image']
+    index = request.form.get('index', '0')
+
+    if not file.filename:
+        return jsonify({"status": "error", "message": "Empty filename"}), 400
+
+    import time as _time
+    upload_dir = os.path.join("assets", "manual_images")
+    os.makedirs(upload_dir, exist_ok=True)
+
+    # 安全文件名
+    ext = os.path.splitext(file.filename)[1].lower() or ".png"
+    if ext not in ('.png', '.jpg', '.jpeg', '.webp', '.gif'):
+        ext = '.png'
+    filename = f"img_{index}_{int(_time.time()*1000)}{ext}"
+    filepath = os.path.join(upload_dir, filename)
+    file.save(filepath)
+
+    return jsonify({
+        "status": "success",
+        "index": int(index),
+        "filename": filename,
+        "filepath": filepath,
+        "url": f"/static_assets/{filename}"
+    })
+
+
+@app.route('/api/image-studio/preview', methods=['POST'])
+def generate_studio_preview():
+    """接收文章文本 + 图片映射关系，返回渲染后的 HTML 预览"""
+    data = request.json or {}
+    article_text = data.get("article_text", "")
+    article_title = data.get("article_title", "AI Article")
+    images_mapping = data.get("images", {})  # {"1": "/static_assets/xxx.png", ...}
+
+    if not article_text.strip():
+        return jsonify({"status": "error", "message": "article_text is empty"}), 400
+
+    try:
+        from utils.image_prompt_gen import render_article_preview
+        rendered_html = render_article_preview(article_text, article_title, images_mapping)
+        return jsonify({"status": "success", "html": rendered_html})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# 提供 manual_images 目录 of 静态文件服务
+@app.route('/static_assets/<path:filename>')
+def serve_manual_image(filename):
+    from flask import send_from_directory
+    return send_from_directory(os.path.join("assets", "manual_images"), filename)
 
 
 if __name__ == '__main__':

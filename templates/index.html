@@ -6,6 +6,7 @@
     <title>AutoWeChat - AI Console</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
     <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/image-studio.css">
 </head>
 <body>
     <div class="app-container">
@@ -30,6 +31,9 @@
                 </a>
                 <a href="#" class="nav-item" data-target="settings" id="nav-settings-link">
                     <span class="icon">⚙️</span> <span data-i18n="nav-settings">Settings</span>
+                </a>
+                <a href="#" class="nav-item" data-target="image-studio" id="nav-image-studio-link">
+                    <span class="icon">🖼️</span> <span data-i18n="nav-image-studio">Image Studio</span>
                 </a>
             </nav>
             
@@ -88,6 +92,55 @@
                         </button>
                     </div>
                 </div>
+                
+                <!-- LLM Cache & Performance Dashboard -->
+                <div class="glass-panel cache-dashboard-panel mb-4" style="padding: 16px 20px; margin-top: 16px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
+                        <div style="font-weight: 700; font-size: 14px; display:flex; align-items:center; gap:8px;">
+                            <span>⚡ DeepSeek Prompt Cache 性能与加速监控</span>
+                            <span id="cache-warm-indicator" class="badge" style="background: rgba(16, 185, 129, 0.15); color: #10b981; font-size: 11px; padding: 2px 8px; border-radius: 12px;">已预热激活</span>
+                        </div>
+                        <button id="btn-warmup-cache" class="btn btn-secondary" style="font-size:12px; padding:4px 12px;">
+                            <span>🔥 一键预热缓存</span>
+                        </button>
+                    </div>
+                    <div class="cache-metrics-grid" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;">
+                        <div class="metric-card" style="background: rgba(255,255,255,0.03); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+                            <div style="font-size:12px; color:#94a3b8;">Cache 命中率</div>
+                            <div id="stat-hit-rate" style="font-size:20px; font-weight:700; color:#38bdf8; margin-top:2px;">0.0%</div>
+                        </div>
+                        <div class="metric-card" style="background: rgba(255,255,255,0.03); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+                            <div style="font-size:12px; color:#94a3b8;">累计已节省 Tokens</div>
+                            <div id="stat-saved-tokens" style="font-size:20px; font-weight:700; color:#34d399; margin-top:2px;">0</div>
+                        </div>
+                        <div class="metric-card" style="background: rgba(255,255,255,0.03); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+                            <div style="font-size:12px; color:#94a3b8;">估计已节省 API 费用</div>
+                            <div id="stat-saved-cny" style="font-size:20px; font-weight:700; color:#facc15; margin-top:2px;">￥0.0000</div>
+                        </div>
+                        <div class="metric-card" style="background: rgba(255,255,255,0.03); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+                            <div style="font-size:12px; color:#94a3b8;">最后请求响应耗时</div>
+                            <div id="stat-latency" style="font-size:20px; font-weight:700; color:#a78bfa; margin-top:2px;">0 ms</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI 科普技能树动态进度面板 -->
+                <div class="glass-panel aikepu-tree-panel mb-4" style="padding: 16px 20px; margin-top: 16px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
+                        <div style="font-weight: 700; font-size: 14px; display:flex; align-items:center; gap:8px;">
+                            <span>🎓 AI 科普技能树动态进度 (微信同步)</span>
+                            <span id="skill-tree-badge" class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 11px; padding: 2px 8px; border-radius: 12px;">自动对齐已发表记录</span>
+                        </div>
+                        <div id="skill-tree-ratio" style="font-size:13px; font-weight:600; color:#38bdf8;">进度: 0/0 (0%)</div>
+                    </div>
+                    <div style="background: rgba(255,255,255,0.06); height: 8px; border-radius: 4px; overflow: hidden; margin-bottom: 12px;">
+                        <div id="skill-tree-progress-bar" style="background: linear-gradient(90deg, #38bdf8, #818cf8); height: 100%; width: 0%; transition: width 0.4s ease;"></div>
+                    </div>
+                    <div style="font-size: 12px; color: #94a3b8; display:flex; align-items:center; gap: 6px;">
+                        <span>🎯 动态解锁下一个最佳选题：</span>
+                        <strong id="skill-tree-next-topic" style="color: #f1f5f9; font-weight: 600;">加载中...</strong>
+                    </div>
+                </div>
                 <div class="terminal-container glass-panel mt-4">
                     <div class="terminal-header">
                         <div class="mac-btns">
@@ -110,6 +163,19 @@
                     <h2 data-i18n="history-title">History</h2>
                     <p data-i18n="history-subtitle">Published articles and results</p>
                 </header>
+                <div class="history-header-actions">
+                    <div class="history-tabs">
+                        <button class="history-tab active" id="tab-history-unsent" data-tab="unsent" data-i18n="tab-unsent">未发送</button>
+                        <button class="history-tab" id="tab-history-sent" data-tab="sent" data-i18n="tab-sent">已发送</button>
+                    </div>
+                    <button class="btn btn-danger btn-delete-batch" id="btn-delete-selected" disabled>
+                        <span class="btn-icon">🗑</span> <span data-i18n="btn-delete-selected">批量删除</span>
+                    </button>
+                </div>
+                <div class="history-select-all-container" id="history-select-all-box" style="display:none;">
+                    <input type="checkbox" id="chk-history-select-all" class="history-select-checkbox">
+                    <label for="chk-history-select-all" data-i18n="label-select-all" style="cursor:pointer; user-select:none;">全选</label>
+                </div>
                 <div id="history-content" class="glass-panel history-panel">
                     <div class="log-line system">Loading...</div>
                 </div>
@@ -117,9 +183,14 @@
 
             <!-- Sources -->
             <section id="sources" class="view-section">
-                <header class="view-header">
-                    <h2 data-i18n="sources-title">Sources</h2>
-                    <p data-i18n="sources-subtitle">News source health status</p>
+                <header class="view-header" style="display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <h2 data-i18n="sources-title">Sources</h2>
+                        <p data-i18n="sources-subtitle">News source health status</p>
+                    </div>
+                    <button id="btn-retest-sources" class="btn btn-secondary" style="font-size:13px; padding:6px 14px;">
+                        <span class="btn-icon">⚡</span> <span data-i18n="btn-retest-sources">重新检测信源</span>
+                    </button>
                 </header>
                 <div id="sources-content" class="sources-grid">
                     <div class="log-line system">Loading...</div>
@@ -200,11 +271,56 @@
                         <label for="diagram-workers" data-i18n="label-diagram-workers">图表并行线程数</label>
                         <input type="number" id="diagram-workers" name="DIAGRAM_PARALLEL_WORKERS" class="form-control" min="1" max="8" placeholder="3">
                     </div>
+                    <div class="form-group mb-4" style="background: rgba(255, 255, 255, 0.03); padding: 12px 16px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08);">
+                        <label style="display:block; margin-bottom:6px; font-weight:600;" data-i18n="label-sd-status">生图引擎在线状态</label>
+                        <div id="sd-status-badge" style="font-size:13px; color:#94a3b8;">
+                            <span class="log-line system">正在检测生图服务...</span>
+                        </div>
+                    </div>
                     <div class="form-actions">
                         <button type="submit" class="btn btn-primary glow-effect" data-i18n="btn-save-settings">Save</button>
                         <span id="save-msg" class="save-message"></span>
                     </div>
                 </form>
+            </section>
+
+            <!-- Image Studio -->
+            <section id="image-studio" class="view-section">
+                <header class="view-header">
+                    <h2 data-i18n="image-studio-title">🖼️ Image Studio</h2>
+                    <p data-i18n="image-studio-subtitle">Generate Imagen 3 prompts, drag &amp; drop images to embed in articles</p>
+                </header>
+
+                <div class="image-studio-container">
+                    <div class="glass-panel" style="padding:20px;">
+                        <div class="studio-input-area">
+                            <input type="text" class="studio-title-input" id="studio-article-title"
+                                   placeholder="文章标题（可选，用于优化提示词生成）">
+                            <textarea id="studio-article-text"
+                                      placeholder="粘贴 Markdown 文章内容...
+
+文章中需包含 【此处插入配图：关键词】 格式的占位符，例如：
+
+【此处插入配图：AI 芯片微观特写】
+【此处插入配图：深度学习数据流可视化】"></textarea>
+                                <button id="btn-generate-prompts" class="btn btn-primary glow-effect">
+                                    <span class="btn-icon">✨</span> 生成英文提示词
+                                </button>
+                                <button id="btn-studio-preview" class="btn btn-secondary" style="display:none; margin-left: 10px;">
+                                    <span class="btn-icon">👁️</span> 预览文章效果
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="prompt-cards-container">
+                        <div class="studio-empty">
+                            <div class="studio-empty-icon">🖼️</div>
+                            <div class="studio-empty-text">粘贴文章并点击「生成英文提示词」</div>
+                            <div class="studio-empty-hint">系统将自动提取配图占位符，生成 Gemini Imagen 3 英文 Prompt</div>
+                        </div>
+                    </div>
+                </div>
             </section>
         </main>
     <!-- Preview Modal -->
@@ -221,5 +337,6 @@
     </div>
 
     <script src="/static/js/app.js"></script>
+    <script src="/static/js/image-studio.js"></script>
 </body>
 </html>

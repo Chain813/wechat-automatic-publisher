@@ -1,7 +1,7 @@
 """
 ============================================================
   AI 科普发布流水线 v1.0
-  技能树选题 → 教育风文章生成 → 配图 → 微信草稿箱
+  技能树选题 → 教育风文章生成 → 图表渲染 → 微信草稿箱
 ============================================================
 """
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -15,7 +15,6 @@ from core.aikepu.skill_tree import (
 from core.aikepu.processor import generate_aikepu_article, generate_digest
 from core.shared.article_utils import process_article_content, _print_review_report
 from core.shared.llm import validate_title
-from utils.image_handler import reset_image_cache
 from core.shared.runtime import check_cancelled
 
 
@@ -24,7 +23,6 @@ def _generate_article_assets(topic_info, publisher):
     为单个选题生成完整文章资产：文章 + 封面 + HTML。
     """
     check_cancelled()
-    reset_image_cache()
 
     import os
     cover_path = os.path.join("assets", "default_aikepu_cover.jpg")
@@ -36,9 +34,9 @@ def _generate_article_assets(topic_info, publisher):
         print("❌ AI科普文章生成失败，跳过。")
         return None
 
-    print("\n🎨 正在执行排版优化与智能配图...")
+    print("\n🎨 正在执行排版优化与图表渲染...")
     final_html, review_data = process_article_content(
-        article_text, publisher, use_ai_first=True
+        article_text, publisher, use_ai_first=False, skip_photo_images=True
     )
     check_cancelled()
     if not final_html:

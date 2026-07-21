@@ -12,6 +12,49 @@ from config import (
 API_SESSION = build_api_session()
 
 
+class LLMCacheMetrics:
+    def __init__(self):
+        self.total_requests = 0
+        self.prompt_cache_hit_tokens = 0
+        self.prompt_cache_miss_tokens = 0
+        self.last_latency_ms = 0
+        self.last_warmup_time = None
+
+    def record(self, hit_tokens, miss_tokens, latency_ms):
+        self.total_requests += 1
+        self.prompt_cache_hit_tokens += hit_tokens
+        self.prompt_cache_miss_tokens += miss_tokens
+        self.last_latency_ms = latency_ms
+
+    def get_stats(self):
+        total_tokens = self.prompt_cache_hit_tokens + self.prompt_cache_miss_tokens
+        hit_rate = (self.prompt_cache_hit_tokens / total_tokens * 100) if total_tokens > 0 else 0.0
+        saved_cny = round(self.prompt_cache_hit_tokens * 0.0000009, 4)
+        return {
+            "total_requests": self.total_requests,
+            "hit_tokens": self.prompt_cache_hit_tokens,
+            "miss_tokens": self.prompt_cache_miss_tokens,
+            "hit_rate_pct": round(hit_rate, 1),
+            "saved_cny": saved_cny,
+            "last_latency_ms": self.last_latency_ms,
+            "is_warm": self.last_warmup_time is not None and (time.time() - self.last_warmup_time < 300)
+        }
+
+cache_metrics = LLMCacheMetrics()
+
+
+def warmup_deepseek_cache():
+    """轻量级预热 DeepSeek 节点 Prompt Cache"""
+    try:
+        from core.aikepu.processor import SYSTEM_PROMPT
+        call_deepseek_with_retry("ping warmup", system_content=SYSTEM_PROMPT, max_tokens=1)
+        cache_metrics.last_warmup_time = time.time()
+        return True
+    except Exception as e:
+        logger.warning("DeepSeek 预热请求失败: {}", e)
+        return False
+
+
 def _interruptible_sleep(seconds):
     """可中断的 sleep：每 0.5 秒检查一次 cancel_event"""
     from core.shared.runtime import cancel_event
@@ -56,6 +99,7 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
                 "temperature": LLM_TEMPERATURE,
                 "max_tokens": max_tokens
             }
+            start_t = time.time()
             response = API_SESSION.post(
                 f"{LLM_BASE_URL}/chat/completions",
                 headers=headers,
@@ -63,7 +107,12 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
                 timeout=timeout
             )
             response.raise_for_status()
+            latency_ms = int((time.time() - start_t) * 1000)
             result = response.json()
+            usage = result.get('usage', {})
+            hit_tokens = usage.get('prompt_cache_hit_tokens', 0)
+            miss_tokens = usage.get('prompt_cache_miss_tokens', 0)
+            cache_metrics.record(hit_tokens, miss_tokens, latency_ms)
             return result['choices'][0]['message']['content']
 
         except Exception as e:

@@ -458,16 +458,47 @@ class HuxiuPlugin(BaseSourcePlugin):
             links = soup.select("a[href*='/article/']")
             for link in links:
                 title = link.get_text(strip=True)
-                if title and 8 < len(title) < 80 and _is_title_fresh(title):
+                if title and 8 < len(title) < 80 and _is_title_fresh(title) and title not in topics:
                     topics.append(title)
+            if topics:
+                _mark_source_success(self.source_id)
+                return topics[:NEWS_MAX_PER_SOURCE]
+        except Exception as e:
+            logger.warning(f"  {self.display_name}抓取失败: {e}，将尝试 Selenium 降级")
+
+        # 降级至 Selenium
+        return self._fetch_huxiu_selenium()
+
+    def _fetch_huxiu_selenium(self) -> List[str]:
+        logger.info("  正在同步 虎嗅网 (Selenium 降级)...")
+        browser = None
+        topics = []
+        try:
+            from utils.spider import build_stealth_browser
+            browser = build_stealth_browser(headless=True)
+            browser.get("https://www.huxiu.com/")
+            import time
+            time.sleep(5)
+            soup = BeautifulSoup(browser.page_source, "html.parser")
+            links = soup.find_all("a")
+            for a in links:
+                href = a.get("href", "")
+                if "/article/" in href:
+                    title = a.get_text(strip=True)
+                    if title and 8 < len(title) < 80 and _is_title_fresh(title) and title not in topics:
+                        topics.append(title)
             if topics:
                 _mark_source_success(self.source_id)
             else:
                 _mark_source_failure(self.source_id)
         except Exception as e:
-            logger.warning(f"  {self.display_name}抓取失败: {e}")
+            logger.warning(f"  虎嗅 Selenium 抓取也失败: {e}")
             _mark_source_failure(self.source_id)
+        finally:
+            if browser:
+                browser.quit()
         return topics[:NEWS_MAX_PER_SOURCE]
+
 
 
 class DouyinPlugin(BaseSourcePlugin):

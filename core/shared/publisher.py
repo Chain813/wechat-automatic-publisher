@@ -168,8 +168,12 @@ def _ai_semantic_check(new_title, existing_titles):
 
 
 class WeChatPublisher:
+    # 全局类变量缓存 Token，防止在多个模块重复实例化时反复请求微信 API 导致被限频或打爆
+    _global_access_token = None
+    _global_token_expires_at = 0
+    _global_lock = threading.Lock()
+
     def __init__(self, app_id, app_secret):
-        import threading
         self.app_id = app_id
         self.app_secret = app_secret
         self.session = build_api_session()
@@ -177,7 +181,15 @@ class WeChatPublisher:
         self._token_expires_at = 0
         self._draft_titles_cache = None
         self._lock = threading.Lock()
-        self._refresh_token()
+        
+        # 优先读取全局有效的 Token 缓存
+        with WeChatPublisher._global_lock:
+            if WeChatPublisher._global_access_token and time.time() < WeChatPublisher._global_token_expires_at:
+                self.access_token = WeChatPublisher._global_access_token
+                self._token_expires_at = WeChatPublisher._global_token_expires_at
+
+        if not self.access_token:
+            self._refresh_token()
 
     def _refresh_token(self):
         """获取并验证微信调用凭证，记录过期时间"""
@@ -189,6 +201,11 @@ class WeChatPublisher:
                 # 微信 Token 有效期 7200 秒，提前 300 秒刷新
                 self._token_expires_at = time.time() + res.get("expires_in", 7200) - 300
                 logger.info("微信 Token 获取成功，有效至 {}", time.strftime("%H:%M:%S", time.localtime(self._token_expires_at)))
+                
+                # 同步更新到全局缓存中
+                with WeChatPublisher._global_lock:
+                    WeChatPublisher._global_access_token = self.access_token
+                    WeChatPublisher._global_token_expires_at = self._token_expires_at
             else:
                 raise Exception(f"Token 授权失败: {res}")
         except Exception as e:
@@ -197,9 +214,22 @@ class WeChatPublisher:
 
     def _ensure_valid_token(self):
         """检查 Token 是否即将过期，自动刷新（线程安全）"""
+        # 优先从全局缓存同步最新状态
+        with WeChatPublisher._global_lock:
+            if WeChatPublisher._global_access_token and time.time() < WeChatPublisher._global_token_expires_at:
+                self.access_token = WeChatPublisher._global_access_token
+                self._token_expires_at = WeChatPublisher._global_token_expires_at
+                return
+
         if not self.access_token or time.time() >= self._token_expires_at:
             with self._lock:
-                # 双重检查：获取锁后再次确认是否仍需刷新
+                # 双重检查
+                with WeChatPublisher._global_lock:
+                    if WeChatPublisher._global_access_token and time.time() < WeChatPublisher._global_token_expires_at:
+                        self.access_token = WeChatPublisher._global_access_token
+                        self._token_expires_at = WeChatPublisher._global_token_expires_at
+                        return
+                
                 if not self.access_token or time.time() >= self._token_expires_at:
                     logger.info("Token 已过期或即将过期，正在自动刷新...")
                     self._draft_titles_cache = None  # Token 切换后缓存失效
@@ -211,35 +241,52 @@ class WeChatPublisher:
         if not self.access_token or not image_path or not os.path.exists(image_path):
             return None
 
-        # 1. 优先尝试永久素材接口 (草稿箱封面必须为永久素材，临时素材会报 invalid media_id)
-        url_perm = f"https://api.weixin.qq.com/cgi-bin/material/add_material?access_token={self.access_token}&type=thumb"
-        try:
-            with open(image_path, 'rb') as f:
-                files = {'media': (os.path.basename(image_path), f, 'image/jpeg')}
-                res = self.session.post(url_perm, files=files, timeout=WECHAT_API_TIMEOUT).json()
-            if "media_id" in res:
-                return res.get("media_id")
-            elif "thumb_media_id" in res:
-                return res.get("thumb_media_id")
-            else:
-                logger.debug("  微信永久素材上传响应: {}", res)
-        except Exception as e:
-            logger.warning("  微信永久素材上传异常: {}", e)
+        for attempt in range(2):
+            # 1. 优先尝试永久素材接口 (草稿箱封面必须为永久素材，临时素材会报 invalid media_id)
+            url_perm = f"https://api.weixin.qq.com/cgi-bin/material/add_material?access_token={self.access_token}&type=thumb"
+            try:
+                with open(image_path, 'rb') as f:
+                    files = {'media': (os.path.basename(image_path), f, 'image/jpeg')}
+                    res = self.session.post(url_perm, files=files, timeout=WECHAT_API_TIMEOUT).json()
+                
+                if "media_id" in res:
+                    return res.get("media_id")
+                elif "thumb_media_id" in res:
+                    return res.get("thumb_media_id")
+                
+                errcode = res.get("errcode")
+                if errcode in (40001, 42001) and attempt == 0:
+                    logger.warning("微信永久素材上传遇到 Token 失效 (errcode={})，正在刷新并重试...", errcode)
+                    self._refresh_token()
+                    continue
+                else:
+                    logger.debug("  微信永久素材上传响应: {}", res)
+            except Exception as e:
+                logger.warning("  微信永久素材上传异常: {}", e)
 
-        # 2. 降级尝试临时素材接口
-        url_temp = f"https://api.weixin.qq.com/cgi-bin/media/upload?access_token={self.access_token}&type=thumb"
-        try:
-            with open(image_path, 'rb') as f:
-                files = {'media': (os.path.basename(image_path), f, 'image/jpeg')}
-                res = self.session.post(url_temp, files=files, timeout=WECHAT_API_TIMEOUT).json()
-            if "thumb_media_id" in res:
-                return res.get("thumb_media_id")
-            elif "media_id" in res:
-                return res.get("media_id")
-            else:
-                logger.warning("  微信临时素材上传失败: {}", res)
-        except Exception as e:
-            logger.warning("  微信临时素材上传异常: {}", e)
+            # 2. 降级尝试临时素材接口
+            url_temp = f"https://api.weixin.qq.com/cgi-bin/media/upload?access_token={self.access_token}&type=thumb"
+            try:
+                with open(image_path, 'rb') as f:
+                    files = {'media': (os.path.basename(image_path), f, 'image/jpeg')}
+                    res = self.session.post(url_temp, files=files, timeout=WECHAT_API_TIMEOUT).json()
+                
+                if "thumb_media_id" in res:
+                    return res.get("thumb_media_id")
+                elif "media_id" in res:
+                    return res.get("media_id")
+                
+                errcode = res.get("errcode")
+                if errcode in (40001, 42001) and attempt == 0:
+                    logger.warning("微信临时素材上传遇到 Token 失效 (errcode={})，正在刷新并重试...", errcode)
+                    self._refresh_token()
+                    continue
+                else:
+                    logger.warning("  微信临时素材上传失败: {}", res)
+            except Exception as e:
+                logger.warning("  微信临时素材上传异常: {}", e)
+            
+            break
 
         return None
 
@@ -248,15 +295,30 @@ class WeChatPublisher:
         self._ensure_valid_token()
         if not self.access_token or not image_path or not os.path.exists(image_path):
             return None
-        url = f"https://api.weixin.qq.com/cgi-bin/media/uploadimg?access_token={self.access_token}"
-        try:
-            with open(image_path, 'rb') as f:
-                files = {'media': (os.path.basename(image_path), f, 'image/jpeg')}
-                res = self.session.post(url, files=files, timeout=WECHAT_API_TIMEOUT).json()
-            return res.get("url")
-        except Exception as e:
-            logger.warning("  upload_news_image 失败: {} - {}", image_path, e)
-            return None
+        
+        for attempt in range(2):
+            url = f"https://api.weixin.qq.com/cgi-bin/media/uploadimg?access_token={self.access_token}"
+            try:
+                with open(image_path, 'rb') as f:
+                    files = {'media': (os.path.basename(image_path), f, 'image/jpeg')}
+                    res = self.session.post(url, files=files, timeout=WECHAT_API_TIMEOUT).json()
+                
+                if "url" in res:
+                    return res.get("url")
+                
+                errcode = res.get("errcode")
+                if errcode in (40001, 42001) and attempt == 0:
+                    logger.warning("微信图片上传遇到 Token 失效 (errcode={})，正在刷新并重试...", errcode)
+                    self._refresh_token()
+                    continue
+                else:
+                    logger.warning("  upload_news_image 失败: {} - {}", image_path, res)
+            except Exception as e:
+                logger.warning("  upload_news_image 异常: {} - {}", image_path, e)
+            
+            break
+
+        return None
 
     def get_draft_titles(self, count=WECHAT_DRAFT_SCAN_COUNT):
         """获取最近草稿标题列表"""

@@ -242,66 +242,204 @@ def _try_lite_render(description, save_dir):
 
 
 # ==========================================
-#  Selenium 渲染管线 (降级回退)
+#  在线 API 渲染 (Mermaid.ink)
 # ==========================================
-def _try_selenium_render(description, save_dir):
+def _try_api_render(mermaid_code, output_path):
     """
-    使用 Selenium Headless 浏览器渲染图表 (Mermaid + KaTeX + Tailwind)。
-    需要本机安装 Chrome 浏览器。
+    使用 Mermaid.ink API 在线将 Mermaid 代码转换为 PNG。
     """
+    import base64
+    from utils.http_client import build_api_session
+    
     try:
-        from utils.html_render import render_html_to_png
-    except ImportError:
-        logger.debug("  [selenium] html_render 模块不可用")
-        return None
+        mermaid_code = mermaid_code.strip()
+        
+        # 自动将全局样式模板注入代码，保证高颜值配色
+        style_template = (
+            "\n"
+            "classDef default fill:#1f2937,stroke:#3b82f6,stroke-width:2px,color:#f3f4f6;\n"
+            "classDef highlight fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff;\n"
+            "classDef success fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#d1fae5;\n"
+            "classDef warning fill:#78350f,stroke:#f59e0b,stroke-width:2px,color:#fef3c7;\n"
+            "classDef danger fill:#7f1d1d,stroke:#ef4444,stroke-width:2px,color:#fee2e2;\n"
+        )
+        if "classDef" not in mermaid_code:
+            # 兼容带有 class 定义的 mermaid 代码结构，附加样式声明
+            mermaid_code = mermaid_code + style_template
+            
+        b64_code = base64.b64encode(mermaid_code.encode('utf-8')).decode('utf-8')
+        url = f"https://mermaid.ink/img/{b64_code}"
+        
+        session = build_api_session()
+        res = session.get(url, timeout=20)
+        if res.status_code == 200 and len(res.content) > 500:
+            if b"Syntax error" in res.content or b"syntax error" in res.content:
+                logger.warning("  [mermaid.ink] API 返回包含语法错误的图片，拒绝使用并降级为 HTML 卡片渲染")
+                return False
+            os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+            with open(output_path, "wb") as f:
+                f.write(res.content)
+            logger.info("  [mermaid.ink] API 渲染成功: {} ({:.1f} KB)", os.path.basename(output_path), len(res.content)/1024)
+            return True
+        else:
+            logger.warning("  [mermaid.ink] API 渲染失败，状态码: {}, 响应长度: {}", res.status_code, len(res.content) if res else 0)
+    except Exception as e:
+        logger.warning("  [mermaid.ink] API 渲染异常: {}", e)
+        
+    return False
 
+
+# ==========================================
+#  高性能高颜值渲染 Prompts
+# ==========================================
+UNIFIED_DIAGRAM_SYSTEM_PROMPT = r"""你是一位顶尖的数据可视化与网页排版设计专家。你的任务是将用户的中文描述转化为一张美观、现代、高颜值且适合微信公众号嵌入的技术图表或概念说明卡片。
+
+根据描述内容，选择以下最合适的一种格式输出：
+
+### 1. MERMAID (适合流程图、架构图、脑图、时序图、步骤说明、关系网络、层次依赖)
+如果描述涉及"流程"、"步骤"、"架构"、"关系"、"网络"、"脑图"、"依赖"，必须选择此格式。
+输出严格的 Mermaid 代码，用 ```mermaid 包裹。
+- 必须使用中文标签。
+- 节点形状多样化（如圆角矩形 `(文本)`、圆柱 `[(文本)]`、菱形 `{"文本"}`）。
+- 必须使用内置样式定义进行美化（在代码尾部使用 classDef 定义样式，并用 ::: 绑定到对应节点上）。
+- 示例：
+```mermaid
+graph TD
+    classDef default fill:#1f2937,stroke:#3b82f6,stroke-width:2px,color:#f3f4f6;
+    classDef highlight fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff;
+    
+    A[输入数据] --> B(特征提取):::highlight
+    B --> C{是否合格}
+    C -- 是 --> D[保存结果]
+    C -- 否 --> E[抛出异常]:::default
+```
+
+### 2. HTML (适合数学公式、核心定理、对比表格、属性PK、要点清单、概念总结卡)
+如果不属于流程图/架构图/脑图，必须选择此格式。
+输出精美的 HTML+Tailwind CSS 代码，用 ```html 包裹。
+- 整个内容必须是一个独立的卡片式容器（如带有 px/py 内边距和现代感圆角阴影的 div），宽度固定为 700px。
+- 使用高档深色科技风配色：背景使用深色渐变（如 `from-slate-900 to-slate-950`），文字使用明亮的灰白双色（如 `text-slate-100`、`text-slate-400`）。
+- 适当添加现代感设计元素：圆角（`rounded-2xl`）、微弱边框（`border border-slate-800`）、渐变强调文字（`bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent`）。
+- 对于公式：使用 KaTeX 格式，即公式部分用 `$$ ... $$` 或 `$` 包裹，并在卡片中做适当的变量对照与背景说明。
+- 示例 1 (公式卡片)：
+```html
+<div class="w-[700px] p-8 bg-gradient-to-br from-slate-900 to-slate-950 rounded-2xl border border-slate-800 shadow-2xl">
+    <h3 class="text-xl font-bold text-slate-100 mb-4 bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent font-sans">梯度下降更新公式</h3>
+    <div class="text-center my-6 text-2xl text-slate-100 font-serif">
+        $$w_{t+1} = w_t - \eta \nabla L(w_t)$$
+    </div>
+    <div class="border-t border-slate-800/80 pt-4 mt-4">
+        <p class="text-xs text-slate-400 leading-relaxed font-mono">
+            其中：$w$ 表示权重参数，$\eta$ 表示学习率，$\nabla L(w)$ 表示损失函数关于权重的梯度。
+        </p>
+    </div>
+</div>
+```
+- 示例 2 (对比表格)：
+```html
+<div class="w-[700px] p-6 bg-gradient-to-b from-slate-900 to-slate-950 rounded-2xl border border-slate-800 shadow-2xl">
+    <h3 class="text-lg font-bold text-slate-100 mb-4 flex items-center gap-2 font-sans">
+        <span class="w-1.5 h-5 bg-blue-500 rounded-full"></span> 核心算法对比分析
+    </h3>
+    <table class="w-full text-sm text-left text-slate-300">
+        <thead class="text-xs text-slate-400 uppercase bg-slate-900/50">
+            <tr>
+                <th class="px-4 py-3 rounded-l-lg">特性</th>
+                <th class="px-4 py-3">深度学习</th>
+                <th class="px-4 py-3 rounded-r-lg">传统ML</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-800/50">
+            <tr>
+                <td class="px-4 py-3 font-semibold text-slate-200">数据量需求</td>
+                <td class="px-4 py-3 text-blue-400">海量数据 (Big Data)</td>
+                <td class="px-4 py-3 text-slate-400">中小型数据集</td>
+            </tr>
+            <tr>
+                <td class="px-4 py-3 font-semibold text-slate-200">特征工程</td>
+                <td class="px-4 py-3 text-blue-400">端到端自动表征学习</td>
+                <td class="px-4 py-3 text-slate-400">手动设计提取特征</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+```
+
+## 输出规则
+- 直接输出代码块，不要有任何多余解释。
+- 绝不允许输出除 MERMAID 和 HTML 以外的格式。
+"""
+
+
+# ==========================================
+#  高质量图表渲染引擎 (API + Selenium)
+# ==========================================
+def _try_high_quality_render(description, save_dir):
+    """
+    尝试以最高质量渲染图表：
+    1. 调用 LLM 生成对应的 Mermaid 或 HTML 代码
+    2. 若是 Mermaid：优先通过在线 API 渲染，失败则走本地 Selenium 网页截图
+    3. 若是 HTML：直接通过本地 Selenium 网页截图
+    """
     from core.shared.runtime import check_cancelled
     check_cancelled()
 
     user_prompt = (
-        f"【重要指示】当前引擎仅支持 MERMAID/HTML/LATEX。请绝对不要输出 ```dot 或 ```graphviz 代码块。\n"
-        f"如果需要绘制流程图、脑图、架构图、步骤说明，请必须使用 ```mermaid 格式输出！\n\n"
-        f"请为以下描述设计并生成一张适合公众号内嵌的高颜值技术图文卡片/图表：\n\n"
+        f"请为以下描述设计并生成一张适合公众号内嵌的高颜值技术图文卡片或图表：\n\n"
         f"描述：{description}\n\n"
         f"提示：直接输出适合的代码块，不要任何废话。"
     )
 
+    # 强制将图表生成重载为轻量级/快速的 flash 模型以加快生成速度
+    from config import LLM_MODEL
+    diagram_model = LLM_MODEL.replace("-pro", "-flash").replace("pro", "flash")
+    logger.info("  [图表生成] 使用模型 {} 生成高质量图表代码...", diagram_model)
+
     response = call_deepseek_with_retry(
         user_prompt,
-        system_content=SELENIUM_DIAGRAM_SYSTEM_PROMPT,
+        system_content=UNIFIED_DIAGRAM_SYSTEM_PROMPT,
         max_retries=1,
         backoff_base=0.5,
+        model=diagram_model
     )
     if not response:
         return None
 
     dtype, code = _extract_code_block(response)
     if not code:
-        return None
-
-    if dtype == "mermaid":
-        html_content = f'<div class="mermaid">\n{code}\n</div>'
-    elif dtype in ("html", "text"):
-        html_content = code
-    else:
-        logger.warning("  [selenium] 丢弃不支持的 Selenium 渲染类型: {}", dtype)
+        logger.warning("  [高质引擎] 未提取到有效的图表代码")
         return None
 
     output_path = os.path.join(save_dir, f"diagram_{int(time.time() * 1000)}.png")
     os.makedirs(save_dir, exist_ok=True)
 
-    success = render_html_to_png(html_content, output_path)
-    if success and os.path.exists(output_path):
-        file_size = os.path.getsize(output_path) / 1024
-        logger.info("  [selenium] 图表渲染成功: {} ({:.1f} KB)", os.path.basename(output_path), file_size)
-        return output_path
-
-    # 清理失败的文件
-    if os.path.exists(output_path):
+    if dtype == "mermaid":
+        # a. 优先尝试 Mermaid.ink API
+        if _try_api_render(code, output_path):
+            return output_path
+            
+        # b. API 失败时，降级使用 Selenium 网页截图渲染
+        logger.info("  [高质引擎] Mermaid.ink API 渲染未成功，尝试本地 Selenium 降级渲染...")
         try:
-            os.remove(output_path)
-        except Exception:
-            pass
+            from utils.html_render import render_html_to_png
+            html_content = f'<div class="mermaid">\n{code}\n</div>'
+            if render_html_to_png(html_content, output_path):
+                return output_path
+        except Exception as e:
+            logger.warning("  [高质引擎] 本地 Selenium 渲染 Mermaid 异常: {}", e)
+
+    elif dtype in ("html", "text", "json"):
+        # 使用 Selenium 网页截图渲染 HTML+Tailwind 卡片
+        try:
+            from utils.html_render import render_html_to_png
+            if render_html_to_png(code, output_path):
+                return output_path
+        except Exception as e:
+            logger.warning("  [高质引擎] 本地 Selenium 渲染 HTML 异常: {}", e)
+
+    else:
+        logger.warning("  [高质引擎] 不支持的代码格式类型: {}", dtype)
+
     return None
 
 
@@ -311,8 +449,9 @@ def _try_selenium_render(description, save_dir):
 def generate_diagram(description, save_dir="assets"):
     """
     根据自然语言描述生成图表 PNG。
-    优先使用轻量级本地渲染 (Graphviz + Matplotlib)，
-    失败时降级使用 Selenium Headless 浏览器渲染。
+    双引擎新架构：
+    1. 优先使用高质量渲染管线 (Mermaid.ink API + Selenium 网页卡片)
+    2. 失败时降级到本地轻量级渲染 (Graphviz + Matplotlib) 作为无浏览器/离线环境兜底
     """
     if not description or not description.strip():
         return None
@@ -320,22 +459,22 @@ def generate_diagram(description, save_dir="assets"):
     os.makedirs(save_dir, exist_ok=True)
     logger.info("📐 正在生成图表: {}", description[:60])
 
-    # 引擎 1：轻量级渲染 (Graphviz + Matplotlib)
+    # 1. 高质量渲染管线 (API + Selenium)
+    try:
+        path = _try_high_quality_render(description, save_dir)
+        if path:
+            return path
+        logger.info("  高质量引擎渲染未成功，尝试本地轻量级兜底...")
+    except Exception as e:
+        logger.warning("  高质量引擎异常: {}", e)
+
+    # 2. 轻量级引擎兜底 (Matplotlib + Graphviz)
     try:
         path = _try_lite_render(description, save_dir)
         if path:
             return path
-        logger.info("  轻量级引擎未成功，尝试 Selenium 渲染...")
     except Exception as e:
-        logger.warning("  轻量级引擎异常: {}", e)
-
-    # 引擎 2：Selenium 降级渲染
-    try:
-        path = _try_selenium_render(description, save_dir)
-        if path:
-            return path
-    except Exception as e:
-        logger.warning("  Selenium 引擎异常: {}", e)
+        logger.warning("  轻量级兜底引擎异常: {}", e)
 
     logger.warning("  ⚠️ 所有图表引擎均失败: {}", description[:50])
     return None
@@ -355,12 +494,14 @@ def replace_diagram_placeholder(html_body, description, image_url):
 
     if image_url:
         replacement = (
-            '<p style="text-align:center;margin:24px 0;">'
-            f'<img src="{image_url}" style="width:100%;max-width:700px;border-radius:12px;'
-            'box-shadow:0 4px 16px rgba(0,0,0,0.12);" alt="图表">'
-            f'<br><span style="font-size:12px;color:#999;margin-top:6px;display:inline-block;">'
-            f'▲ {description[:50]}</span>'
-            '</p>'
+            '<div style="text-align:center;margin:28px 0;width:100%;">'
+            f'<img src="{image_url}" style="width:100%;max-width:800px;border-radius:12px;'
+            'box-shadow:0 6px 20px rgba(0,0,0,0.15);" alt="架构示意图">'
+            '<div style="max-width:800px;margin:10px auto 0 auto;padding:10px 16px;background:#f8fafc;'
+            'border-left:4px solid #2563eb;border-radius:6px;text-align:left;box-sizing:border-box;">'
+            f'<span style="font-size:13px;color:#334155;line-height:1.6;font-weight:500;display:block;">'
+            f'💡 <strong>图解阅读指南：</strong> {description}</span>'
+            '</div></div>'
         )
     else:
         replacement = ""

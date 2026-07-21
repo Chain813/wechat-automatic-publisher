@@ -263,8 +263,9 @@ The dark-themed dashboard provides:
 | Page | Features |
 |------|----------|
 | **Console** | One-click start/stop, real-time log streaming, task type selection |
-| **History** | Published articles grouped by date |
-| **Sources** | 12-source health status (green/yellow/red cards) |
+| **Image Studio** | **Drag-and-Drop Image Placement & Prompt Generator** (🆕 v4.3): Automatically parses image placeholders in Markdown, calls LLM to generate Imagen 3 English Prompts, supports HTML5 drag-and-drop image uploads and high-fidelity mobile WeChat draft previews. |
+| **History** | Published articles grouped by date with offline/online draft preview |
+| **Sources** | 12-source health status (green/yellow/red cards) with real-time polling |
 | **Settings** | API key configuration with secret masking |
 
 ---

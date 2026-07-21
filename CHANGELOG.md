@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-07-21
+
+### ✨ 新特性 (New Features)
+- **图片工作台 (Image Studio)**: 推出全新的前端可视化配图工作台。支持从 Markdown 文章一键提取 `【此处插入配图：xxx】` 占位标签，调用 LLM 批量转化为 Imagen 3 / Midjourney 专业英文提示词。
+- **拖拽式直观配图**: 前端支持 HTML5 原生拖拽上传图片至对应卡片，支持实时进度条、缩略图展示、一键复制 Prompt 及替换/删除。
+- **高保真移动端预览**: 后端根据拖拽上传的图片映射动态替换文章占位符，渲染符合微信公众号排版标准的移动端预览弹窗。
+
+### ♻️ 架构重构与优化 (Refactoring & Optimization)
+- **解耦与清理自动化生图**: 彻底移除不稳定的 Gemini Selenium 网页自动化生图模块及会话缓存，降级策略调整为高清免费图源搜索，大幅提升系统稳定性与纯净度。
+- **代码库级规范审计**: 修复了 SQLAlchemy 规范布尔过滤、PIL `ImageDraw`/`ImageFont` 引用及冗余 f-string，全项目通过 `ruff check` 零警告标准。
+- **完善全量自动化测试**: 适配历史数据同步引擎与单元测试 mock 机制，18 个自动化测试全部通过 (18 passed)。
+
 ## [3.0.0] - 2026-07-16
 
 ### ✨ 新特性 (New Features)

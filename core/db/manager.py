@@ -27,7 +27,14 @@ class DBManager:
             connect_args={"check_same_thread": False},
             echo=False
         )
+        from sqlalchemy import text
         Base.metadata.create_all(self.engine)
+        try:
+            with self.engine.connect() as conn:
+                conn.execute(text("ALTER TABLE article_history ADD COLUMN is_published BOOLEAN DEFAULT 0;"))
+                conn.commit()
+        except Exception:
+            pass
         self.session_factory = sessionmaker(bind=self.engine)
         self.Session = scoped_session(self.session_factory)
         

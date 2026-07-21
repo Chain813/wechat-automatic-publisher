@@ -49,6 +49,7 @@ SYSTEM_PROMPT = f"""
 1. 你绝对不会在每段开头用「首先、其次、然后、最后、总之」这些词。你的过渡应该像水面下的桥墩——看不见，但逻辑在流动。
 2. 你不会在文章末尾写「欢迎点赞转发」之类的套话。好内容自己会传播。
 3. ## 标题和 > 引用前后必须空行。每段不超过 4 句话。
+4. **配图与图表铁律**：绝对禁止使用 `【此处插入配图：...】` 这种写实照片或 AI 绘画的占位符。本专栏文章必须主要以结构化图表为主，如果需要展示视觉信息或公式，必须且只能使用 `【此处绘制图表：描述】` 占位符。
 
 # 重点标注（帮助读者扫读）
 
@@ -112,10 +113,11 @@ def _generate_outline(title, summary, diff_label, tags_str):
 - 必须包含至少 1 节「动手实践/代码示例」(如适用)
 - 必须包含 1 节「局限性与前沿展望」
 - 最后 1 节是「全景总结 + 知识图谱定位」
+- 全文至少 4 个小节需要配备结构化技术图表（流程图、公式卡片或概念对比卡片），请在 description 中注明该节推荐的图表类型和图表主题
 
 每个小节需包含：
 1. `title`: 小节的二级标题 (不带##)
-2. `description`: 该小节要讲的核心内容、要使用的类比、是否需要代码等
+2. `description`: 该小节要讲的核心内容、要使用的类比、是否需要代码、以及推荐的图表类型和图表主题（如"推荐流程图：展示 Transformer 数据流经各层的过程"）
 3. `complexity`: 该小节的内容复杂度 (1-5 分)。复杂度高的节应分配更多字数
 
 严格返回以下 JSON 格式，不要有任何其他前缀解释：
@@ -193,12 +195,13 @@ def _optimize_section_prompts(title, diff_label, sections):
 
 ### 你必须为每一节指定：
 
-1. **`optimized_prompt`**（≥300字的详细写作指令）：
+1. **`optimized_prompt`**（≥120字的详细写作指令）：
    - 本节的核心论点、展开逻辑和叙事节奏
    - 必须使用的一个**独占核心类比**（不得与其他节重复，如第2节用"厨房"比喻，其他节就不能再用）
    - 如果不是第1节：开头必须如何**承接上一节的结尾**
    - 结尾必须留一个**悬念钩子**（引导读者继续看下一节）
-   - 该节推荐的图表类型（流程图/公式卡片/对比卡片/无）
+   - 该节推荐的**结构化图表类型**（流程图/公式卡片/对比卡片/无），使用 `【此处绘制图表：描述】` 格式
+   - **绝对禁止**在写作指令中建议使用 `【此处插入配图：...】` 等普通照片或 AI 生图占位符。本专栏只使用结构化技术图表
 
 2. **`forbidden_overlaps`**：本节**绝对不能出现**的内容清单（防止与其他节重复）
 
@@ -217,13 +220,17 @@ def _optimize_section_prompts(title, diff_label, sections):
 ]
 ```"""
 
-    logger.info("🧠 [阶段2] 提示词自优化中 (编辑总监审稿)...")
+    # 强制将自优化重载为轻量级 flash 模型（例如将 deepseek-v4-pro 降级为 deepseek-v4-flash）以加快生成速度并防止超时
+    from config import LLM_MODEL
+    optimize_model = LLM_MODEL.replace("-pro", "-flash").replace("pro", "flash")
+    logger.info("🧠 [阶段2] 提示词自优化中 (编辑总监审稿，使用轻量级模型 {})...", optimize_model)
 
     result = call_deepseek_with_retry(
         optimize_prompt,
         system_content="你是一位顶级科普编辑总监，负责确保多节长文的跨章节一致性。严格输出 JSON 数组。",
-        timeout=180,
+        timeout=90,
         max_tokens=8192,
+        model=optimize_model
     )
 
     if not result:
@@ -317,6 +324,7 @@ def _generate_section(title, diff_label, opt_section, prev_tail, section_index, 
 5. 难度匹配 {diff_label}。如果是入门，大量使用类比；如果是进阶，深入技术细节。
 6. (如果指令中要求写代码) 给出带详细注释的 Python 代码，单段控制在 25 行内。
 7. 不要写任何"欢迎点赞关注"的废话，只输出纯 Markdown 正文。
+8. **禁止 AI 生图**：绝对禁止在正文中使用 `【此处插入配图：...】` 等普通照片或 AI 生图占位符。配图必须且只能使用 `【此处绘制图表：描述】` 格式。
 """
 
     content = call_deepseek_with_retry(
@@ -390,6 +398,9 @@ def generate_aikepu_article(topic_info):
         return None
 
     final_article = "\n\n".join(full_article)
+
+    # 强制清理可能误输出的普通照片配图占位符，落实“科普长文主要以图表为主，避免AI生图”的原则
+    final_article = re.sub(r"【\s*此处插入配图\s*[：:]\s*.*?\s*】", "", final_article)
 
     # 追加知识地图和关注尾缀
     final_article += (

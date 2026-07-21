@@ -103,16 +103,21 @@ def _replace_placeholder(html_body, keyword, replacement):
     pattern = re.compile(rf"【\s*此处插入配图\s*[：:]\s*{re.escape(keyword)}\s*】")
     return pattern.sub(replacement, html_body)
 
-def process_article_content(article_text, publisher, use_ai_first=False):
+def process_article_content(article_text, publisher, use_ai_first=False, skip_photo_images=False):
     from core.shared.runtime import check_cancelled
     check_cancelled()
     if not article_text:
         return "", {"word_count": 0, "image_count": 0, "sensitive_words": []}
 
-    cleaned = re.sub(r"```\s*markdown\s*\n?", "", article_text)
-    cleaned = re.sub(r"```\s*\n?", "", cleaned).strip()
+    lines = article_text.strip().splitlines()
+    if len(lines) >= 2 and lines[0].strip() in ("```markdown", "```") and lines[-1].strip() == "```":
+        # 确保中间没有未配对的单独 ``` 冲突，再解包
+        cleaned = "\n".join(lines[1:-1]).strip()
+    else:
+        cleaned = article_text.strip()
 
-    # 移除残留的结构性标签文字（LLM 可能仍会输出）
+    # 自动修复 LLM 未在代码块前插入空行的低级格式问题 (Anti-Missing-Blankline)
+    cleaned = re.sub(r'([^\n])\n(```[a-zA-Z]*)', r'\1\n\n\2', cleaned)
     for pattern in _STRUCTURAL_LABEL_PATTERNS:
         cleaned = pattern.sub('', cleaned)
 
@@ -162,6 +167,15 @@ def process_article_content(article_text, publisher, use_ai_first=False):
     if hit_words:
         logger.warning("  检测到敏感词: {}", hit_words)
 
+    # 科普长文模式：强制清除所有普通照片/AI生图占位符，仅保留图表占位符
+    if skip_photo_images:
+        stripped_count = len(PLACEHOLDER_PATTERN.findall(cleaned))
+        if stripped_count > 0:
+            logger.info("  [skip_photo_images] 清除 {} 个照片配图占位符（仅保留图表）", stripped_count)
+            cleaned = PLACEHOLDER_PATTERN.sub('', cleaned)
+        # 同时清除 GitHub 配图占位符（科普长文不需要）
+        cleaned = GITHUB_IMAGE_PATTERN.sub('', cleaned)
+
     placeholders = _extract_image_placeholders(cleaned)
 
     github_images = []
@@ -174,7 +188,7 @@ def process_article_content(article_text, publisher, use_ai_first=False):
 
     logger.info("  配图诊断: 普通占位符={}, GitHub配图={}", len(placeholders), len(github_images))
 
-    html_body = markdown.markdown(cleaned, extensions=["extra", "nl2br", "sane_lists"])
+    html_body = markdown.markdown(cleaned, extensions=["fenced_code", "tables", "sane_lists"])
 
     # 更加鲁棒地移除占位符周围的 P 标签
     html_body = re.sub(
@@ -325,11 +339,25 @@ def process_article_content(article_text, publisher, use_ai_first=False):
         html_body
     )
 
+    # 优化多行代码块 (<pre><code>) 样式：渲染为 Mac 终端暗黑高档风格
+    mac_dots = '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;"><span style="width:10px;height:10px;border-radius:50%;background:#ef4444;display:inline-block;"></span><span style="width:10px;height:10px;border-radius:50%;background:#f59e0b;display:inline-block;"></span><span style="width:10px;height:10px;border-radius:50%;background:#10b981;display:inline-block;"></span></div>'
+    code_container_style = (
+        'margin: 20px 0; padding: 14px 18px; background-color: #1e293b; color: #f8fafc; '
+        'border-radius: 12px; font-family: Consolas, Monaco, "Courier New", monospace; '
+        'font-size: 13.5px; line-height: 1.65; overflow-x: auto; box-shadow: 0 6px 18px rgba(0,0,0,0.25);'
+    )
+    html_body = re.sub(
+        r'<pre>\s*<code[^>]*>(.*?)</code>\s*</pre>',
+        r'<div style="' + code_container_style + r'">' + mac_dots + r'<pre style="margin:0;padding:0;background:transparent;border:none;color:#f8fafc;font-family:inherit;white-space:pre-wrap;word-break:break-all;">\1</pre></div>',
+        html_body,
+        flags=re.DOTALL
+    )
+
     # 统一行内代码（英文字体）样式，解决字体不统一问题
     font_stack = "-apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif"
     html_body = html_body.replace(
         '<code>',
-        f'<code style="font-family: {font_stack}; background-color: #f6f8fa; padding: 2px 5px; border-radius: 4px; color: #0366d6; font-size: 0.95em;">'
+        f'<code style="font-family: {font_stack}; background-color: #f1f5f9; padding: 2px 5px; border-radius: 4px; color: #2563eb; font-size: 0.95em;">'
     )
 
     word_count = len(cleaned.replace("\n", "").replace(" ", ""))

@@ -42,6 +42,7 @@ AutoWeChat 是微信公众号全自动内容生产与发布系统。集成 12 �
 │       └── runtime.py         # 日志 + 控制信号 (cancel_event/pause_event)
 ├── utils/
 │   ├── image_handler.py       # 图片检索 + SD 生图
+│   ├── image_prompt_gen.py    # 提示词提取与移动端渲染引擎 (Image Studio)
 │   ├── image_filter.py        # 图片评分（6 维 CV + 视觉 AI）
 │   ├── http_client.py         # HTTP Session（缓存 + 重试）
 │   └── spider.py              # Selenium 隐身浏览器

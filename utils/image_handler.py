@@ -8,7 +8,7 @@ import os
 import re
 import time
 import threading
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 # 屏蔽 icrawler/OpenCV 的损坏图片警告
 os.environ["OPENCV_LOG_LEVEL"] = "SILENT"
@@ -18,7 +18,7 @@ try:
 except (ImportError, AttributeError):
     pass
 
-from config import SD_API_URL, SD_TIMEOUT, SD_STEPS, SD_MAX_RETRIES, WECHAT_COVER_WIDTH, WECHAT_COVER_HEIGHT, WECHAT_BODY_WIDTH, WECHAT_BODY_HEIGHT, WECHAT_BODY_MAX_MB
+from config import SD_TIMEOUT, SD_STEPS, SD_MAX_RETRIES, WECHAT_COVER_WIDTH, WECHAT_COVER_HEIGHT, WECHAT_BODY_WIDTH, WECHAT_BODY_HEIGHT, WECHAT_BODY_MAX_MB
 
 from loguru import logger
 
@@ -177,8 +177,52 @@ def _build_pollinations_prompt(keyword):
 
 
 # ==========================================
-#  Stable Diffusion 本地生图
+#  Stable Diffusion 本地生图与端口动态探测
 # ==========================================
+_detected_sd_url = None
+_last_sd_check_time = 0
+
+def detect_sd_api_url():
+    """
+    自动探测本地 Stable Diffusion WebUI 运行的端口和 Host。
+    扫描常见端口并测试 /sdapi/v1/sd-models 连通性。
+    """
+    import requests
+    from config import SD_API_URL
+    
+    candidate_urls = [SD_API_URL] if SD_API_URL else []
+    
+    # 增加常见端口列表，WebUI默认7860/7861/7862等
+    ports = [7860, 7861, 7862, 7863, 7865]
+    hosts = ["127.0.0.1", "localhost"]
+    for host in hosts:
+        for port in ports:
+            url = f"http://{host}:{port}"
+            if url not in candidate_urls:
+                candidate_urls.append(url)
+                
+    logger.info("🔍 开始探测本地 Stable Diffusion API 端口...")
+    for url in candidate_urls:
+        try:
+            resp = requests.get(f"{url}/sdapi/v1/sd-models", timeout=1.0)
+            if resp.status_code == 200:
+                logger.info("  ✅ 成功探测到 Stable Diffusion 服务在: {}", url)
+                return url
+        except Exception:
+            continue
+            
+    logger.warning("  ❌ 未在任何常见端口检测到本地 Stable Diffusion 服务。")
+    return None
+
+def get_sd_api_url():
+    global _detected_sd_url, _last_sd_check_time
+    now = time.time()
+    # 如果未探测到，或者探测失败后超过 60 秒，则重新进行探测
+    if _detected_sd_url is None and (now - _last_sd_check_time > 60):
+        _detected_sd_url = detect_sd_api_url()
+        _last_sd_check_time = now
+    return _detected_sd_url
+
 def _try_local_sd(keyword, directory, width=1024, height=576, max_retries=None, prompt=None, prefix="local_sd"):
     """
     调用本地 Stable Diffusion WebUI API 生图（唯一生图源）。
@@ -186,13 +230,6 @@ def _try_local_sd(keyword, directory, width=1024, height=576, max_retries=None, 
     prompt: 直接传入预构建的 prompt；为 None 时从 keyword 自动生成。
     prefix: 保存文件名前缀。
     支持用户中断（检查 cancel_event）。
-
-    SD 超时优化（v8.0）：
-    - 请求前健康检查，SD 离线直接跳过
-    - steps 降至 15（质量损失可忽略）
-    - 超时 120s，ConnectionError 不重试
-    - 进度轮询替代盲等
-    - 退避等待用 cancel_event.wait 替代忙轮询
     """
     import requests
     import base64
@@ -202,13 +239,19 @@ def _try_local_sd(keyword, directory, width=1024, height=576, max_retries=None, 
         max_retries = SD_MAX_RETRIES
 
     # ---- 1. 健康检查：SD 服务是否存活 ----
+    sd_url = get_sd_api_url()
+    if not sd_url:
+        return None
+
     try:
-        health = requests.get(f"{SD_API_URL}/sdapi/v1/sd-models", timeout=5)
+        health = requests.get(f"{sd_url}/sdapi/v1/sd-models", timeout=5)
         if health.status_code != 200:
             logger.warning("  本地 SD 服务未就绪 (status={})，跳过 SD 生图", health.status_code)
             return None
     except requests.exceptions.ConnectionError:
-        logger.warning("  本地 SD 服务未启动，跳过 SD 生图")
+        logger.warning("  本地 SD 服务连接断开，重新探测...")
+        global _detected_sd_url
+        _detected_sd_url = None
         return None
     except Exception:
         logger.warning("  本地 SD 健康检查失败，跳过 SD 生图")
@@ -239,7 +282,7 @@ def _try_local_sd(keyword, directory, width=1024, height=576, max_retries=None, 
 
         try:
             # ---- 2. 发起生图请求（120s 超时） ----
-            resp = requests.post(f"{SD_API_URL}/sdapi/v1/txt2img", json=payload, timeout=SD_TIMEOUT)
+            resp = requests.post(f"{sd_url}/sdapi/v1/txt2img", json=payload, timeout=SD_TIMEOUT)
             if resp.status_code == 200:
                 data = resp.json()
                 if "images" in data and len(data["images"]) > 0:
@@ -261,6 +304,7 @@ def _try_local_sd(keyword, directory, width=1024, height=576, max_retries=None, 
         except requests.exceptions.ConnectionError:
             # ---- 3. 连接失败不重试（服务已离线） ----
             logger.warning("  SD 服务连接中断，跳过 SD 生图")
+            _detected_sd_url = None
             return None
         except requests.exceptions.Timeout:
             logger.warning("  SD 生图超时 ({}s) (第 {}/{} 次)", SD_TIMEOUT, attempt, total_attempts)
@@ -424,6 +468,9 @@ def _try_unsplash_source(keyword, width, height):
         final_url = resp.url
         if "unsplash.com" in final_url and "source" not in final_url:
             return final_url
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+        logger.debug("  Unsplash Source 连接异常: {}", e)
+        raise e
     except Exception:
         pass
     return None
@@ -445,6 +492,9 @@ def _try_pexels_api(keyword, width, height):
                 src = photo.get("src", {}).get("large") or photo.get("src", {}).get("original")
                 if src:
                     return src
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+        logger.debug("  Pexels API 连接异常: {}", e)
+        raise e
     except Exception as e:
         logger.debug("  Pexels API 失败: {}", e)
     return None
@@ -466,6 +516,9 @@ def _try_unsplash_api(keyword, width, height):
                 raw_url = r.get("urls", {}).get("raw")
                 if raw_url:
                     return f"{raw_url}&w={width}&h={height}&fit=crop"
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+        logger.debug("  Unsplash API 连接异常: {}", e)
+        raise e
     except Exception as e:
         logger.debug("  Unsplash API 失败: {}", e)
     return None
@@ -575,12 +628,46 @@ def _enhance_search_keyword(keyword):
     return keyword
 
 
+# 记录图源健康状态
+_image_sources_status = {
+    "unsplash_api": {"status": True, "last_check": 0},
+    "pexels_api": {"status": True, "last_check": 0},
+    "unsplash_source": {"status": True, "last_check": 0},
+    "bing": {"status": True, "last_check": 0}
+}
+
+def is_source_available(source_name):
+    """检查图源当前是否可用（避免被拉黑或墙掉后重复等待超时）"""
+    now = time.time()
+    info = _image_sources_status.get(source_name)
+    if not info:
+        return True
+    if not info["status"] and (now - info["last_check"] < 300):
+        return False
+    return True
+
+def mark_source_failed(source_name):
+    """将图源标记为失效"""
+    _image_sources_status[source_name] = {
+        "status": False,
+        "last_check": time.time()
+    }
+    logger.warning("  ⚠️ 图源 {} 已标记为不可用，将在 5 分钟内跳过，防止请求持续超时", source_name)
+
+def mark_source_success(source_name):
+    """标记图源成功"""
+    _image_sources_status[source_name] = {
+        "status": True,
+        "last_check": time.time()
+    }
+
 def _download_free_image(keyword, save_dir, purpose="body"):
     """
     免费图源降级下载（SD 不可用时自动启用）。
     优先级：Unsplash API → Pexels API → Unsplash Source → Bing 搜索
     自动将中文 AI 术语翻译为英文搜索词以提高匹配度。
     """
+    import requests
     if not keyword or not keyword.strip():
         return None
 
@@ -601,43 +688,162 @@ def _download_free_image(keyword, save_dir, purpose="body"):
     logger.info("🖼️  免费图源下载 '{}' ...", keyword)
 
     # 1. Unsplash 官方 API（需 UNSPLASH_ACCESS_KEY）
-    img_url = _try_unsplash_api(search_keyword, width, height)
-    if img_url:
-        path = _save_image_from_url(img_url, target_dir, prefix="unsplash")
-        if path:
-            return path
+    if is_source_available("unsplash_api"):
+        try:
+            img_url = _try_unsplash_api(search_keyword, width, height)
+            if img_url:
+                path = _save_image_from_url(img_url, target_dir, prefix="unsplash")
+                if path:
+                    mark_source_success("unsplash_api")
+                    return path
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            mark_source_failed("unsplash_api")
+        except Exception:
+            pass
 
     # 2. Pexels 官方 API（需 PEXELS_API_KEY）
-    img_url = _try_pexels_api(search_keyword, width, height)
-    if img_url:
-        path = _save_image_from_url(img_url, target_dir, prefix="pexels")
-        if path:
-            return path
+    if is_source_available("pexels_api"):
+        try:
+            img_url = _try_pexels_api(search_keyword, width, height)
+            if img_url:
+                path = _save_image_from_url(img_url, target_dir, prefix="pexels")
+                if path:
+                    mark_source_success("pexels_api")
+                    return path
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            mark_source_failed("pexels_api")
+        except Exception:
+            pass
 
     # 3. Unsplash Source 直接 URL（无需 API Key）
-    img_url = _try_unsplash_source(search_keyword, width, height)
-    if img_url:
-        path = _save_image_from_url(img_url, target_dir, prefix="unsplash_src")
-        if path:
-            return path
+    if is_source_available("unsplash_source"):
+        try:
+            img_url = _try_unsplash_source(search_keyword, width, height)
+            if img_url:
+                path = _save_image_from_url(img_url, target_dir, prefix="unsplash_src")
+                if path:
+                    mark_source_success("unsplash_source")
+                    return path
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            mark_source_failed("unsplash_source")
+        except Exception:
+            pass
 
     # 4. icrawler Bing 搜索（首次用增强词，失败后用原词）
-    path = _try_icrawler_bing(search_keyword, target_dir)
-    if not path and search_keyword != keyword:
-        path = _try_icrawler_bing(keyword, target_dir)
-    if path:
-        return path
+    if is_source_available("bing"):
+        try:
+            path = _try_icrawler_bing(search_keyword, target_dir)
+            if not path and search_keyword != keyword:
+                path = _try_icrawler_bing(keyword, target_dir)
+            if path:
+                mark_source_success("bing")
+                return path
+        except Exception:
+            mark_source_failed("bing")
 
     logger.warning("  ⚠️ 所有免费图源均失败，'{}' 无配图", keyword)
     return None
 
 
 # ==========================================
-#  核心下载函数
+#  文字卡图本地兜底生成
+# ==========================================
+def generate_default_cover(title, save_path, purpose="cover"):
+    """
+    用 Pillow 动态生成一个高颜值的文字封面卡片，作为终极兜底。
+    - cover 尺寸: 900x383
+    - body 尺寸: 900x500
+    """
+    w, h = (900, 383) if purpose == "cover" else (900, 500)
+    
+    # 1. 创建渐变色背景 (从深蓝/黑色到深灰)
+    base = Image.new("RGB", (w, h), (11, 14, 20))  # #0b0e14
+    draw = ImageDraw.Draw(base)
+    
+    # 绘制对角渐变
+    for y in range(h):
+        for x in range(w):
+            factor = (x / w + y / h) / 2
+            r = int(15 + (30 - 15) * factor)
+            g = int(23 + (41 - 23) * factor)
+            b = int(42 + (59 - 42) * factor)
+            base.putpixel((x, y), (r, g, b))
+            
+    # 2. 绘制装饰边框或网格 (比如左侧画一条渐变色装饰条)
+    draw.rectangle([0, 0, 12, h], fill=(59, 130, 246))  # #3b82f6
+    draw.rectangle([12, 0, 16, h], fill=(6, 182, 212))  # #06b6d4
+
+    # 3. 写入标题文字
+    font_paths = [
+        "C:\\Windows\\Fonts\\msyh.ttc",    # 微软雅黑
+        "C:\\Windows\\Fonts\\msyhbd.ttc",  # 微软雅黑粗体
+        "C:\\Windows\\Fonts\\simhei.ttf",   # 黑体
+        "msyh.ttc",
+        "arial.ttf"
+    ]
+    
+    font = None
+    font_size = 40 if purpose == "cover" else 44
+    for fp in font_paths:
+        if os.path.exists(fp):
+            try:
+                font = ImageFont.truetype(fp, font_size)
+                break
+            except Exception:
+                continue
+                
+    if not font:
+        font = ImageFont.load_default()
+
+    # 简单的文字自动换行
+    max_char_per_line = 14 if purpose == "cover" else 16
+    lines = []
+    current_line = ""
+    for char in title:
+        current_line += char
+        if len(current_line) >= max_char_per_line:
+            lines.append(current_line)
+            current_line = ""
+    if current_line:
+        lines.append(current_line)
+        
+    lines = lines[:3]
+    
+    line_height = font_size + 15
+    total_text_height = len(lines) * line_height
+    y_offset = (h - total_text_height) // 2
+    
+    for line in lines:
+        draw.text((60, y_offset), line, fill=(241, 245, 249), font=font)  # #f1f5f9
+        y_offset += line_height
+        
+    # 5. 绘制右下角的小标注
+    tag_font = None
+    for fp in font_paths:
+        if os.path.exists(fp):
+            try:
+                tag_font = ImageFont.truetype(fp, 18)
+                break
+            except Exception:
+                continue
+    if not tag_font:
+        tag_font = ImageFont.load_default()
+        
+    draw.text((60, h - 50), "科学科普专栏 • AI AUTOMATION", fill=(100, 116, 139), font=tag_font)  # #64748b
+
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    base.save(save_path, "JPEG", quality=95)
+    logger.info("  [兜底卡图] 已成功绘制并保存本地兜底文字卡片: {}", save_path)
+    return save_path
+
+
+# ==========================================
+#  核心下载与图源调度接口
 # ==========================================
 def download_image(keyword, save_dir="assets"):
     """
     下载正文配图：优先本地 SD，不可用时自动降级到免费图源。
+    若全部失效，则自动调用本地 Pillow 引擎绘制高颜值文字卡片配图兜底。
     """
     if not keyword or not keyword.strip():
         return None
@@ -650,25 +856,39 @@ def download_image(keyword, save_dir="assets"):
     if not os.path.exists(specific_dir):
         os.makedirs(specific_dir)
 
-    # 优先尝试本地 SD
-    logger.info("正在为 '{}' 调用本地 SD 生图...", keyword)
+    # 1. 高清真实网络图源 (Unsplash / Pexels / Bing)
+    logger.info("正在搜寻网络高清实拍图源: '{}'...", keyword)
+    best = _download_free_image(keyword, save_dir, purpose="body")
+    if best:
+        best = _finalize_image(best, "body")
+        if best:
+            return best
+
+    # 3. 降级到本地 SD 引擎 (弱显卡备选)
+    logger.info("搜寻本地 SD 生图: '{}'...", keyword)
     best = _try_local_sd(keyword, specific_dir, width=1024, height=576)
     if best:
         best = _finalize_image(best, "body")
         if best:
             return best
 
-    # SD 不可用 → 降级到免费图源
-    logger.info("SD 不可用，降级到免费图源...")
-    best = _download_free_image(keyword, save_dir, purpose="body")
-    if best:
-        best = _finalize_image(best, "body")
-    return best
+    # 3. 终极兜底：当所有免费图源也失效时，自动在本地绘制文字卡片配图
+    logger.warning("  ⚠️ 正文配图图源全部失效，启用本地文字卡片自动兜底机制...")
+    fallback_path = os.path.join(specific_dir, f"body_fallback_{int(time.time())}.jpg")
+    try:
+        generate_default_cover(keyword, fallback_path, purpose="body")
+        if os.path.exists(fallback_path):
+            return fallback_path
+    except Exception as e:
+        logger.error("  [兜底配图] 生成兜底配图异常: {}", e)
+
+    return None
 
 
 def download_cover_image(keyword, save_dir="assets"):
     """
     下载封面图：优先本地 SD，不可用时自动降级到免费图源。
+    若全部失效，则自动调用本地 Pillow 引擎绘制高颜值文字卡片封面兜底。
     """
     if not keyword or not keyword.strip():
         return None
@@ -678,23 +898,37 @@ def download_cover_image(keyword, save_dir="assets"):
     if not os.path.exists(specific_dir):
         os.makedirs(specific_dir)
 
-    # 优先尝试本地 SD
-    logger.info("正在为封面 '{}' 调用本地 SD 生图...", keyword)
+    # 1. 高清真实网络图源 (Unsplash / Pexels / Bing)
+    logger.info("正在搜寻网络高清实拍封面图源: '{}'...", keyword)
+    best = _download_free_image(keyword, save_dir, purpose="cover")
+    if best:
+        best = _finalize_image(best, "cover")
+        if best:
+            return best
+
+    # 3. 降级到本地 SD 引擎
+    logger.info("搜寻本地 SD 封面生图: '{}'...", keyword)
     best = _try_local_sd(keyword, specific_dir, width=1280, height=545)
     if best:
         best = _finalize_image(best, "cover")
         if best:
             return best
 
-    # SD 不可用 → 降级到免费图源
-    logger.info("SD 不可用，封面降级到免费图源...")
-    best = _download_free_image(keyword, save_dir, purpose="cover")
-    if best:
-        best = _finalize_image(best, "cover")
-    return best
+    # 3. 终极兜底：当所有免费图源也失效时，自动在本地绘制文字卡片封面
+    logger.warning("  ⚠️ 封面图源全部失效，启用本地文字卡片自动兜底机制...")
+    fallback_path = os.path.join(specific_dir, f"cover_fallback_{int(time.time())}.jpg")
+    try:
+        generate_default_cover(keyword, fallback_path, purpose="cover")
+        if os.path.exists(fallback_path):
+            return fallback_path
+    except Exception as e:
+        logger.error("  [兜底封面] 生成兜底封面异常: {}", e)
 
+    # 4. 最基础的静态图片兜底 (若上面均失败了)
+    if os.path.exists(LOCAL_FALLBACK_IMAGE):
+        return LOCAL_FALLBACK_IMAGE
 
-
+    return None
 
 
 def _finalize_image(img_path, purpose):
