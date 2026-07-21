@@ -122,9 +122,11 @@ graph TD
 
 **Web Management UI** — Flask glassmorphism dark-theme dashboard:
 - **Console**: One-click control (Start/Pause/Resume/Stop) and real-time streaming logs.
+- **Image Studio** (🆕 v4.3): Extracts image placeholders from Markdown, generates configurable model Prompts (e.g. Imagen 3 / Midjourney v6 / FLUX.1), supports HTML5 drag-and-drop uploads, and provides high-fidelity mobile previews.
+- **Diagram Engine** (🆕 v4.3): Supports 5 hybrid rendering engines including Mermaid, LaTeX cards, Graphviz, Tailwind HTML, and **Archify / D2 system architecture diagrams** with smooth fallback.
 - **History Preview** (🆕 v4.2): Supports online and offline article previews. Click "Preview" next to any record to inspect draft style/content. Offline HTML cache files (saved under `data/previews/`) allow inspecting drafts even for failed tasks.
 - **Sources Health** (🆕 v4.2): Features 12 source status cards. When the tab is active, polls the health API every 3 seconds to keep status in sync with workflow progress.
-- **Settings**: Online configurations for API keys, models, and **Diagram Parallel Workers** (`DIAGRAM_PARALLEL_WORKERS`).
+- **Settings**: Online configurations for API keys, models, **Image Gen Model** (`IMAGE_GEN_MODEL`), and **Diagram Parallel Workers** (`DIAGRAM_PARALLEL_WORKERS`).
 
 **WeChat Integration** — Auto-push notifications to WeChat group bots after publishing.
 
@@ -135,6 +137,7 @@ graph TD
 - **Language**: Python 3.8+
 - **LLM**: DeepSeek Chat / Reasoner
 - **Vision AI**: Gemini Flash 2.0 (cloud) + Gemma 3 4B via Ollama (local)
+- **Diagrams & Architecture**: Archify / D2 / Mermaid / Graphviz / LaTeX
 - **GitHub**: PyGithub (API), rich (directory tree rendering), diagrams (architecture diagrams), carbon (code screenshots)
 - **Crawling**: Requests, BeautifulSoup4, Selenium (Stealth Mode), icrawler
 - **Image**: Pillow, numpy, Pollinations.ai API, Pexels API

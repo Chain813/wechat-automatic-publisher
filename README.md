@@ -177,10 +177,11 @@ Flask 暗色玻璃拟态主题仪表盘：
 | 页面 | 功能说明 |
 |------|---------|
 | **控制台** | 一键启停任务、实时日志流、任务类型选择（热点/GitHub/AI科普）。支持暂停/恢复/停止。 |
-| **图片工作台** | **拖拽配图与提示词生成** (🆕 v4.3)：自动提取 Markdown 中的配图占位符，调用 LLM 生成 Imagen 3 英文 Prompt，支持 HTML5 拖拽上传配图与微信公众号手机端高保真预览。 |
+| **图片工作台** | **拖拽配图与生图工作室** (🆕 v4.3)：自动提取 Markdown 中的配图占位符，生成可配置模型（如 Imagen 3 / Midjourney v6 / FLUX.1）Prompt，支持 HTML5 拖拽上传配图与微信公众号手机端高保真预览。 |
+| **图表引擎** | **混合五模渲染** (🆕 v4.3)：支持 Mermaid 脑图、LaTeX 学术卡片、Graphviz 依赖图、Tailwind HTML 对比卡片及 **Archify / D2 系统架构图**，系统未安装 Archify 时自动平滑降级。 |
 | **历史记录** | 按日期分组展示。**支持离线/在线文章预览** (🆕 v4.2)：每条记录均提供“预览”按钮，点击后可在弹窗中完美渲染文章内容和精美排版。即使发布失败，也可本地浏览失败前的稿件。 |
 | **数据源** | 12 个数据源的健康状态卡片（绿=正常/黄=告警/红=故障）。**支持实时同步** (🆕 v4.2)：在信源 Tab 激活时，每 3 秒自动轮询健康状态，实现与后台采集进度的实时一致。 |
-| **设置** | API Key 在线配置，密钥脱敏显示，防注入校验，支持配置**图表并行生成线程数**（DIAGRAM_PARALLEL_WORKERS）。 |
+| **设置** | API Key 在线配置，密钥脱敏显示，防注入校验，支持在线配置**提示词目标生图模型**（`IMAGE_GEN_MODEL`）与**图表并行生成线程数**（`DIAGRAM_PARALLEL_WORKERS`）。 |
 
 ### 企业微信集成
 
@@ -195,6 +196,7 @@ Flask 暗色玻璃拟态主题仪表盘：
 | **语言** | Python 3.8+ | 主开发语言 |
 | **LLM** | DeepSeek Chat / Reasoner | 文章生成、选题筛选、摘要生成 |
 | **视觉 AI** | Gemini Flash 2.0 + Gemma 3 4B | 图片质量 AI 评估（云端/本地双通道） |
+| **架构与图表** | Archify / D2 / Mermaid / Graphviz | 系统架构图、流程图、数据流图原生与平滑转译渲染 |
 | **GitHub 工具链** | PyGithub | GitHub API 封装，获取 Trending 项目、仓库元数据 |
 | | rich | Python 富文本库，渲染项目目录树为高质量 PNG 图片 |
 | | diagrams | Python 架构图生成库，根据技术栈自动生成项目架构图 |
@@ -467,6 +469,7 @@ graph TD
 | `PEXELS_API_KEY` | Pexels 图库 API Key（可选） | 未配置 |
 | `SD_ENABLED` | 是否启用本地 Stable Diffusion 生图 | `True` |
 | `SD_API_URL` | Stable Diffusion WebUI API 地址 | `http://127.0.0.1:7860` |
+| `IMAGE_GEN_MODEL` | 图片工作室 Prompt 目标生成模型 | `Google Gemini Imagen 3` |
 | `WECHAT_TITLE_MAX_LEN` | 微信标题最大字数限制 | 64 |
 | `WECHAT_DIGEST_MAX_LEN` | 微信摘要最大字数限制 | 120 |
 | `DIAGRAM_PARALLEL_WORKERS` | 图表并行生成线程数（Chrome + Graphviz） | 5 |
