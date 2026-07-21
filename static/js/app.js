@@ -351,6 +351,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('llm-apikey').value = data.LLM_API_KEY || '';
             document.getElementById('gemini-apikey').value = data.GEMINI_API_KEY || '';
             document.getElementById('qywechat-webhook').value = data.QYWECHAT_WEBHOOK || '';
+            document.getElementById('image-gen-model').value = data.IMAGE_GEN_MODEL || 'Google Gemini Imagen 3';
             document.getElementById('diagram-workers').value = data.DIAGRAM_PARALLEL_WORKERS || '3';
             const sel = document.getElementById('llm-model');
             if (data.LLM_MODEL && [...sel.options].some(o => o.value === data.LLM_MODEL)) {

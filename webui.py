@@ -328,6 +328,7 @@ def handle_config():
             "QYWECHAT_WEBHOOK": os.getenv("QYWECHAT_WEBHOOK", ""),
             "LLM_MODEL": os.getenv("LLM_MODEL", "deepseek-v4-pro"),
             "GEMINI_API_KEY": _mask_secret(os.getenv("GEMINI_API_KEY", "")),
+            "IMAGE_GEN_MODEL": os.getenv("IMAGE_GEN_MODEL", "Google Gemini Imagen 3"),
             "DIAGRAM_PARALLEL_WORKERS": os.getenv("DIAGRAM_PARALLEL_WORKERS", "5"),
         })
     else:
@@ -339,7 +340,7 @@ def handle_config():
             pathlib.Path(env_file).touch()
         for key in ["WECHAT_APP_ID", "WECHAT_APP_SECRET", "LLM_API_KEY",
                      "QYWECHAT_WEBHOOK", "LLM_MODEL", "GEMINI_API_KEY",
-                     "DIAGRAM_PARALLEL_WORKERS"]:
+                     "IMAGE_GEN_MODEL", "DIAGRAM_PARALLEL_WORKERS"]:
             if key in data and "*" not in str(data[key]):
                 value = str(data[key]).strip()
                 if len(value) > 500 or '\n' in value or '\r' in value:
@@ -697,7 +698,8 @@ def test_sources():
             except Exception:
                 _mark_source_failure(source_id)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(plugins), 12)) as executor:
+        workers = max(1, min(len(plugins), 12))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             futures = [executor.submit(check_plugin, sid, p) for sid, p in plugins.items()]
             concurrent.futures.wait(futures, timeout=10)
             
