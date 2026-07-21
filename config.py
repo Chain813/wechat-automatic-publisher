@@ -100,7 +100,8 @@ WECHAT_BODY_WIDTH = 900
 WECHAT_BODY_HEIGHT = 500
 WECHAT_BODY_MAX_MB = 2
 
-# 12. 本地 Stable Diffusion 配置
+# 12. 本地 Stable Diffusion & 生图模型配置
+IMAGE_GEN_MODEL = os.getenv("IMAGE_GEN_MODEL", "Google Gemini Imagen 3")
 SD_ENABLED = os.getenv("SD_ENABLED", "True").lower() == "true"
 SD_API_URL = os.getenv("SD_API_URL", "http://127.0.0.1:7860")
 SD_TIMEOUT = int(os.getenv("SD_TIMEOUT", "120"))        # 单次生图超时秒数

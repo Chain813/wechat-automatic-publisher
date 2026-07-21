@@ -7,6 +7,7 @@
 import re
 import json
 from loguru import logger
+from config import IMAGE_GEN_MODEL
 from core.shared.llm import call_deepseek_with_retry
 
 # 配图占位符正则
@@ -31,7 +32,7 @@ def extract_placeholders(article_text: str) -> list[str]:
 def generate_image_prompts(article_title: str, placeholders: list[str]) -> list[dict]:
     """
     输入文章标题 + 占位符关键词列表，
-    调用 LLM 批量翻译为 Gemini Imagen 3 英文 Prompt。
+    调用 LLM 批量翻译为目标生图模型 (如 IMAGE_GEN_MODEL) 的英文 Prompt。
 
     返回:
         [{"index": 1, "keyword": "原中文", "prompt": "English prompt..."}, ...]
@@ -44,7 +45,7 @@ def generate_image_prompts(article_title: str, placeholders: list[str]) -> list[
     user_prompt = (
         f"文章标题：{article_title}\n\n"
         f"以下是文章中需要配图的关键词列表：\n{keywords_text}\n\n"
-        "请为每个关键词生成一段适合 Google Gemini Imagen 3 模型的英文生图 Prompt。\n\n"
+        f"请为每个关键词生成一段适合 {IMAGE_GEN_MODEL} 模型的英文生图 Prompt。\n\n"
         "要求：\n"
         "1. 每个 Prompt 为 1-2 句精炼英文，描述一幅高清 16:9 科技感/现代感图片\n"
         "2. 包含画面风格、色彩感与视角（如 cinematic, 8k, modern tech style）\n"
