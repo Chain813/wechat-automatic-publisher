@@ -20,6 +20,9 @@
                 <a href="#" class="nav-item active" data-target="dashboard" id="nav-console-link">
                     <span class="icon">📊</span> <span data-i18n="nav-console">Console</span>
                 </a>
+                <a href="#" class="nav-item" data-target="skill-tree-view" id="nav-skill-tree-link">
+                    <span class="icon">🎓</span> <span data-i18n="nav-skill-tree">Skill Tree</span>
+                </a>
                 <a href="#" class="nav-item" data-target="history" id="nav-history-link">
                     <span class="icon">📜</span> <span data-i18n="nav-history">History</span>
                 </a>
@@ -58,29 +61,63 @@
                     <h2 data-i18n="console-title">Console</h2>
                     <p data-i18n="console-subtitle">Auto fetch, generate, and publish to WeChat</p>
                 </header>
-                <div class="action-panel glass-panel">
-                    <div class="panel-info">
-                        <h3 data-i18n="run-workflow-title">Run Workflow</h3>
-                        <p data-i18n="run-workflow-desc">Scan hotspots, generate articles with DeepSeek, add images, publish to WeChat drafts.</p>
-                        <div class="task-selector">
-                            <label class="radio-label">
-                                <input type="radio" name="task_type" value="hotspots" checked>
-                                <span data-i18n="task-hotspots">Hotspots</span>
-                            </label>
-                            <label class="radio-label">
-                                <input type="radio" name="task_type" value="github">
-                                <span data-i18n="task-github">GitHub Trending</span>
-                            </label>
-                            <label class="radio-label">
-                                <input type="radio" name="task_type" value="aikepu">
-                                <span data-i18n="task-aikepu">🎓 AI 科普</span>
-                            </label>
+                <div class="module-cards-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 16px;">
+                    <!-- Hotspots Card -->
+                    <div class="module-card glass-panel" style="padding: 20px; display: flex; flex-direction: column; justify-content: space-between;">
+                        <div>
+                            <div style="font-size: 24px; margin-bottom: 8px;">🌟</div>
+                            <h3 style="margin-bottom: 8px; font-size: 16px;" data-i18n="task-hotspots">Hotspots</h3>
+                            <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5;">全网资讯自动聚合，提取当日最热科技新闻进行智能改写并生成配图。</p>
                         </div>
-                    </div>
-                    <div class="action-buttons">
-                        <button id="btn-start" class="btn btn-primary glow-effect">
+                        <button class="btn btn-primary glow-effect btn-module-start" data-task="hotspots" style="width: 100%;">
                             <span class="btn-icon">▶</span> <span data-i18n="btn-start">Start</span>
                         </button>
+                    </div>
+
+                    <!-- GitHub Card -->
+                    <div class="module-card glass-panel" style="padding: 20px; display: flex; flex-direction: column; justify-content: space-between;">
+                        <div>
+                            <div style="font-size: 24px; margin-bottom: 8px;">💻</div>
+                            <h3 style="margin-bottom: 8px; font-size: 16px;" data-i18n="task-github">GitHub Trending</h3>
+                            <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5;">分析 GitHub Trending 开源项目，解析技术亮点，自动生成长图文分析报告。</p>
+                        </div>
+                        <button class="btn btn-primary glow-effect btn-module-start" data-task="github" style="width: 100%;">
+                            <span class="btn-icon">▶</span> <span data-i18n="btn-start">Start</span>
+                        </button>
+                    </div>
+
+                    <!-- AI Kepu Card -->
+                    <div class="module-card glass-panel" style="padding: 20px; display: flex; flex-direction: column; justify-content: space-between;">
+                        <div>
+                            <div style="font-size: 24px; margin-bottom: 8px;">🎓</div>
+                            <h3 style="margin-bottom: 8px; font-size: 16px;" data-i18n="task-aikepu">AI 科普</h3>
+                            <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5;">基于技能树前置依赖，智能解锁下一个图谱节点，生成体系化的硬核教程。</p>
+                        </div>
+                        <button class="btn btn-primary glow-effect btn-module-start" data-task="aikepu" style="width: 100%;">
+                            <span class="btn-icon">▶</span> <span data-i18n="btn-start">Start</span>
+                        </button>
+                    </div>
+
+                    <!-- Daily Knowledge Card -->
+                    <div class="module-card glass-panel" style="padding: 20px; display: flex; flex-direction: column; justify-content: space-between;">
+                        <div>
+                            <div style="font-size: 24px; margin-bottom: 8px;">💡</div>
+                            <h3 style="margin-bottom: 8px; font-size: 16px;">每日小知识</h3>
+                            <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5;">完全解耦的短文模块。精选高阶概念，运用隐喻手法讲解，并自动防重推送。</p>
+                        </div>
+                        <button class="btn btn-primary glow-effect btn-module-start" data-task="daily_knowledge" style="width: 100%;">
+                            <span class="btn-icon">▶</span> <span data-i18n="btn-start">Start</span>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Global Controls (Pause/Resume/Stop) -->
+                <div class="global-controls glass-panel" style="padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; display: none;" id="active-task-controls">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <div class="spinner" style="width: 20px; height: 20px; border: 2px solid var(--border-color); border-top-color: var(--primary-color); border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                        <span style="font-weight: 600;" id="active-task-label">Running...</span>
+                    </div>
+                    <div class="action-buttons" style="display: flex; gap: 8px;">
                         <button id="btn-pause" class="btn btn-warning" style="display:none;">
                             <span class="btn-icon">⏸</span> <span data-i18n="btn-pause">Pause</span>
                         </button>
@@ -105,19 +142,19 @@
                         </button>
                     </div>
                     <div class="cache-metrics-grid" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;">
-                        <div class="metric-card" style="background: rgba(255,255,255,0.03); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+                        <div class="metric-card" style="background: #ffffff; padding: 10px 14px; border-radius: 8px; border: 1px solid #e2e8f0;">
                             <div style="font-size:12px; color:#94a3b8;">Cache 命中率</div>
                             <div id="stat-hit-rate" style="font-size:20px; font-weight:700; color:#38bdf8; margin-top:2px;">0.0%</div>
                         </div>
-                        <div class="metric-card" style="background: rgba(255,255,255,0.03); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+                        <div class="metric-card" style="background: #ffffff; padding: 10px 14px; border-radius: 8px; border: 1px solid #e2e8f0;">
                             <div style="font-size:12px; color:#94a3b8;">累计已节省 Tokens</div>
                             <div id="stat-saved-tokens" style="font-size:20px; font-weight:700; color:#34d399; margin-top:2px;">0</div>
                         </div>
-                        <div class="metric-card" style="background: rgba(255,255,255,0.03); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+                        <div class="metric-card" style="background: #ffffff; padding: 10px 14px; border-radius: 8px; border: 1px solid #e2e8f0;">
                             <div style="font-size:12px; color:#94a3b8;">估计已节省 API 费用</div>
                             <div id="stat-saved-cny" style="font-size:20px; font-weight:700; color:#facc15; margin-top:2px;">￥0.0000</div>
                         </div>
-                        <div class="metric-card" style="background: rgba(255,255,255,0.03); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+                        <div class="metric-card" style="background: #ffffff; padding: 10px 14px; border-radius: 8px; border: 1px solid #e2e8f0;">
                             <div style="font-size:12px; color:#94a3b8;">最后请求响应耗时</div>
                             <div id="stat-latency" style="font-size:20px; font-weight:700; color:#a78bfa; margin-top:2px;">0 ms</div>
                         </div>
@@ -129,16 +166,21 @@
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
                         <div style="font-weight: 700; font-size: 14px; display:flex; align-items:center; gap:8px;">
                             <span>🎓 AI 科普技能树动态进度 (微信同步)</span>
-                            <span id="skill-tree-badge" class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-size: 11px; padding: 2px 8px; border-radius: 12px;">自动对齐已发表记录</span>
+                            <span id="skill-tree-badge" class="badge" style="background: rgba(37, 99, 235, 0.1); color: #2563eb; font-size: 11px; padding: 2px 8px; border-radius: 12px;">自动对齐已发表记录</span>
                         </div>
-                        <div id="skill-tree-ratio" style="font-size:13px; font-weight:600; color:#38bdf8;">进度: 0/0 (0%)</div>
+                        <div style="display:flex; align-items:center; gap:12px;">
+                            <div id="skill-tree-ratio" style="font-size:13px; font-weight:600; color:#38bdf8;">进度: 0/0 (0%)</div>
+                            <button id="btn-open-skill-tree" class="btn btn-secondary" style="font-size:11px; padding:3px 10px; border-radius:6px; cursor:pointer;">
+                                <span>🌐 展开知识树</span>
+                            </button>
+                        </div>
                     </div>
-                    <div style="background: rgba(255,255,255,0.06); height: 8px; border-radius: 4px; overflow: hidden; margin-bottom: 12px;">
+                    <div style="background: #f1f5f9; height: 8px; border-radius: 4px; overflow: hidden; margin-bottom: 12px;">
                         <div id="skill-tree-progress-bar" style="background: linear-gradient(90deg, #38bdf8, #818cf8); height: 100%; width: 0%; transition: width 0.4s ease;"></div>
                     </div>
                     <div style="font-size: 12px; color: #94a3b8; display:flex; align-items:center; gap: 6px;">
                         <span>🎯 动态解锁下一个最佳选题：</span>
-                        <strong id="skill-tree-next-topic" style="color: #f1f5f9; font-weight: 600;">加载中...</strong>
+                        <strong id="skill-tree-next-topic" style="color: #0f172a; font-weight: 600;">加载中...</strong>
                     </div>
                 </div>
                 <div class="terminal-container glass-panel mt-4">
@@ -153,6 +195,76 @@
                     </div>
                     <div class="terminal-body" id="log-console">
                         <div class="log-line system">AutoWeChat console ready.</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Skill Tree Visualizer View -->
+            <section id="skill-tree-view" class="view-section">
+                <header class="view-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+                    <div>
+                        <h2>⚡ AI 全栈科普 30 核心知识点全景拓扑图谱</h2>
+                        <p>知识图谱 DAG 有向无环图 · 严谨先修依赖校验 · 微信全量同步状态</p>
+                    </div>
+                    <div style="display:flex; gap:10px;">
+                        <button id="btn-sync-wechat-skill-tree" class="btn btn-secondary" style="font-size:13px; padding:6px 14px; border-color: rgba(16, 185, 129, 0.4); color: #10b981;">
+                            <span class="btn-icon">💬</span> 微信同步
+                        </button>
+                        <button id="btn-refresh-skill-tree-view" class="btn btn-secondary" style="font-size:13px; padding:6px 14px;">
+                            <span class="btn-icon">🔄</span> 刷新拓扑图谱
+                        </button>
+                        <button id="btn-start-recommended-node" class="btn btn-primary glow-effect" style="font-size:13px; padding:6px 14px;">
+                            <span class="btn-icon">⚡</span> 撰写下一个可解锁节点
+                        </button>
+                    </div>
+                </header>
+
+                <div class="glass-panel mb-4" style="padding:16px 20px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+                        <div class="tree-legend" style="display:flex; align-items:center; gap:20px; font-size:13px;">
+                            <span style="display:flex; align-items:center; gap:6px;">
+                                <span style="width:12px; height:12px; border-radius:50%; background:#10b981; box-shadow:0 0 8px #10b981;"></span> 已生成/微信草稿箱 (<strong id="legend-published-count" style="color:#10b981;">0</strong>)
+                            </span>
+                            <span style="display:flex; align-items:center; gap:6px;">
+                                <span style="width:12px; height:12px; border-radius:50%; background:#38bdf8; box-shadow:0 0 8px #38bdf8;"></span> 可解锁生成 (<strong id="legend-available-count" style="color:#38bdf8;">0</strong>)
+                            </span>
+                            <span style="display:flex; align-items:center; gap:6px;">
+                                <span style="width:12px; height:12px; border-radius:50%; background:#64748b;"></span> 锁定待先修条件 (<strong id="legend-locked-count" style="color:#94a3b8;">0</strong>)
+                            </span>
+                        </div>
+                        <div class="tree-filter-tabs" style="display:flex; gap:6px;">
+                            <button class="tree-filter-btn active" data-filter="all">全部 (30)</button>
+                            <button class="tree-filter-btn" data-filter="1">🌱 入门</button>
+                            <button class="tree-filter-btn" data-filter="2">📘 基础</button>
+                            <button class="tree-filter-btn" data-filter="3">🔥 进阶</button>
+                            <button class="tree-filter-btn" data-filter="4">⚡ 前沿</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="skill-tree-viewport glass-panel" id="skill-tree-viewport">
+                    <svg id="skill-tree-svg-canvas" class="tree-svg-overlay"></svg>
+                    <div id="skill-tree-columns-container" class="skill-tree-columns-container">
+                        <!-- Column 1: Tier 1 -->
+                        <div class="skill-tier-column" data-tier="1">
+                            <div class="tier-header"><span class="tier-badge tier-1">Level 1</span> 🌱 入门与数学工具箱</div>
+                            <div class="tier-nodes-list" id="tier-nodes-1"></div>
+                        </div>
+                        <!-- Column 2: Tier 2 -->
+                        <div class="skill-tier-column" data-tier="2">
+                            <div class="tier-header"><span class="tier-badge tier-2">Level 2</span> 📘 深度学习与核心网络</div>
+                            <div class="tier-nodes-list" id="tier-nodes-2"></div>
+                        </div>
+                        <!-- Column 3: Tier 3 -->
+                        <div class="skill-tier-column" data-tier="3">
+                            <div class="tier-header"><span class="tier-badge tier-3">Level 3</span> 🔥 大语言模型 & Transformer</div>
+                            <div class="tier-nodes-list" id="tier-nodes-3"></div>
+                        </div>
+                        <!-- Column 4: Tier 4 -->
+                        <div class="skill-tier-column" data-tier="4">
+                            <div class="tier-header"><span class="tier-badge tier-4">Level 4</span> ⚡ 智能体 & 前沿应用</div>
+                            <div class="tier-nodes-list" id="tier-nodes-4"></div>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -275,7 +387,7 @@
                         <label for="diagram-workers" data-i18n="label-diagram-workers">图表并行线程数</label>
                         <input type="number" id="diagram-workers" name="DIAGRAM_PARALLEL_WORKERS" class="form-control" min="1" max="8" placeholder="3">
                     </div>
-                    <div class="form-group mb-4" style="background: rgba(255, 255, 255, 0.03); padding: 12px 16px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08);">
+                    <div class="form-group mb-4" style="background: rgba(255, 255, 255, 0.03); padding: 12px 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
                         <label style="display:block; margin-bottom:6px; font-weight:600;" data-i18n="label-sd-status">生图引擎在线状态</label>
                         <div id="sd-status-badge" style="font-size:13px; color:#94a3b8;">
                             <span class="log-line system">正在检测生图服务...</span>
@@ -336,6 +448,55 @@
             </div>
             <div class="modal-body">
                 <iframe class="modal-iframe" id="preview-iframe" src="about:blank"></iframe>
+            </div>
+        </div>
+    </div>
+
+    <!-- Skill Tree Node Detail Modal -->
+    <div id="skill-node-modal" class="modal-overlay">
+        <div class="modal-container glass-panel" style="max-width: 520px; height: auto; max-height: 85vh;">
+            <div class="modal-header">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span id="node-modal-icon" style="font-size:1.2rem;">🎓</span>
+                    <span class="modal-title" id="node-modal-title">知识节点详情</span>
+                </div>
+                <button class="modal-close" id="btn-close-node-modal">&times;</button>
+            </div>
+            <div style="padding: 20px; color: var(--text-primary);">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px; flex-wrap:wrap;">
+                    <span id="node-modal-badge" class="badge" style="background:rgba(37, 99, 235, 0.1); color:#2563eb; font-size:11px;">Level 1</span>
+                    <span id="node-modal-id" style="font-family:var(--font-mono); font-size:11px; color:var(--text-secondary);">id: math-basics</span>
+                    <span id="node-modal-status-badge" style="margin-left:auto;"></span>
+                </div>
+                <h3 id="node-modal-heading" style="font-size: 1.1rem; color: #0f172a; margin-bottom: 12px; font-weight:600;">--</h3>
+                <p id="node-modal-summary" style="font-size: 0.88rem; color: #475569; line-height: 1.6; background: #f8fafc; padding:12px 14px; border-radius:8px; margin-bottom:14px; border:1px solid var(--border-color);">--</p>
+                
+                <div style="margin-bottom:14px;">
+                    <div style="font-size:12px; color:var(--text-secondary); margin-bottom:6px;">🏷️ 知识点分类标签</div>
+                    <div id="node-modal-tags" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+                </div>
+
+                <div style="margin-bottom:18px;">
+                    <div style="font-size:12px; color:var(--text-secondary); margin-bottom:6px;">🔗 先修依赖节点</div>
+                    <div id="node-modal-prereqs" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+                </div>
+
+                <div style="border-top: 1px solid var(--border-color); padding-top: 14px;">
+                    <div style="margin-bottom:10px;">
+                        <div style="font-size:12px; color:var(--text-secondary); margin-bottom:6px;">🔧 手动标记节点状态</div>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <button class="btn btn-secondary" id="btn-override-published-modal" title="手动标记为已群发" style="font-size:12px; padding:6px 14px; color:#10b981; border-color:rgba(16, 185, 129, 0.4); background:rgba(16,185,129,0.06); font-weight:600;">✅ 标记已群发</button>
+                            <button class="btn btn-secondary" id="btn-override-draft-modal" title="手动标记为草稿箱" style="font-size:12px; padding:6px 14px; color:#38bdf8; border-color:rgba(56, 189, 248, 0.4); background:rgba(56,189,248,0.06); font-weight:600;">📝 标记草稿箱</button>
+                            <button class="btn btn-secondary" id="btn-override-reset-modal" title="重置回未完成状态" style="font-size:12px; padding:6px 14px; color:#ef4444; border-color:rgba(239, 68, 68, 0.4); background:rgba(239,68,68,0.06); font-weight:600;">🔄 重置状态</button>
+                        </div>
+                    </div>
+                    <div style="display:flex; justify-content:flex-end; gap:8px;">
+                        <button class="btn btn-secondary" id="btn-cancel-node-modal" style="font-size:12px; padding:6px 14px;">关闭</button>
+                        <button class="btn btn-primary glow-effect" id="btn-generate-node-modal" style="font-size:12px; padding:6px 14px;">
+                            <span class="btn-icon">🚀</span> 撰写此知识点
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

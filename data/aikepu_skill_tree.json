@@ -9,242 +9,445 @@
     {
       "id": "math-basics",
       "title": "AI 必备数学基础：线性代数、概率论与梯度下降",
-      "tags": ["数学", "基础"],
+      "tags": [
+        "数学",
+        "基础"
+      ],
       "prerequisites": [],
       "difficulty": 1,
-      "summary": "从向量矩阵到概率分布，一文讲清 AI 最核心的数学工具箱"
+      "summary": "从向量矩阵到概率分布，一文讲清 AI 最核心的数学工具箱",
+      "custom_prompt": "用乐高积木搭建AI大脑：线性代数是积木的拼接规则，矩阵乘法就是不同零件组合的维度匹配；概率论是抽奖箱里的分布规律，条件概率如同根据已有抽奖结果预测下一颗球颜色；梯度下降是盲人下山，每一步都靠触碰地面坡度（导数）调整方向。重点拆解矩阵乘法中“行乘列”的直觉、高斯分布的钟形曲线含义、梯度下降学习率对步长的影响。行文重宏观比喻，用生活场景建立直觉，避免公式堆砌。"
     },
     {
       "id": "ml-basics",
       "title": "机器学习入门：从线性回归到过拟合",
-      "tags": ["机器学习", "基础"],
-      "prerequisites": ["math-basics"],
+      "tags": [
+        "机器学习",
+        "基础"
+      ],
+      "prerequisites": [
+        "math-basics"
+      ],
       "difficulty": 1,
-      "summary": "损失函数、正则化、偏差方差权衡——机器学习的第一性原理"
+      "summary": "损失函数、正则化、偏差方差权衡——机器学习的第一性原理",
+      "custom_prompt": "用“学骑自行车”的跨界类比：直线前行是线性回归，过度纠正龙头导致蛇形是过拟合，握把放松（正则化）兼顾平衡。必须重点击破“偏差方差权衡”——用射箭靶图建立直觉：低偏差=准星准，低方差=散布小。行文侧重宏观直觉：用厨房称调料解释损失函数，用学生死记硬背类比过拟合，避免公式，仅直观展示曲线图。"
     },
     {
       "id": "python-toolchain",
       "title": "AI 开发工具链：PyTorch、Jupyter 与 GPU 环境搭建",
-      "tags": ["工具", "Python", "基础"],
-      "prerequisites": [],
+      "tags": [
+        "工具",
+        "Python",
+        "基础"
+      ],
+      "prerequisites": [
+        "math-basics"
+      ],
       "difficulty": 1,
-      "summary": "从零搭建深度学习开发环境，了解 PyTorch 核心抽象"
+      "summary": "从零搭建深度学习开发环境，了解 PyTorch 核心抽象",
+      "custom_prompt": "必须用「搭积木工作台」类比：Jupyter是积木图纸笔记本，PyTorch是积木零件（张量是基础方块），GPU是加速拼装的机械臂。重点击破「张量」直觉：把标量、向量、矩阵、高维张量分别比作点、箭头、棋盘、魔方，强调维度即数据的组织方式。难度1侧重宏观流程：从安装Conda开始，像配齐工具架；用一次前向传播演示如何用PyTorch搭乐高模型，最后在GPU上跑出数字跳舞的效果。避免底层细节，只讲直觉与乐趣。"
     },
     {
       "id": "nn-basics",
       "title": "神经网络原理：从感知机到深度网络",
-      "tags": ["深度学习", "神经网络"],
-      "prerequisites": ["ml-basics"],
+      "tags": [
+        "深度学习",
+        "神经网络"
+      ],
+      "prerequisites": [
+        "ml-basics",
+        "python-toolchain"
+      ],
       "difficulty": 2,
-      "summary": "激活函数、隐藏层、万能逼近定理——神经网络为什么能工作"
+      "summary": "激活函数、隐藏层、万能逼近定理——神经网络为什么能工作",
+      "custom_prompt": "使用乐高积木搭建任意曲面的比喻引入：单层感知机就像一块直板积木，只能拼直线；通过堆叠不同角度的小积木（隐藏层），就能搭出任何复杂形状（万能逼近定理）。重点击破激活函数——把它比作积木的卡扣，去掉它所有层就坍缩成一条直线。行文侧重宏观直觉：从点亮的神经元如何逐层抽象出特征讲起，用「分层解谜」的叙事代替数学推导，让读者秒懂深度网络为什么能学习。"
     },
     {
       "id": "backprop",
       "title": "反向传播算法：深度学习的心脏",
-      "tags": ["深度学习", "优化"],
-      "prerequisites": ["nn-basics"],
+      "tags": [
+        "深度学习",
+        "优化"
+      ],
+      "prerequisites": [
+        "nn-basics"
+      ],
       "difficulty": 2,
-      "summary": "链式法则、计算图、自动微分——理解模型到底如何学习"
+      "summary": "链式法则、计算图、自动微分——理解模型到底如何学习",
+      "custom_prompt": "用“多层级公司追责系统”类比：CEO看最终亏损，逐级追问各部门责任，每个部门只承担自己造成的部分，而非全盘负责。必须拆解链式法则的“局部梯度相乘”直觉——像每一层只记录自己的误差贡献率。难度2，重直觉而非数学推导，用计算图可视化梯度流动，让读者秒懂反向传播如何从输出倒推到输入修正权重。"
     },
     {
       "id": "cnn",
       "title": "卷积神经网络：计算机视觉的基石",
-      "tags": ["深度学习", "CV"],
-      "prerequisites": ["nn-basics"],
+      "tags": [
+        "深度学习",
+        "CV"
+      ],
+      "prerequisites": [
+        "nn-basics"
+      ],
       "difficulty": 2,
-      "summary": "卷积核、池化、感受野——从 LeNet 到 ResNet 的核心思想"
+      "summary": "卷积核、池化、感受野——从 LeNet 到 ResNet 的核心思想",
+      "custom_prompt": "必须用「侦探用放大镜逐块扫描照片找线索」类比卷积核：每个卷积核是不同专长的侦探（边缘、纹理），滑动时保留空间结构。重点击破“感受野”：用堆叠3×3核等效7×7的直觉，解释小核参数量少但感受野不变。行文侧重“卷积为何优于全连接”——参数共享与局部连接带来的平移不变性，简析LeNet到ResNet的跳连解决退化。避免公式，多用切片动画描述。"
     },
     {
       "id": "rnn-lstm",
       "title": "RNN 与 LSTM：序列模型的黄金时代",
-      "tags": ["深度学习", "NLP"],
-      "prerequisites": ["nn-basics"],
+      "tags": [
+        "深度学习",
+        "NLP"
+      ],
+      "prerequisites": [
+        "nn-basics"
+      ],
       "difficulty": 2,
-      "summary": "循环网络、长短期记忆、门控机制——Transformer 之前的主流方案"
+      "summary": "循环网络、长短期记忆、门控机制——Transformer 之前的主流方案",
+      "custom_prompt": "用「快递员记不住路线 vs 智能管家带记事本+三道门」类比引入RNN与LSTM：RNN像记忆力差的快递员，遇到长序列就忘路（梯度消失）；LSTM则用遗忘门、输入门、输出门精准控制信息流，像管家决定记什么、忘什么、何时输出。必须拆解「门控机制」的零到一直觉：每个门本质是sigmoid与点乘的协作。难度2侧重宏观直觉，无需深究公式推导，但要用生活化例子（如预测天气时保留关键特征）让读者秒懂为何LSTM是序列建模黄金时代的中流砥柱。"
     },
     {
       "id": "attention",
       "title": "注意力机制：从 Seq2Seq 到 Self-Attention",
-      "tags": ["深度学习", "Transformer", "注意力"],
-      "prerequisites": ["nn-basics", "rnn-lstm"],
+      "tags": [
+        "深度学习",
+        "Transformer",
+        "注意力"
+      ],
+      "prerequisites": [
+        "nn-basics",
+        "rnn-lstm"
+      ],
       "difficulty": 3,
-      "summary": "Query/Key/Value 三部曲，理解模型如何「关注」重要信息"
+      "summary": "Query/Key/Value 三部曲，理解模型如何「关注」重要信息",
+      "custom_prompt": "用“图书馆检索系统”类比：用户Query（问题）与图书Key（索引）匹配得到相关性得分，再加权提取Value（内容）。必须拆解注意力计算中的缩放点积公式，重点讲透Softmax中的温度参数（温度越高注意力越分散）及维度对齐的直觉。务必对比Seq2Seq Attention（单向、顺序、信息瓶颈）与Self-Attention（全局并行、无距离衰减），最后点出Transformer中多头注意力如何通过不同子空间捕捉多类关系。"
     },
     {
       "id": "transformer",
       "title": "Transformer 架构详解：Attention Is All You Need",
-      "tags": ["Transformer", "LLM", "核心"],
-      "prerequisites": ["attention"],
+      "tags": [
+        "Transformer",
+        "LLM",
+        "核心"
+      ],
+      "prerequisites": [
+        "attention"
+      ],
       "difficulty": 3,
-      "summary": "多头注意力、残差连接、LayerNorm——现代大模型的统一底座"
+      "summary": "多头注意力、残差连接、LayerNorm——现代大模型的统一底座",
+      "custom_prompt": "必须用“图书馆管理员团队并行检索”类比引入：每个头像一名管理员，同时查询不同书架的关联信息。重点拆解缩放点积注意力公式，从Q/K维度投影到Softmax概率分布，用“路灯的聚光灯亮度调节”建立直觉。结合多头拼接与线性变换，强调残差连接解决梯度退化，LayerNorm稳定训练分布。难度3要求：对照RNN串行瓶颈，分析并行计算与长程依赖的权衡，点出自注意力O(n²)复杂度如何催生稀疏注意力和FlashAttention优化。"
     },
     {
       "id": "pos-encoding",
       "title": "位置编码：让 Transformer 感知顺序",
-      "tags": ["Transformer", "LLM"],
-      "prerequisites": ["transformer"],
+      "tags": [
+        "Transformer",
+        "LLM"
+      ],
+      "prerequisites": [
+        "transformer"
+      ],
       "difficulty": 3,
-      "summary": "正弦编码、可学习编码、RoPE——大模型如何理解词语顺序"
+      "summary": "正弦编码、可学习编码、RoPE——大模型如何理解词语顺序",
+      "custom_prompt": "用\"电影胶片暗盒\"类比：没有位置编码的Transformer像一卷没编号的胶片，分不清第1帧与第100帧的播放顺序。先对比RNN天然有序与Transformer并行无序，用\"时间戳编码\"建立直觉。核心拆解正弦编码公式：不同频率的正弦波如同钟表不同指针，高频编码局部顺序，低频编码全局距离。最后对比可学习与固定编码的泛化差异，并点明RoPE用旋转变换取代加法，完美解决相对位置感知—难度3需兼顾直觉与实现权衡。"
     },
     {
       "id": "tokenizer",
       "title": "Tokenizer 原理：从 BPE 到 SentencePiece",
-      "tags": ["LLM", "NLP"],
-      "prerequisites": ["transformer"],
+      "tags": [
+        "LLM",
+        "NLP"
+      ],
+      "prerequisites": [
+        "python-toolchain"
+      ],
       "difficulty": 2,
-      "summary": "分词、子词、词表构建——大模型理解文本的第一步"
+      "summary": "分词、子词、词表构建——大模型理解文本的第一步",
+      "custom_prompt": "用“乐高大师的魔改造”比喻Tokenzier：从最小积木块（字符/字节）开始，逐步合并高频对，拼出高效词表。必须拆解BPE的贪婪合并公式（统计相邻对→替换为新token）并建立直觉：就像不断把“th”粘成“the”节省空间。对比SentencePiece的字覆盖损失函数，强调其不依赖预分词（空格也视为字符）的自由度。行文侧重直观流程：先用大模型眼中的“字世界”引入，再逐步演示BPE合并、词表增长与SentencePiece的全局可控性，最后点明对LLM推理速度与泛化的影响。"
     },
     {
       "id": "gpt-series",
       "title": "GPT 家族进化史：从 GPT-1 到 GPT-4",
-      "tags": ["LLM", "GPT"],
-      "prerequisites": ["transformer"],
-      "difficulty": 2,
-      "summary": "解码器架构、规模定律、涌现能力——大语言模型的发展脉络"
+      "tags": [
+        "LLM",
+        "GPT"
+      ],
+      "prerequisites": [
+        "transformer"
+      ],
+      "difficulty": 3,
+      "summary": "解码器架构、规模定律、涌现能力——大语言模型的发展脉络",
+      "custom_prompt": "把GPT家族进化比作「智能手机系统迭代」：GPT-1是初代iOS，能打电话发短信；GPT-2是安卓2.3，App自由但卡顿；GPT-3是iOS 10，Siri突然听懂人话；GPT-4是鸿蒙万物互联，涌现系统级智能。必须拆解「解码器架构的自回归生成」——用“打英雄联盟时AI预测你下一步操作”建立直觉。重点解释「规模定律」：画一张横轴参数量、纵轴性能的S曲线图，指出拐点（1750亿参数）后的涌现能力并非玄学，而是“参数足够多时概率分布自然收敛”。行文突出工程取舍：GPT-3为何不开放代码？因为稀疏MoE训练成本是成本的10倍。"
     },
     {
       "id": "pretraining",
       "title": "预训练揭秘：大模型的海量数据学习",
-      "tags": ["LLM", "训练"],
-      "prerequisites": ["gpt-series"],
+      "tags": [
+        "LLM",
+        "训练"
+      ],
+      "prerequisites": [
+        "gpt-series"
+      ],
       "difficulty": 3,
-      "summary": "数据清洗、分布式训练、Scaling Law——数千 GPU 如何协同训练"
+      "summary": "数据清洗、分布式训练、Scaling Law——数千 GPU 如何协同训练",
+      "custom_prompt": "必须使用“全球最大的知识拼图大赛”类比：数十万块拼图（数据）需要清洗去噪、分类摆放；数千名工人（GPU）通过流水线（分布式训练）同时拼接，而经理（调度器）需要平衡效率与通信损耗。重点击破Scaling Law：用“拼图块数越多，最终画面的清晰度提升越明显，但后期每块拼图提升的边际收益递减”建立直觉。难度3要求在中层解释数据清洗的脏数据影响、分布式训练中的All-Reduce瓶颈，避免过度深入底层硬件。"
     },
     {
       "id": "finetuning",
       "title": "微调实战：让大模型适配你的业务",
-      "tags": ["LLM", "微调"],
-      "prerequisites": ["pretraining"],
+      "tags": [
+        "LLM",
+        "微调"
+      ],
+      "prerequisites": [
+        "pretraining"
+      ],
       "difficulty": 3,
-      "summary": "全参微调 vs 高效微调，SFT 数据准备与训练技巧"
+      "summary": "全参微调 vs 高效微调，SFT 数据准备与训练技巧",
+      "custom_prompt": "必须用「厨师精修米其林配方」类比：全参微调是更换全套厨具与食材，高效微调是仅调整调味料配方（LoRA等）。重点拆解「SFT数据质量 vs 数量」的直觉：低质量数据如同劣质油，再多也练不出好菜。行文侧重全参与高效微调的适用场景、数据清洗策略与过拟合预警，不加泛论，直击工程敏感点。"
     },
     {
       "id": "lora",
       "title": "LoRA 与 QLoRA：低秩适配的高效微调",
-      "tags": ["LLM", "微调", "高效"],
-      "prerequisites": ["finetuning"],
+      "tags": [
+        "LLM",
+        "微调",
+        "高效"
+      ],
+      "prerequisites": [
+        "finetuning"
+      ],
       "difficulty": 3,
-      "summary": "矩阵分解、量化、单卡微调 7B 模型——高效微调最佳实践"
+      "summary": "矩阵分解、量化、单卡微调 7B 模型——高效微调最佳实践",
+      "custom_prompt": "必须用“给大模型加装外挂显卡”类比：LoRA是低成本升级套件（低秩矩阵），QLoRA则是压缩显卡性能的同时保留效果。重点拆解核心公式 ΔW = BA（秩r远小于原维度），解释为什么低秩就能捕获关键特征变化。结合量化（NF4）解释QLoRA如何单卡跑7B。难度3侧重：先建立直觉，再展示量化与秩的工程权衡（速度 vs 精度），点出实践中秩的选择法则。"
     },
     {
       "id": "embeddings",
       "title": "文本嵌入：从 Word2Vec 到现代 Embedding 模型",
-      "tags": ["LLM", "NLP", "RAG"],
-      "prerequisites": ["transformer"],
+      "tags": [
+        "LLM",
+        "NLP",
+        "RAG"
+      ],
+      "prerequisites": [
+        "nn-basics"
+      ],
       "difficulty": 2,
-      "summary": "向量表示、语义相似度、嵌入模型选型——RAG 的前置知识"
+      "summary": "向量表示、语义相似度、嵌入模型选型——RAG 的前置知识",
+      "custom_prompt": "必须用“星系坐标”类比引入：每个词/句是星系中的恒星，Embedding是其空间坐标，语义相似即距离近。重点击破Word2Vec的CBOW/Skip-gram直觉：如何通过上下文预测习得向量，以及现代模型（如BERT）如何通过双向上下文生成动态嵌入。行文侧重：兼顾直觉与关键权衡——静态vs动态嵌入的适用场景，以及维度过大导致的计算与语义退化问题，为RAG选型埋下伏笔。"
     },
     {
       "id": "prompt-eng",
       "title": "Prompt Engineering 完全指南",
-      "tags": ["LLM", "Prompt", "应用"],
-      "prerequisites": ["gpt-series"],
+      "tags": [
+        "LLM",
+        "Prompt",
+        "应用"
+      ],
+      "prerequisites": [
+        "tokenizer"
+      ],
       "difficulty": 2,
-      "summary": "Few-shot、Chain-of-Thought、结构化输出——与大模型高效对话的艺术"
+      "summary": "Few-shot、Chain-of-Thought、结构化输出——与大模型高效对话的艺术",
+      "custom_prompt": "请使用“高阶编程语言的编译器优化”类比引入：Prompt Engineering就像为LLM这个超级编译器编写高效代码。重点拆解Few-shot（通过示例指定输入输出映射，类比类型推导）、Chain-of-Thought（强制中间变量与逐步求值，类比编译器IR优化）、结构化输出（用schemas约束输出格式，类比外部函数接口）。难度2：重视直觉与实用技巧，但必须解释每个技巧背后的概率本质与上下文窗口限制，避免玄学化。"
     },
     {
       "id": "rag",
       "title": "RAG 检索增强生成：原理与架构",
-      "tags": ["LLM", "RAG", "应用"],
-      "prerequisites": ["prompt-eng", "embeddings"],
+      "tags": [
+        "LLM",
+        "RAG",
+        "应用"
+      ],
+      "prerequisites": [
+        "prompt-eng",
+        "embeddings"
+      ],
       "difficulty": 3,
-      "summary": "向量数据库、文档分块、检索策略——让大模型拥有外部知识库"
+      "summary": "向量数据库、文档分块、检索策略——让大模型拥有外部知识库",
+      "custom_prompt": "使用“学者+私人图书馆馆长”的类比：大模型像天才学者，但记忆有限；RAG如同配备一位随时从海量书库中精准调取参考文献的馆长。必须拆解文档分块（chunking）策略（如按段落/语义分割对检索质量的影响）、向量化与相似度计算（结合余弦相似度与Top-K筛选建立直觉），以及检索结果如何与原始Prompt融合（拼接还是重排序？）。难度3需平衡宏观流程与工程权衡：重点说明chunk大小对召回率与困惑度的矛盾、向量索引（HNSW/IVF）的速度-精度取舍。"
     },
     {
       "id": "vector-db",
       "title": "向量数据库选型：Chroma、Milvus 与 Pinecone",
-      "tags": ["RAG", "工具", "数据库"],
-      "prerequisites": ["rag"],
+      "tags": [
+        "RAG",
+        "工具",
+        "数据库"
+      ],
+      "prerequisites": [
+        "rag"
+      ],
       "difficulty": 3,
-      "summary": "ANN 索引、HNSW 算法、性能对比——为你的 RAG 选对存储引擎"
+      "summary": "ANN 索引、HNSW 算法、性能对比——为你的 RAG 选对存储引擎",
+      "custom_prompt": "必须用“快递分拣系统”类比：Chroma是小区代收点（轻量全内存），Milvus是物流分拣中心（分布式高吞吐），Pinecone是快递专线SaaS（免运维托管）。重点击破HNSW算法：从跳表变体切入，解释“多层图 + 贪心搜索”如何平衡精度与速度，用“先走高速路（顶层粗搜），再走村道（底层精细搜）”建立直觉。深度侧重工程权衡：倒排索引 vs. 索引构建时间、内存占用 vs. 召回率、QPS vs. 延迟，给出选型决策树。"
     },
     {
       "id": "agent",
       "title": "AI Agent 核心原理：感知、规划与行动",
-      "tags": ["Agent", "LLM", "核心"],
-      "prerequisites": ["rag", "prompt-eng"],
+      "tags": [
+        "Agent",
+        "LLM",
+        "核心"
+      ],
+      "prerequisites": [
+        "rag",
+        "prompt-eng"
+      ],
       "difficulty": 4,
-      "summary": "ReAct、思维树、任务分解——让大模型从「聊天」进化为「干活」"
+      "summary": "ReAct、思维树、任务分解——让大模型从「聊天」进化为「干活」",
+      "custom_prompt": "必须用「交响乐团指挥」比喻Agent：指挥感知乐章（输入）、规划乐句分配（任务分解）、指挥各声部行动（工具调用），并强调实时纠错（ReAct循环）。重点击破ReAct公式：Action→Observation→Reasoning循环，用「指挥听到走音后立刻调整」建立直觉。难度4须深挖工程瓶颈：思维树搜索的采样效率与推理成本权衡，任务分解中「粒度-成功率」的帕累托边界，行动接口的延迟与容错设计。"
     },
     {
       "id": "func-calling",
       "title": "Function Calling：大模型与外部工具的桥梁",
-      "tags": ["Agent", "LLM", "工具"],
-      "prerequisites": ["agent"],
+      "tags": [
+        "Agent",
+        "LLM",
+        "工具"
+      ],
+      "prerequisites": [
+        "agent"
+      ],
       "difficulty": 4,
-      "summary": "工具定义、JSON Schema、并行调用——让 AI 操作 API 和数据库"
+      "summary": "工具定义、JSON Schema、并行调用——让 AI 操作 API 和数据库",
+      "custom_prompt": "用“操作系统系统调用”类比Function Calling：LLM是内核，外部API/数据库是硬件设备，JSON Schema是设备驱动接口定义，tool_choice是系统调用号。必须拆解双重调用流程（LLM→函数→结果回馈），并重点击破JSON Schema强类型定义如何规避参数幻觉。行文侧重工程权衡：并行调用带来的并发控制与错误隔离成本，以及tool_choice=auto/none/required不同策略对任务延迟与可控性的影响。"
     },
     {
       "id": "multi-agent",
       "title": "Multi-Agent 协作：AI 团队的构建与编排",
-      "tags": ["Agent", "协作"],
-      "prerequisites": ["agent"],
+      "tags": [
+        "Agent",
+        "协作"
+      ],
+      "prerequisites": [
+        "agent"
+      ],
       "difficulty": 4,
-      "summary": "角色分工、消息传递、任务调度——多个 AI Agent 如何组队作战"
+      "summary": "角色分工、消息传递、任务调度——多个 AI Agent 如何组队作战",
+      "custom_prompt": "必须使用\"分布式微服务架构\"类比：每个Agent是独立部署的服务，通过消息队列通信，由编排器或选举机制调度。重点击破消息传递中的同步阻塞 vs 异步回调权衡，以及共识机制（如Raft变体）在决策时的延迟与一致性代价。难度4需聚焦工程实现：讨论通信开销的量化计算、集中式编排与动态自组织的效率对比、任务依赖图中的拓扑排序与死锁风险——用实际Agent协作场景（如代码多步生成）展示权衡。"
     },
     {
       "id": "rlhf",
       "title": "RLHF：让模型对齐人类偏好",
-      "tags": ["LLM", "训练", "安全"],
-      "prerequisites": ["pretraining"],
+      "tags": [
+        "LLM",
+        "训练",
+        "安全"
+      ],
+      "prerequisites": [
+        "pretraining"
+      ],
       "difficulty": 4,
-      "summary": "奖励模型、PPO、DPO——从「能说话」到「说人话」的关键技术"
+      "summary": "奖励模型、PPO、DPO——从「能说话」到「说人话」的关键技术",
+      "custom_prompt": "使用「驯兽师用响片训练海豚」类比：响片（奖励模型）标记正确行为，而非直接给鱼吃。核心击破PPO的剪切损失函数：用「安全带限制急转弯」直观解释KL散度约束，避免策略崩塌。工程侧重：深挖奖励黑客（Reward Hacking）和奖励过度优化（Overoptimization）的权衡，以及DPO如何通过偏好对直接优化，省去奖励模型的计算瓶颈。"
     },
     {
       "id": "ai-safety",
       "title": "AI 安全与对齐：大模型的护栏设计",
-      "tags": ["安全", "对齐", "LLM"],
-      "prerequisites": ["rlhf"],
+      "tags": [
+        "安全",
+        "对齐",
+        "LLM"
+      ],
+      "prerequisites": [
+        "rlhf",
+        "eval"
+      ],
       "difficulty": 4,
-      "summary": "红队测试、越狱防御、内容审核——构建安全的 AI 系统"
+      "summary": "红队测试、越狱防御、内容审核——构建安全的 AI 系统",
+      "custom_prompt": "用“要塞防御体系”类比AI安全：红队测试如渗透测试，越狱攻击似挖地道，RLHF则是训练免疫细胞。重点拆解“对抗训练”与“偏好对齐”的博弈——必须从奖励黑客（Reward Hacking）与泛化能力权衡切入，揭示安全护栏如何随攻击进化而失效。行文聚焦工程瓶颈：计算成本与鲁棒性的矛盾，以及模式崩溃与有用性之间的取舍。"
     },
     {
       "id": "eval",
       "title": "大模型评估：Benchmark 与人类偏好",
-      "tags": ["LLM", "评估"],
-      "prerequisites": ["gpt-series"],
+      "tags": [
+        "LLM",
+        "评估"
+      ],
+      "prerequisites": [
+        "gpt-series"
+      ],
       "difficulty": 3,
-      "summary": "MMLU、HumanEval、Chatbot Arena——如何科学地评判模型能力"
+      "summary": "MMLU、HumanEval、Chatbot Arena——如何科学地评判模型能力",
+      "custom_prompt": "必须使用“高考与职场晋升”的类比引入：MMLU、HumanEval就像标准化考试（考记忆与解题），Chatbot Arena则是老板与同事对你长期协作能力的打分。重点拆解MMLU的57科目覆盖逻辑、HumanEval的通过率统计，以及Chatbot Arena的Elo评分如何模拟人类偏好。行文侧重揭示benchmark的局限性（“考霸≠实干家”）与人类评估的主观性，强调客观性与生态效度的权衡。"
     },
     {
       "id": "inference-opt",
       "title": "推理优化：量化、KV Cache 与投机解码",
-      "tags": ["LLM", "优化", "部署"],
-      "prerequisites": ["transformer", "pretraining"],
+      "tags": [
+        "LLM",
+        "优化",
+        "部署"
+      ],
+      "prerequisites": [
+        "transformer",
+        "pretraining"
+      ],
       "difficulty": 4,
-      "summary": "INT4/INT8 量化、Flash Attention、vLLM——让大模型跑得更快更省"
+      "summary": "INT4/INT8 量化、Flash Attention、vLLM——让大模型跑得更快更省",
+      "custom_prompt": "用“物流管道改造”类比：量化如同将精密零件换成标准件（精度换通量），KV Cache是增设中转仓库（复用历史注意力），投机解码是双传送带并行（轻量模型预判+主模型校验）。核心击破：量化必须讲清INT4/INT8的数值映射与校准（最小化均方误差）；KV Cache需从计算瓶颈推导O(n²)显存消耗（每步保存key/value矩阵）；投机解码要定义接受率与加速比公式。行文侧重：每个技术的工程下限——量化需处理outlier；KV Cache需实现paged memory；投机解码需平衡模型差异与回滚成本。"
     },
     {
       "id": "multimodal",
       "title": "多模态大模型：视觉与语言的融合",
-      "tags": ["多模态", "LLM", "前沿"],
-      "prerequisites": ["transformer", "cnn"],
+      "tags": [
+        "多模态",
+        "LLM",
+        "前沿"
+      ],
+      "prerequisites": [
+        "transformer",
+        "cnn"
+      ],
       "difficulty": 4,
-      "summary": "视觉编码器、跨模态对齐、GPT-4V 架构推演——AI 的「眼」与「脑」"
+      "summary": "视觉编码器、跨模态对齐、GPT-4V 架构推演——AI 的「眼」与「脑」",
+      "custom_prompt": "用「盲人摸象」团队协作的笑话类比——每个模态是不同感官，多模态大模型是让盲人开会整合出大象全貌。必须拆解视觉编码器（ViT）如何将图像切为patch token，对比学习损失（CLIP loss）如何对齐图文空间，并指明GPT-4V用Q-Former或Perceiver降采样视觉token的工程权衡：牺牲分辨率换取推理速度，同时揭示KV Cache在视觉token激增时的内存爆炸困境。行文聚焦模态对齐的精度与效率矛盾，突出实际落地的取舍。"
     },
     {
       "id": "open-source",
       "title": "开源大模型生态：Llama、DeepSeek 与 Mistral",
-      "tags": ["LLM", "开源", "生态"],
-      "prerequisites": ["gpt-series"],
-      "difficulty": 2,
-      "summary": "开源 vs 闭源、模型选型、社区生态——选择适合你的开源大模型"
+      "tags": [
+        "LLM",
+        "开源",
+        "生态"
+      ],
+      "prerequisites": [
+        "gpt-series"
+      ],
+      "difficulty": 3,
+      "summary": "开源 vs 闭源、模型选型、社区生态——选择适合你的开源大模型",
+      "custom_prompt": "必须使用「不同风格的主厨公开食谱」类比：Llama如同米其林大厨的标准化菜谱（严谨稳定），DeepSeek像私房菜馆的定制菜谱（极致性价比），Mistral则如街边小店的极简菜谱（轻快灵活）。重点拆解「参数规模与性能的边际收益曲线」——用百人主厨团队 vs 十人精英团队说明，而非复杂公式。行文侧重宏观生态对比，强调选型直觉：闭源是吃独食，开源是共享厨房，社区生态决定菜谱迭代速度。"
     },
     {
       "id": "ai-coding",
       "title": "AI 编程助手：Cursor、Copilot 与 Aider 深度使用",
-      "tags": ["工具", "编程", "应用"],
-      "prerequisites": ["gpt-series"],
-      "difficulty": 2,
-      "summary": "代码补全、重构、测试生成——AI 如何改变软件开发的日常工作流"
+      "tags": [
+        "工具",
+        "编程",
+        "应用"
+      ],
+      "prerequisites": [
+        "gpt-series",
+        "prompt-eng"
+      ],
+      "difficulty": 3,
+      "summary": "代码补全、重构、测试生成——AI 如何改变软件开发的日常工作流",
+      "custom_prompt": "必须用「驾驶辅助系统与手动驾驶」作类比：自动补全如车道保持，对话重构如自适应巡航，完整代理如全自动驾驶。核心拆解「上下文窗口」与「令牌预测」：用代码前缀+后缀推断中间缺失逻辑建立直觉。难度2侧重工具间「交互深度」与「自动化程度」的权衡——从输入提示到自然语言指令的演进，并展示重构场景下三种工具的实际决策路径对比。"
     },
     {
       "id": "agent-practice",
       "title": "AI Agent 实战：从零搭建你的第一个智能助手",
-      "tags": ["Agent", "实战"],
-      "prerequisites": ["agent", "func-calling"],
+      "tags": [
+        "Agent",
+        "实战"
+      ],
+      "prerequisites": [
+        "agent",
+        "func-calling"
+      ],
       "difficulty": 4,
-      "summary": "完整项目：LangChain/LlamaIndex 搭建可调用工具、查数据库的 AI Agent"
+      "summary": "完整项目：LangChain/LlamaIndex 搭建可调用工具、查数据库的 AI Agent",
+      "custom_prompt": "必须用「公司CEO组建跨部门团队」类比：Agent是CEO，LLM是战略决策者，工具是各部门负责人，数据库是公司档案室。重点击破ReAct（Reason+Act）循环，通过状态机拆解意图解析→工具调用→结果反馈的闭环。难度4需深挖工程瓶颈：工具调用延迟与思维链长度的权衡、错误恢复的降级策略、上下文窗口的智能截断。"
     }
   ]
 }

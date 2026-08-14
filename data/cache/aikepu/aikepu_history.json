@@ -1,0 +1,23 @@
+{
+  "2026-08-06": [
+    {
+      "node_id": "math-basics",
+      "title": "AI 必备数学基础：线性代数、概率论与梯度下降",
+      "status": "published",
+      "time": "13:35:17"
+    },
+    {
+      "node_id": "ml-basics",
+      "title": "机器学习入门：从线性回归到过拟合",
+      "status": "published",
+      "time": "13:35:20"
+    },
+    {
+      "node_id": "python-toolchain",
+      "title": "AI 开发工具链：PyTorch、Jupyter 与 GPU 环境搭建",
+      "status": "draft",
+      "time": "13:41:06",
+      "draft_id": "LJezKlMwKoGqLNf2RzG5KH88k6I6w4cKQqdpQl0alsWdQHQcZTlyzbrR1kYL_0En"
+    }
+  ]
+}

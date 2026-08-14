@@ -241,12 +241,28 @@ class WeChatPublisher:
         if not self.access_token or not image_path or not os.path.exists(image_path):
             return None
 
+        # 安全防爆检查：如果图片大于 1.8MB (如 SD 生图 6-8MB)，自动压缩至 2MB 微信封面限制以内
+        try:
+            if os.path.getsize(image_path) > 1.8 * 1024 * 1024:
+                logger.info("  🖼️ 封面图片文件较重 ({:.2f} MB)，执行 1.8MB 自动优化压缩...", os.path.getsize(image_path)/(1024*1024))
+                from utils.image_handler import resize_for_wechat
+                image_path = resize_for_wechat(image_path, purpose="cover")
+        except Exception as pre_err:
+            logger.debug("  封面预处理检查跳过: {}", pre_err)
+
+        mime_type = "image/png" if image_path.lower().endswith(".png") else "image/jpeg"
+        if image_path.lower().endswith(".gif"):
+            mime_type = "image/gif"
+        elif image_path.lower().endswith(".webp"):
+            mime_type = "image/webp"
+
         for attempt in range(2):
             # 1. 优先尝试永久素材接口 (草稿箱封面必须为永久素材，临时素材会报 invalid media_id)
             url_perm = f"https://api.weixin.qq.com/cgi-bin/material/add_material?access_token={self.access_token}&type=thumb"
             try:
                 with open(image_path, 'rb') as f:
-                    files = {'media': (os.path.basename(image_path), f, 'image/jpeg')}
+                    safe_filename = f"cover{os.path.splitext(image_path)[1]}"
+                    files = {'media': (safe_filename, f, mime_type)}
                     res = self.session.post(url_perm, files=files, timeout=WECHAT_API_TIMEOUT).json()
                 
                 if "media_id" in res:
@@ -268,7 +284,8 @@ class WeChatPublisher:
             url_temp = f"https://api.weixin.qq.com/cgi-bin/media/upload?access_token={self.access_token}&type=thumb"
             try:
                 with open(image_path, 'rb') as f:
-                    files = {'media': (os.path.basename(image_path), f, 'image/jpeg')}
+                    safe_filename = f"cover{os.path.splitext(image_path)[1]}"
+                    files = {'media': (safe_filename, f, mime_type)}
                     res = self.session.post(url_temp, files=files, timeout=WECHAT_API_TIMEOUT).json()
                 
                 if "thumb_media_id" in res:
@@ -295,12 +312,28 @@ class WeChatPublisher:
         self._ensure_valid_token()
         if not self.access_token or not image_path or not os.path.exists(image_path):
             return None
-        
+
+        # 安全防爆检查：如果正文插图大于 1.8MB (如高清生图 6-8MB)，自动压缩至 1.8MB 以内
+        try:
+            if os.path.getsize(image_path) > 1.8 * 1024 * 1024:
+                logger.info("  🖼️ 正文插图文件较重 ({:.2f} MB)，执行 1.8MB 自动优化压缩...", os.path.getsize(image_path)/(1024*1024))
+                from utils.image_handler import resize_for_wechat
+                image_path = resize_for_wechat(image_path, purpose="body")
+        except Exception as pre_err:
+            logger.debug("  正文插图预处理检查跳过: {}", pre_err)
+
+        mime_type = "image/png" if image_path.lower().endswith(".png") else "image/jpeg"
+        if image_path.lower().endswith(".gif"):
+            mime_type = "image/gif"
+        elif image_path.lower().endswith(".webp"):
+            mime_type = "image/webp"
+
         for attempt in range(2):
             url = f"https://api.weixin.qq.com/cgi-bin/media/uploadimg?access_token={self.access_token}"
             try:
                 with open(image_path, 'rb') as f:
-                    files = {'media': (os.path.basename(image_path), f, 'image/jpeg')}
+                    safe_filename = f"image{os.path.splitext(image_path)[1]}"
+                    files = {'media': (safe_filename, f, mime_type)}
                     res = self.session.post(url, files=files, timeout=WECHAT_API_TIMEOUT).json()
                 
                 if "url" in res:
@@ -329,10 +362,12 @@ class WeChatPublisher:
         data = {"offset": 0, "count": count, "no_content": 1}
         titles = []
         try:
-            res = self.session.post(url, json=data, timeout=WECHAT_API_TIMEOUT).json()
-            for item in res.get("item", []):
+            res = self.session.post(url, json=data, timeout=WECHAT_API_TIMEOUT)
+            res_data = json.loads(res.content.decode('utf-8'))
+            for item in res_data.get("item", []):
                 for news in item.get("content", {}).get("news_item", []):
-                    titles.append(news.get("title", ""))
+                    if news.get("title"):
+                        titles.append(news.get("title"))
         except Exception as exc:
             logger.warning("获取草稿标题失败: {}", exc)
         return titles
@@ -346,10 +381,12 @@ class WeChatPublisher:
         data = {"offset": 0, "count": count, "no_content": 1}
         titles = []
         try:
-            res = self.session.post(url, json=data, timeout=WECHAT_API_TIMEOUT).json()
-            for item in res.get("item", []):
+            res = self.session.post(url, json=data, timeout=WECHAT_API_TIMEOUT)
+            res_data = json.loads(res.content.decode('utf-8'))
+            for item in res_data.get("item", []):
                 for news in item.get("content", {}).get("news_item", []):
-                    titles.append(news.get("title", ""))
+                    if news.get("title"):
+                        titles.append(news.get("title"))
         except Exception as exc:
             logger.warning("获取发布标题失败: {}", exc)
         return titles
@@ -451,6 +488,18 @@ class WeChatPublisher:
             f'{html_content}'
             '</section>'
         )
+
+        # 校验微信公众号正文体积限制 (不得超过 10M 字节 / 10,485,760 字节)
+        content_bytes = len(styled_html.encode('utf-8'))
+        max_bytes = 10 * 1024 * 1024  # 10MB
+        if content_bytes > max_bytes:
+            logger.warning(
+                "  ⚠️ 文章正文体积 ({:.2f} MB) 超过微信 10MB (10,485,760 字节) 限制，正在执行安全截断保护...",
+                content_bytes / (1024 * 1024)
+            )
+            safe_limit = max_bytes - 102400
+            truncated_bytes = styled_html.encode('utf-8')[:safe_limit]
+            styled_html = truncated_bytes.decode('utf-8', errors='ignore') + '</section>'
 
         if not digest:
             digest = title[:60]

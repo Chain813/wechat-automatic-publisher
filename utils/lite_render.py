@@ -234,6 +234,33 @@ def render_comparison_card(title, columns, rows, output_path="compare.png"):
         return False
 
 
+def _wrap_chinese_text(text, max_units=40):
+    """
+    针对中英混合文本的自适应折行函数：
+    中文字符/全角标点计为 2 个单位宽度，英文字符/数字/半角标点计为 1 个单位宽度。
+    """
+    if not text:
+        return ""
+    lines = []
+    current_line = ""
+    current_units = 0
+
+    for char in text:
+        unit = 2 if ord(char) > 127 else 1
+        if current_units + unit > max_units and current_line:
+            lines.append(current_line)
+            current_line = char
+            current_units = unit
+        else:
+            current_line += char
+            current_units += unit
+
+    if current_line:
+        lines.append(current_line)
+
+    return "\n".join(lines)
+
+
 def render_text_card(title, bullet_points, output_path="card.png"):
     """
     使用 Matplotlib 渲染要点清单卡片。
@@ -260,8 +287,9 @@ def render_text_card(title, bullet_points, output_path="card.png"):
         ]
         rcParams["axes.unicode_minus"] = False
 
-        n = len(bullet_points)
-        fig_height = max(3, 1.2 + n * 0.55)
+        wrapped_points = [_wrap_chinese_text(point, max_units=40) for point in bullet_points]
+        total_lines = sum(len(p.splitlines()) for p in wrapped_points)
+        fig_height = max(3, 1.2 + total_lines * 0.45)
         fig, ax = plt.subplots(figsize=(8, fig_height))
         fig.patch.set_facecolor("#0b0e14")
         ax.set_facecolor("#0b0e14")
@@ -283,9 +311,9 @@ def render_text_card(title, bullet_points, output_path="card.png"):
             fontsize=15, fontweight="bold", color="#38bdf8"
         )
 
-        for i, point in enumerate(bullet_points):
+        n = len(wrapped_points)
+        for i, wrapped in enumerate(wrapped_points):
             y = 0.82 - i * (0.75 / max(n, 1))
-            wrapped = textwrap.fill(point, width=45)
             ax.text(
                 0.08, y, f"• {wrapped}",
                 ha="left", va="top",

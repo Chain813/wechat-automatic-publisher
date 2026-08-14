@@ -31,12 +31,17 @@ def _save_publish_result(topic, success, draft_id=None, error=None):
     session = db_manager.get_session()
     existing = session.query(ArticleHistory).filter_by(title=topic, source_type="hotspots").order_by(ArticleHistory.id.desc()).first()
     if existing:
-        existing.success_status = success
-        existing.media_id = draft_id
-        existing.error_log = str(error) if error else None
+        if success:
+            existing.success_status = success
+            existing.media_id = draft_id
+            existing.error_log = None
+        else:
+            # 发布失败：删除本地缓存，以便下次重试
+            session.delete(existing)
     else:
-        ah = ArticleHistory(title=topic, source_type="hotspots", publish_date=datetime.now().strftime("%Y-%m-%d"), success_status=success, media_id=draft_id, error_log=str(error) if error else None)
-        session.add(ah)
+        if success:
+            ah = ArticleHistory(title=topic, source_type="hotspots", publish_date=datetime.now().strftime("%Y-%m-%d"), success_status=success, media_id=draft_id, error_log=None)
+            session.add(ah)
     session.commit()
 
 def _get_past_topics(days=7):
@@ -237,6 +242,8 @@ class ParallelPublishNode(BaseNode):
                     published_count += 1
                 elif error:
                     logger.warning("  「{}」发布失败: {}", topic, error)
+                    # 边界条件防护：如果是因文章生成异常等早期流程退出的，统一在这里清理本地占位历史缓存
+                    _save_publish_result(topic, success=False, error=error)
 
         print(f"\n{'⭐' * 30}\n  本次运行完成：成功发布 {published_count}/{len(valid_topics)} 篇\n{'⭐' * 30}")
         return True

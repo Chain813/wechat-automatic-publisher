@@ -19,10 +19,10 @@
     width: 100%;
     min-height: 120px;
     padding: 14px 16px;
-    background: rgba(30, 41, 59, 0.6);
-    border: 1px solid rgba(148, 163, 184, 0.2);
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
     border-radius: 12px;
-    color: #f1f5f9;
+    color: #0f172a;
     font-family: 'Consolas', 'Monaco', monospace;
     font-size: 13px;
     line-height: 1.6;
@@ -37,16 +37,16 @@
 }
 
 .studio-input-area textarea::placeholder {
-    color: rgba(148, 163, 184, 0.5);
+    color: #94a3b8;
 }
 
 .studio-title-input {
     width: 100%;
     padding: 10px 14px;
-    background: rgba(30, 41, 59, 0.6);
-    border: 1px solid rgba(148, 163, 184, 0.2);
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
     border-radius: 10px;
-    color: #f1f5f9;
+    color: #0f172a;
     font-size: 14px;
     font-weight: 600;
 }
@@ -57,7 +57,7 @@
 }
 
 .studio-title-input::placeholder {
-    color: rgba(148, 163, 184, 0.5);
+    color: #94a3b8;
     font-weight: 400;
 }
 
@@ -75,8 +75,8 @@
 }
 
 .prompt-card {
-    background: rgba(30, 41, 59, 0.5);
-    border: 1px solid rgba(148, 163, 184, 0.15);
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
     border-radius: 14px;
     padding: 18px;
     transition: all 0.3s ease;
@@ -110,7 +110,7 @@
 .prompt-card-keyword {
     font-size: 15px;
     font-weight: 600;
-    color: #e2e8f0;
+    color: #0f172a;
     flex: 1;
     margin-left: 10px;
 }
@@ -132,21 +132,21 @@
 }
 
 .prompt-text {
-    background: rgba(15, 23, 42, 0.5);
+    background: #f8fafc;
     border-radius: 8px;
     padding: 10px 12px;
     margin-bottom: 14px;
     font-family: 'Consolas', monospace;
     font-size: 12.5px;
     line-height: 1.5;
-    color: #94a3b8;
+    color: #475569;
     word-break: break-word;
     user-select: all;
 }
 
 /* 拖拽区域 */
 .drop-zone {
-    border: 2px dashed rgba(148, 163, 184, 0.25);
+    border: 2px dashed #cbd5e1;
     border-radius: 12px;
     padding: 28px 16px;
     text-align: center;
@@ -180,12 +180,12 @@
 
 .drop-zone-text {
     font-size: 13px;
-    color: rgba(148, 163, 184, 0.6);
+    color: #64748b;
 }
 
 .drop-zone-hint {
     font-size: 11px;
-    color: rgba(148, 163, 184, 0.4);
+    color: #94a3b8;
 }
 
 /* 图片已上传状态 */
@@ -269,7 +269,7 @@
     align-items: center;
     gap: 12px;
     padding: 12px 16px;
-    background: rgba(30, 41, 59, 0.4);
+    background: #f1f5f9;
     border-radius: 10px;
 }
 
@@ -290,7 +290,7 @@
 
 .studio-progress-text {
     font-size: 13px;
-    color: #94a3b8;
+    color: #475569;
     white-space: nowrap;
 }
 
@@ -298,7 +298,7 @@
 .studio-empty {
     text-align: center;
     padding: 60px 20px;
-    color: rgba(148, 163, 184, 0.5);
+    color: #94a3b8;
 }
 
 .studio-empty-icon {
@@ -314,7 +314,7 @@
 
 .studio-empty-hint {
     font-size: 13px;
-    color: rgba(148, 163, 184, 0.35);
+    color: #94a3b8;
 }
 
 /* Loading spinner */
@@ -324,7 +324,7 @@
     justify-content: center;
     gap: 10px;
     padding: 30px;
-    color: #94a3b8;
+    color: #475569;
     font-size: 14px;
 }
 

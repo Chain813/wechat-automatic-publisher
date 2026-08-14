@@ -1,4 +1,5 @@
 import os
+import re
 import threading
 from flask import Flask, render_template, jsonify, request
 from core.shared.runtime import configure_runtime, log_queue
@@ -15,6 +16,7 @@ from apscheduler.triggers.cron import CronTrigger
 from core.db.manager import db_manager
 
 app = Flask(__name__)
+app.config['TEMPLATES_AUTO_RELOAD'] = True
 _start_lock = threading.Lock()
 
 # ---- APScheduler 配置 ----
@@ -111,8 +113,12 @@ class PrintRedirector:
 
 def run_workflow_thread(task_type="hotspots"):
     from core.shared.runtime import cancel_event, pause_event, WorkflowCancelled
-    ProcessState.set_running(True)
-    ProcessState.set_paused(False)
+    with _start_lock:
+        if ProcessState.is_running:
+            logger.warning("已有任务在运行中，跳过本次触发: {}", task_type)
+            return
+        ProcessState.set_running(True)
+        ProcessState.set_paused(False)
     cancel_event.clear()
     pause_event.set()  # 确保开始时是运行状态
     old_stdout = sys.stdout
@@ -237,7 +243,7 @@ def start_process():
             return jsonify({"status": "error", "message": "Task already running"}), 400
         data = request.json or {}
         task_type = data.get("task_type", "hotspots")
-        if task_type not in ("hotspots", "github", "aikepu"):
+        if task_type not in ("hotspots", "github", "aikepu", "daily_knowledge"):
             return jsonify({"status": "error", "message": f"Invalid task_type: {task_type}"}), 400
         ProcessState.thread = threading.Thread(target=run_workflow_thread, args=(task_type,), daemon=True)
         ProcessState.thread.start()
@@ -351,6 +357,22 @@ def handle_config():
         # 重置全局缓存以使新配置生效
         global _publisher_instance
         _publisher_instance = None
+
+        try:
+            import config
+            config.WECHAT_APP_ID = os.getenv("WECHAT_APP_ID", "")
+            config.WECHAT_APP_SECRET = os.getenv("WECHAT_APP_SECRET", "")
+            config.LLM_API_KEY = os.getenv("LLM_API_KEY", "")
+            config.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+            config.QYWECHAT_WEBHOOK = os.getenv("QYWECHAT_WEBHOOK", "")
+            config.LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-v4-pro")
+            config.IMAGE_GEN_MODEL = os.getenv("IMAGE_GEN_MODEL", "Google Gemini Imagen 3")
+            
+            from core.aikepu.skill_tree import invalidate_published_ids_cache, reset_tree_cache
+            invalidate_published_ids_cache()
+            reset_tree_cache()
+        except Exception as e:
+            logger.debug("配置保存刷新依赖配置异常: {}", e)
         
         return jsonify({"status": "success", "message": "Config saved"})
 
@@ -413,6 +435,8 @@ def get_history():
     except Exception as e:
         logger.exception("获取历史记录失败: {}", e)
         return jsonify({"sent": [], "unsent": [], "error": str(e)})
+    finally:
+        db_manager.remove_session()
 
 
 @app.route('/api/history/mark_published', methods=['POST'])
@@ -433,6 +457,8 @@ def mark_published():
         return jsonify({"status": "success", "message": "标记更新成功"})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        db_manager.remove_session()
 
 
 @app.route('/api/system/llm_cache_stats', methods=['GET'])
@@ -457,9 +483,11 @@ def trigger_warmup():
 @app.route('/api/aikepu/tree_stats', methods=['GET'])
 def get_aikepu_tree_stats():
     try:
-        from core.aikepu.skill_tree import get_skill_tree_stats, get_available_nodes
-        stats = get_skill_tree_stats()
-        available = get_available_nodes()
+        force_refresh = request.args.get("force") == "1" or request.args.get("refresh") == "1"
+        from core.aikepu.skill_tree import get_skill_tree_stats, get_available_nodes, get_published_ids
+        published_ids = get_published_ids(force_refresh=force_refresh)
+        available = get_available_nodes(published_ids=published_ids)
+        stats = get_skill_tree_stats(published_ids=published_ids, available_nodes=available)
         stats["available_nodes"] = [
             {
                 "id": n.get("id"),
@@ -472,6 +500,96 @@ def get_aikepu_tree_stats():
         return jsonify({"status": "success", "stats": stats})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
+
+
+@app.route('/api/aikepu/full_tree', methods=['GET'])
+def get_aikepu_full_tree():
+    try:
+        force_refresh = request.args.get("force") == "1" or request.args.get("refresh") == "1"
+        from core.aikepu.skill_tree import load_skill_tree, get_published_ids, get_draft_ids, get_available_nodes, get_skill_tree_stats, set_node_status
+        tree = load_skill_tree()
+        published_ids = get_published_ids(force_refresh=force_refresh)
+        draft_ids = get_draft_ids()
+        available_nodes = get_available_nodes(published_ids=published_ids)
+        available_ids = [n["id"] for n in available_nodes]
+        stats = get_skill_tree_stats(published_ids=published_ids, available_nodes=available_nodes)
+        
+        return jsonify({
+            "status": "success",
+            "meta": tree.get("meta", {}),
+            "nodes": tree.get("nodes", []),
+            "published_ids": published_ids,
+            "draft_ids": draft_ids,
+            "available_ids": available_ids,
+            "stats": stats
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+
+@app.route('/api/aikepu/sync_wechat', methods=['POST'])
+def sync_aikepu_wechat():
+    try:
+        from core.aikepu.skill_tree import sync_wechat_status
+        result = sync_wechat_status()
+        conn_msg = "（已成功连接微信 API）" if result.get("wechat_connected") else "（微信凭证未配置或连接受限，已同步本地与数据库状态）"
+        msg = f"微信公众号同步完成{conn_msg}：包含 {result.get('published_titles_count', 0)} 篇已发表推文，{result.get('draft_titles_count', 0)} 篇草稿箱文章。"
+        return jsonify({
+            "status": "success",
+            "message": msg,
+            "result": result
+        })
+    except Exception as e:
+        logger.error("同步微信公众号失败: {}", e)
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/aikepu/set_node_status', methods=['POST'])
+def set_aikepu_node_status():
+    data = request.json or {}
+    node_id = data.get("node_id")
+    status = data.get("status", "published") # 'published', 'draft', 'reset'
+    if not node_id:
+        return jsonify({"status": "error", "message": "Missing node_id"}), 400
+
+    try:
+        from core.aikepu.skill_tree import set_node_status, get_published_ids, get_available_nodes, get_skill_tree_stats
+        success = set_node_status(node_id, status=status)
+        published_ids = get_published_ids()
+        available_nodes = get_available_nodes(published_ids=published_ids)
+        stats = get_skill_tree_stats(published_ids=published_ids, available_nodes=available_nodes)
+        return jsonify({
+            "status": "success",
+            "message": f"节点 [{node_id}] 状态已设置为 {status}",
+            "published_ids": published_ids,
+            "stats": stats
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/aikepu/generate_node', methods=['POST'])
+def generate_specific_node():
+    data = request.json or {}
+    node_id = data.get("node_id")
+    if not node_id:
+        return jsonify({"status": "error", "message": "Missing node_id"}), 400
+
+    with _start_lock:
+        if ProcessState.is_running:
+            return jsonify({"status": "error", "message": "工作流正在运行中，请等待完成后再发起"}), 400
+        
+        # 预设定要生成的节点
+        try:
+            from core.aikepu.skill_tree import select_next_topic
+            select_next_topic(override_node_id=node_id)
+        except Exception as e:
+            logger.warning("手动预选节点异常: {}", e)
+
+        ProcessState.thread = threading.Thread(target=run_workflow_thread, args=("aikepu",), daemon=True)
+        ProcessState.thread.start()
+
+    return jsonify({"status": "success", "message": f"已启动指定节点 [{node_id}] 的撰写工作流"})
 
 
 @app.route('/api/history/delete', methods=['POST'])
@@ -502,7 +620,7 @@ def delete_history():
         deleted_count = 0
         
         for record in records:
-            # 同时也尝试清理本地的预览 HTML 缓存文件
+            # 1. 尝试清理本地的预览 HTML 缓存文件
             import hashlib
             title_hash = hashlib.md5(record.title.encode('utf-8')).hexdigest()
             preview_id = record.media_id if record.success_status else f"fail_{title_hash}"
@@ -512,6 +630,25 @@ def delete_history():
                     os.remove(local_path)
                 except Exception:
                     pass
+
+            # 2. 清理 data/markdown/ 中对应的 Markdown 源文件
+            try:
+                markdown_dir = os.path.join("data", "markdown")
+                if os.path.exists(markdown_dir) and record.title:
+                    clean_record_title = re.sub(r'[^\w\u4e00-\u9fff]', '', record.title).lower()
+                    zh_words = "".join(re.findall(r'[\u4e00-\u9fff]+', record.title))
+                    for fname in os.listdir(markdown_dir):
+                        if fname.endswith(".md"):
+                            clean_fname = re.sub(r'[^\w\u4e00-\u9fff]', '', fname).lower()
+                            match_full = clean_record_title and (clean_record_title in clean_fname or clean_fname.replace("md", "") in clean_record_title)
+                            match_zh = len(zh_words) >= 4 and zh_words in fname
+                            if match_full or match_zh:
+                                md_file_path = os.path.join(markdown_dir, fname)
+                                if os.path.exists(md_file_path):
+                                    os.remove(md_file_path)
+                                    logger.info("  📄 成功同步删除 data/markdown 关联文档: {}", fname)
+            except Exception as md_del_err:
+                logger.warning("删除关联 Markdown 文件异常: {}", md_del_err)
             
             if record.source_type == "aikepu" or getattr(record, 'source_type', '') == 'aikepu':
                 try:
@@ -528,6 +665,8 @@ def delete_history():
     except Exception as e:
         logger.exception("删除文章记录失败: {}", e)
         return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        db_manager.remove_session()
 
 
 @app.route('/api/preview/<preview_id>', methods=['GET'])

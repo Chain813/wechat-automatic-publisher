@@ -164,6 +164,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 sourcesPollInterval = setInterval(loadSources, 3000);
             }
             if (targetId === 'schedule') loadSchedule();
+            if (targetId === 'skill-tree-view') loadSkillTreeVisualizer();
         });
     });
 
@@ -190,7 +191,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- Process Control ---
-    const btnStart = document.getElementById('btn-start');
+    const moduleStartBtns = document.querySelectorAll('.btn-module-start');
+    const activeTaskControls = document.getElementById('active-task-controls');
+    const activeTaskLabel = document.getElementById('active-task-label');
     const btnPause = document.getElementById('btn-pause');
     const btnResume = document.getElementById('btn-resume');
     const btnStop = document.getElementById('btn-stop');
@@ -198,22 +201,33 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusText = document.getElementById('status-text');
     let isRunning = false;
     let isPaused = false;
+    let currentTaskName = '';
 
     function setRunningState(running, paused = false) {
         isRunning = running;
         isPaused = paused;
 
-        const startText = currentLang === 'zh' ? '开始' : 'Start';
         const stopText = currentLang === 'zh' ? '停止' : 'Stop';
         const pauseText = currentLang === 'zh' ? '暂停' : 'Pause';
         const resumeText = currentLang === 'zh' ? '恢复' : 'Resume';
 
-        if (btnStart) {
-            btnStart.style.display = running ? 'none' : 'flex';
-            btnStart.disabled = running;
-            const textSpan = btnStart.querySelector('[data-i18n="btn-start"]');
-            if (textSpan) textSpan.textContent = startText;
+        // Toggle start buttons state
+        moduleStartBtns.forEach(btn => {
+            btn.disabled = running;
+            if (running) {
+                btn.style.opacity = '0.5';
+                btn.style.cursor = 'not-allowed';
+            } else {
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+            }
+        });
+
+        // Toggle active task controls panel
+        if (activeTaskControls) {
+            activeTaskControls.style.display = running ? 'flex' : 'none';
         }
+
         if (btnStop) {
             btnStop.style.display = running ? 'flex' : 'none';
             btnStop.disabled = false;
@@ -221,6 +235,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (running) {
+            if (activeTaskLabel) {
+                activeTaskLabel.textContent = currentLang === 'zh' ? `正在运行: ${currentTaskName}` : `Running: ${currentTaskName}`;
+            }
             if (btnPause) {
                 btnPause.style.display = paused ? 'none' : 'flex';
                 const textSpan = btnPause.querySelector('[data-i18n="btn-pause"]');
@@ -242,31 +259,35 @@ document.addEventListener('DOMContentLoaded', () => {
             if (statusText) {
                 statusText.textContent = i18n[currentLang]['status-idle'];
             }
+            currentTaskName = '';
         }
     }
 
-    btnStart.addEventListener('click', async () => {
-        if (isRunning) return;
-        const taskType = document.querySelector('input[name="task_type"]:checked').value;
-        const startMsg = currentLang === 'zh' ? `正在启动 (${taskType})...` : `Starting (${taskType})...`;
-        appendLog(`SYSTEM | ${startMsg}`, 'system');
-        try {
-            const res = await fetch('/api/start', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ task_type: taskType })
-            });
-            const data = await res.json();
-            if (data.status === 'success') {
-                const startedMsg = currentLang === 'zh' ? '工作流已启动' : 'Workflow started';
-                appendLog('SYSTEM | ' + startedMsg, 'system');
-                setRunningState(true);
-            } else {
-                appendLog('ERROR | ' + data.message, 'error');
+    moduleStartBtns.forEach(btn => {
+        btn.addEventListener('click', async () => {
+            if (isRunning) return;
+            const taskType = btn.getAttribute('data-task');
+            currentTaskName = taskType;
+            const startMsg = currentLang === 'zh' ? `正在启动 (${taskType})...` : `Starting (${taskType})...`;
+            appendLog(`SYSTEM | ${startMsg}`, 'system');
+            try {
+                const res = await fetch('/api/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task_type: taskType })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    const startedMsg = currentLang === 'zh' ? '工作流已启动' : 'Workflow started';
+                    appendLog('SYSTEM | ' + startedMsg, 'system');
+                    setRunningState(true);
+                } else {
+                    appendLog('ERROR | ' + data.message, 'error');
+                }
+            } catch (e) {
+                appendLog('ERROR | ' + e.message, 'error');
             }
-        } catch (e) {
-            appendLog('ERROR | ' + e.message, 'error');
-        }
+        });
     });
 
     btnStop.addEventListener('click', async () => {
@@ -311,10 +332,682 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // --- DeepSeek Prompt Cache 监控更新 ---
+    async function updateCacheMetrics() {
+        try {
+            const res = await fetch('/api/system/llm_cache_stats');
+            if (!res.ok) return;
+            const stats = await res.json();
+            
+            const hitRateEl = document.getElementById('stat-hit-rate');
+            const savedTokensEl = document.getElementById('stat-saved-tokens');
+            const savedCnyEl = document.getElementById('stat-saved-cny');
+            const latencyEl = document.getElementById('stat-latency');
+            const warmIndicator = document.getElementById('cache-warm-indicator');
+
+            if (hitRateEl) hitRateEl.textContent = `${stats.hit_rate_pct || 0.0}%`;
+            if (savedTokensEl) savedTokensEl.textContent = (stats.hit_tokens || 0).toLocaleString();
+            if (savedCnyEl) savedCnyEl.textContent = `￥${(stats.saved_cny || 0.0).toFixed(4)}`;
+            if (latencyEl) latencyEl.textContent = `${stats.last_latency_ms || 0} ms`;
+
+            if (warmIndicator) {
+                if (stats.is_warm) {
+                    warmIndicator.style.background = 'rgba(16, 185, 129, 0.15)';
+                    warmIndicator.style.color = '#10b981';
+                    warmIndicator.textContent = currentLang === 'zh' ? '已预热激活' : 'Warm Active';
+                } else {
+                    warmIndicator.style.background = 'rgba(148, 163, 184, 0.15)';
+                    warmIndicator.style.color = '#94a3b8';
+                    warmIndicator.textContent = currentLang === 'zh' ? '冷启动节点' : 'Cold Node';
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to fetch cache metrics:', e);
+        }
+    }
+
+    // 一键预热按钮处理
+    const btnWarmup = document.getElementById('btn-warmup-cache');
+    if (btnWarmup) {
+        btnWarmup.addEventListener('click', async () => {
+            btnWarmup.disabled = true;
+            btnWarmup.textContent = currentLang === 'zh' ? '🔥 预热中...' : 'Warming up...';
+            try {
+                const res = await fetch('/api/system/warmup_cache', { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    appendLog('SYSTEM | 🔥 DeepSeek Cache 预热成功！', 'system');
+                    updateCacheMetrics();
+                } else {
+                    appendLog('ERROR | Cache 预热失败: ' + (data.message || ''), 'error');
+                }
+            } catch (e) {
+                appendLog('ERROR | Cache 预热网络异常: ' + e.message, 'error');
+            } finally {
+                btnWarmup.disabled = false;
+                btnWarmup.innerHTML = '<span>🔥 一键预热缓存</span>';
+            }
+        });
+    }
+
+    // --- AI 科普技能树进度更新 ---
+    async function updateSkillTreeStats() {
+        try {
+            const res = await fetch('/api/aikepu/tree_stats');
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.status !== 'success' || !data.stats) return;
+
+            const stats = data.stats;
+            const published = stats.published_count !== undefined ? stats.published_count : (stats.published !== undefined ? stats.published : 0);
+            const total = stats.total_count !== undefined ? stats.total_count : (stats.total !== undefined ? stats.total : 0);
+            const ratioEl = document.getElementById('skill-tree-ratio');
+            const barEl = document.getElementById('skill-tree-progress-bar');
+            const nextTopicEl = document.getElementById('skill-tree-next-topic');
+
+            if (ratioEl) {
+                ratioEl.textContent = `进度: ${published}/${total} (${stats.progress_pct}%)`;
+            }
+            if (barEl) {
+                barEl.style.width = `${stats.progress_pct}%`;
+            }
+            if (nextTopicEl) {
+                if (stats.available_nodes && stats.available_nodes.length > 0) {
+                    const nextNode = stats.available_nodes[0];
+                    const diffBadge = ['', '🌱 入门', '📘 基础', '🔥 进阶', '⚡ 前沿'][nextNode.difficulty] || '';
+                    nextTopicEl.textContent = `${nextNode.title} (${diffBadge})`;
+                } else if (published >= total && total > 0) {
+                    nextTopicEl.textContent = currentLang === 'zh' ? '🎉 全部选题已通关！' : '🎉 All Topics Completed!';
+                } else {
+                    nextTopicEl.textContent = currentLang === 'zh' ? '待前置节点解锁' : 'Waiting for Prerequisites';
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to fetch skill tree stats:', e);
+        }
+    }
+
+    // --- AI 科普技能树可视化 (HTML + SVG) ---
+    let skillTreeDataCache = null;
+    let currentFilterTier = 'all';
+    let currentModalNode = null;
+
+    async function loadSkillTreeVisualizer(force = false) {
+        const container = document.getElementById('skill-tree-columns-container');
+        if (!container) return;
+
+        try {
+            const url = force ? '/api/aikepu/full_tree?force=1' : '/api/aikepu/full_tree';
+            const res = await fetch(url);
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.status !== 'success') return;
+
+            skillTreeDataCache = data;
+            renderSkillTreeGraph();
+        } catch (err) {
+            console.error('Failed to load full skill tree:', err);
+        }
+    }
+
+    function renderSkillTreeGraph() {
+        if (!skillTreeDataCache) return;
+
+        const { nodes, published_ids, draft_ids, available_ids } = skillTreeDataCache;
+        const pubSet = new Set(published_ids || []);
+        const draftSet = new Set(draft_ids || []);
+        const availSet = new Set(available_ids || []);
+        const completedSet = new Set([...pubSet, ...draftSet]);
+
+        // 1. 更新 Legend Counters
+        const publishedCountEl = document.getElementById('legend-published-count');
+        const availableCountEl = document.getElementById('legend-available-count');
+        const lockedCountEl = document.getElementById('legend-locked-count');
+
+        const pubCount = pubSet.size;
+        const draftCount = draftSet.size;
+        const completedCount = completedSet.size;
+        const availCount = availSet.size;
+        const lockedCount = Math.max(0, (nodes.length || 30) - completedCount - availCount);
+
+        if (publishedCountEl) {
+            publishedCountEl.innerHTML = `${completedCount} <span style="font-size:11px; font-weight:normal; opacity:0.85;">(群发${pubCount}/草稿${draftCount})</span>`;
+        }
+        if (availableCountEl) availableCountEl.textContent = availCount;
+        if (lockedCountEl) lockedCountEl.textContent = lockedCount;
+
+        // 2. 清空 4 个 Tier 列
+        for (let i = 1; i <= 4; i++) {
+            const el = document.getElementById(`tier-nodes-${i}`);
+            if (el) el.innerHTML = '';
+        }
+
+        // 3. 渲染 HTML 精简 Node 卡片 (Knowledge Graph Pill Style)
+        const nodeElementsMap = {};
+        const prereqMap = {};
+        const childMap = {};
+
+        nodes.forEach(n => {
+            prereqMap[n.id] = n.prerequisites || [];
+            (n.prerequisites || []).forEach(p => {
+                if (!childMap[p]) childMap[p] = [];
+                childMap[p].push(n.id);
+            });
+        });
+
+        nodes.forEach((node, index) => {
+            const difficulty = node.difficulty || 1;
+            const tierList = document.getElementById(`tier-nodes-${difficulty}`);
+            if (!tierList) return;
+
+            // 过滤判断
+            if (currentFilterTier !== 'all' && currentFilterTier !== String(difficulty)) {
+                return;
+            }
+
+            const isPublished = pubSet.has(node.id);
+            const isDraft = !isPublished && draftSet.has(node.id);
+            const isAvailable = !isPublished && !isDraft && availSet.has(node.id);
+            const isLocked = !isPublished && !isDraft && !isAvailable;
+
+            let statusClass = 'locked';
+            let statusText = '🔒 锁定';
+            if (isPublished) {
+                statusClass = 'published';
+                statusText = '✅ 已群发';
+            } else if (isDraft) {
+                statusClass = 'published';
+                statusText = '📝 草稿箱';
+            } else if (isAvailable) {
+                statusClass = 'available';
+                statusText = '⚡ 可生成';
+            }
+
+            const card = document.createElement('div');
+            card.className = `skill-node-card ${statusClass}`;
+            card.setAttribute('data-node-id', node.id);
+
+            const tagsHtml = (node.tags || []).slice(0, 2).map(t => `<span class="node-tag-item">${t}</span>`).join('');
+
+            card.innerHTML = `
+                <div class="node-card-top">
+                    <span class="node-id-label">#${String(index + 1).padStart(2, '0')} · ${node.id}</span>
+                    <span class="node-status-tag ${statusClass}">${statusText}</span>
+                </div>
+                <div class="node-card-title" title="${node.title}">${node.title}</div>
+                <div class="node-card-tags">${tagsHtml}</div>
+            `;
+
+            // Hover 效果: 知识图谱前后依赖关系高亮
+            card.addEventListener('mouseenter', () => {
+                highlightKnowledgeGraphPath(node.id, prereqMap, childMap);
+            });
+            card.addEventListener('mouseleave', () => {
+                resetKnowledgeGraphHighlight();
+            });
+
+            // 卡片点击 -> 弹窗详情
+            card.addEventListener('click', () => {
+                openNodeModal(node, statusClass, statusText);
+            });
+
+            tierList.appendChild(card);
+            nodeElementsMap[node.id] = card;
+        });
+
+        // 4. 延迟渲染 SVG 连线 (等待 DOM Layout 完成)
+        requestAnimationFrame(() => {
+            setTimeout(() => drawSVGConnections(nodes, nodeElementsMap, completedSet, availSet), 60);
+        });
+    }
+
+    function highlightKnowledgeGraphPath(hoverId, prereqMap, childMap) {
+        const sources = new Set(prereqMap[hoverId] || []);
+        const targets = new Set(childMap[hoverId] || []);
+
+        document.querySelectorAll('.skill-node-card').forEach(card => {
+            const nid = card.getAttribute('data-node-id');
+            if (nid === hoverId) {
+                card.classList.add('highlight-source');
+            } else if (sources.has(nid)) {
+                card.classList.add('highlight-source');
+            } else if (targets.has(nid)) {
+                card.classList.add('highlight-target');
+            } else {
+                card.classList.add('dimmed');
+            }
+        });
+
+        document.querySelectorAll('.tree-svg-path').forEach(path => {
+            const parent = path.getAttribute('data-parent');
+            const child = path.getAttribute('data-child');
+            if ((parent === hoverId || child === hoverId) || (sources.has(parent) && child === hoverId) || (parent === hoverId && targets.has(child))) {
+                path.classList.add('highlight');
+            } else {
+                path.classList.add('dimmed');
+            }
+        });
+    }
+
+    function resetKnowledgeGraphHighlight() {
+        document.querySelectorAll('.skill-node-card').forEach(c => {
+            c.classList.remove('highlight-source', 'highlight-target', 'dimmed');
+        });
+        document.querySelectorAll('.tree-svg-path').forEach(p => {
+            p.classList.remove('highlight', 'dimmed');
+        });
+    }
+
+    function drawSVGConnections(nodes, nodeMap, completedSet, availSet) {
+        const svg = document.getElementById('skill-tree-svg-canvas');
+        const viewport = document.getElementById('skill-tree-viewport');
+        if (!svg || !viewport) return;
+
+        svg.innerHTML = '';
+        const viewportRect = viewport.getBoundingClientRect();
+        
+        // 设置 SVG width/height
+        svg.setAttribute('width', viewport.scrollWidth);
+        svg.setAttribute('height', Math.max(viewport.scrollHeight, 650));
+
+        // 定义 Marker 箭头
+        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        defs.innerHTML = `
+            <marker id="arrow-pub" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#10b981"/>
+            </marker>
+            <marker id="arrow-avail" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/>
+            </marker>
+            <marker id="arrow-locked" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" opacity="0.6"/>
+            </marker>
+        `;
+        svg.appendChild(defs);
+
+        function createRoundedPath(points, r = 12) {
+            if (points.length < 2) return '';
+            let d = `M ${points[0].x} ${points[0].y}`;
+            for (let i = 1; i < points.length - 1; i++) {
+                const p0 = points[i - 1], p1 = points[i], p2 = points[i + 1];
+                const dx1 = p0.x - p1.x, dy1 = p0.y - p1.y;
+                const dx2 = p2.x - p1.x, dy2 = p2.y - p1.y;
+                const len1 = Math.hypot(dx1, dy1), len2 = Math.hypot(dx2, dy2);
+                const radius = Math.min(r, len1 / 2, len2 / 2);
+                
+                if (radius === 0) {
+                    d += ` L ${p1.x} ${p1.y}`;
+                } else {
+                    const sX = p1.x + (dx1 / len1) * radius;
+                    const sY = p1.y + (dy1 / len1) * radius;
+                    const eX = p1.x + (dx2 / len2) * radius;
+                    const eY = p1.y + (dy2 / len2) * radius;
+                    d += ` L ${sX} ${sY} Q ${p1.x} ${p1.y} ${eX} ${eY}`;
+                }
+            }
+            d += ` L ${points[points.length - 1].x} ${points[points.length - 1].y}`;
+            return d;
+        }
+
+        function getSafeY(colIndex, targetY, viewportRectTop, viewportScrollTop) {
+            const cards = Array.from(document.querySelectorAll(`.skill-tier-column[data-tier="${colIndex}"] .skill-node-card`));
+            const midCards = cards.map(c => {
+                const r = c.getBoundingClientRect();
+                return { top: r.top - viewportRectTop + viewportScrollTop, bottom: r.bottom - viewportRectTop + viewportScrollTop };
+            }).sort((a,b) => a.top - b.top);
+            
+            let bestY = targetY;
+            let minDiff = Infinity;
+            const gaps = [];
+            
+            if (midCards.length > 0) gaps.push(midCards[0].top - 30);
+            for (let k = 0; k < midCards.length - 1; k++) {
+                gaps.push((midCards[k].bottom + midCards[k+1].top) / 2);
+            }
+            if (midCards.length > 0) gaps.push(midCards[midCards.length-1].bottom + 30);
+            if (gaps.length === 0) gaps.push(targetY);
+            
+            for (const gy of gaps) {
+                if (Math.abs(gy - targetY) < minDiff) {
+                    minDiff = Math.abs(gy - targetY);
+                    bestY = gy;
+                }
+            }
+            return bestY;
+        }
+
+        nodes.forEach(node => {
+            const childCard = nodeMap[node.id];
+            if (!childCard) return;
+
+            const prereqs = node.prerequisites || [];
+            prereqs.forEach(prereqId => {
+                const parentCard = nodeMap[prereqId];
+                if (!parentCard) return;
+
+                const pNode = nodes.find(n => n.id === prereqId);
+                const pDiff = pNode.difficulty || 1;
+                const cDiff = node.difficulty || 1;
+
+                const parentRect = parentCard.getBoundingClientRect();
+                const childRect = childCard.getBoundingClientRect();
+
+                const startX = parentRect.right - viewportRect.left + viewport.scrollLeft;
+                const startY = parentRect.top + parentRect.height / 2 - viewportRect.top + viewport.scrollTop;
+                
+                let endX;
+                if (pDiff >= cDiff) {
+                    endX = childRect.right - viewportRect.left + viewport.scrollLeft + 8;
+                } else {
+                    endX = childRect.left - viewportRect.left + viewport.scrollLeft - 8;
+                }
+                const endY = childRect.top + childRect.height / 2 - viewportRect.top + viewport.scrollTop;
+
+                let points = [{x: startX, y: startY}];
+
+                if (pDiff === cDiff) {
+                    points.push({x: startX + 25, y: startY});
+                    points.push({x: startX + 25, y: endY});
+                } else if (pDiff < cDiff) {
+                    let currX = startX;
+                    let currY = startY;
+
+                    for (let i = pDiff; i < cDiff; i++) {
+                        const thisCol = document.querySelector(`.skill-tier-column[data-tier="${i}"]`);
+                        const nextCol = document.querySelector(`.skill-tier-column[data-tier="${i + 1}"]`);
+                        
+                        let thisRight = thisCol ? thisCol.getBoundingClientRect().right - viewportRect.left + viewport.scrollLeft : currX + 170;
+                        let nextLeft = nextCol ? nextCol.getBoundingClientRect().left - viewportRect.left + viewport.scrollLeft : currX + 300;
+                        
+                        const gutterX = (thisRight + nextLeft) / 2;
+                        points.push({x: gutterX, y: currY});
+                        currX = gutterX;
+
+                        if (i + 1 < cDiff) {
+                            const targetY = startY + (endY - startY) * ((i + 1 - pDiff) / (cDiff - pDiff));
+                            const bestY = getSafeY(i + 1, targetY, viewportRect.top, viewport.scrollTop);
+                            points.push({x: currX, y: bestY});
+                            currY = bestY;
+                        } else {
+                            points.push({x: currX, y: endY});
+                            currY = endY;
+                        }
+                    }
+                } else {
+                    // Backward routing (e.g. diff 3 -> diff 2)
+                    let currX = startX + 25;
+                    points.push({x: currX, y: startY});
+                    let currY = startY;
+
+                    for (let i = pDiff; i > cDiff; i--) {
+                        const targetY = startY + (endY - startY) * ((pDiff - i + 1) / (pDiff - cDiff + 1));
+                        const bestY = getSafeY(i, targetY, viewportRect.top, viewport.scrollTop);
+                        points.push({x: currX, y: bestY});
+                        currY = bestY;
+                        
+                        const thisCol = document.querySelector(`.skill-tier-column[data-tier="${i}"]`);
+                        const prevCol = document.querySelector(`.skill-tier-column[data-tier="${i - 1}"]`);
+                        
+                        let thisLeft = thisCol ? thisCol.getBoundingClientRect().left - viewportRect.left + viewport.scrollLeft : currX - 300;
+                        let prevRight = prevCol ? prevCol.getBoundingClientRect().right - viewportRect.left + viewport.scrollLeft : currX - 450;
+                        
+                        const gutterX = (thisLeft + prevRight) / 2;
+                        points.push({x: gutterX, y: currY});
+                        currX = gutterX;
+                    }
+                    points.push({x: currX, y: endY});
+                }
+
+                points.push({x: endX, y: endY});
+                const d = createRoundedPath(points, 12);
+
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                path.setAttribute('d', d);
+
+                // 连线样式判定
+                let pathClass = 'locked';
+                let markerId = 'arrow-locked';
+                if (completedSet.has(prereqId) && completedSet.has(node.id)) {
+                    pathClass = 'published';
+                    markerId = 'arrow-pub';
+                } else if (completedSet.has(prereqId) && availSet.has(node.id)) {
+                    pathClass = 'available';
+                    markerId = 'arrow-avail';
+                }
+
+                path.setAttribute('class', `tree-svg-path ${pathClass}`);
+                path.setAttribute('marker-end', `url(#${markerId})`);
+                path.setAttribute('data-parent', prereqId);
+                path.setAttribute('data-child', node.id);
+
+                svg.appendChild(path);
+            });
+        });
+    }
+
+    function openNodeModal(node, statusClass, statusText) {
+        currentModalNode = node;
+        const modal = document.getElementById('skill-node-modal');
+        if (!modal) return;
+
+        const headingEl = document.getElementById('node-modal-heading');
+        const idEl = document.getElementById('node-modal-id');
+        const summaryEl = document.getElementById('node-modal-summary');
+        const badgeEl = document.getElementById('node-modal-badge');
+        const statusBadgeEl = document.getElementById('node-modal-status-badge');
+        const tagsContainer = document.getElementById('node-modal-tags');
+        const prereqsContainer = document.getElementById('node-modal-prereqs');
+        const btnGen = document.getElementById('btn-generate-node-modal');
+
+        if (headingEl) headingEl.textContent = node.title;
+        if (idEl) idEl.textContent = `node_id: ${node.id}`;
+        if (summaryEl) summaryEl.textContent = node.summary || '暂无摘要描述';
+        if (badgeEl) badgeEl.textContent = `Level ${node.difficulty}`;
+
+        if (statusBadgeEl) {
+            statusBadgeEl.innerHTML = `<span class="node-status-tag ${statusClass}">${statusText}</span>`;
+        }
+
+        if (tagsContainer) {
+            tagsContainer.innerHTML = (node.tags || []).map(t => `<span class="node-tag-item">${t}</span>`).join('');
+        }
+
+        if (prereqsContainer) {
+            const prereqs = node.prerequisites || [];
+            if (prereqs.length === 0) {
+                prereqsContainer.innerHTML = '<span style="font-size:12px; color:var(--text-secondary);">无先修基础要求（入门节点）</span>';
+            } else {
+                const pubSet = new Set(skillTreeDataCache?.published_ids || []);
+                const draftSet = new Set(skillTreeDataCache?.draft_ids || []);
+                const completedSet = new Set([...pubSet, ...draftSet]);
+                prereqsContainer.innerHTML = prereqs.map(p => {
+                    const isMet = completedSet.has(p);
+                    const metBadge = isMet ? '✅ 已解锁' : '🔒 待完成';
+                    const colorStyle = isMet ? 'color:#10b981; border:1px solid rgba(16,185,129,0.3); background:rgba(16,185,129,0.08);' : 'color:#f59e0b; border:1px solid rgba(245,158,11,0.3); background:rgba(245,158,11,0.08);';
+                    return `<span class="node-tag-item" style="${colorStyle}">${metBadge} · ${p}</span>`;
+                }).join(' ');
+            }
+        }
+
+        // 撰写按钮：始终可用，不锁死
+        if (btnGen) {
+            const isPub = statusText.includes('已群发');
+            const isDraft = statusText.includes('草稿箱');
+
+            btnGen.disabled = false;
+            if (isPub) {
+                btnGen.innerHTML = '<span class="btn-icon">🔄</span> 重新撰写/覆盖已群发推文';
+            } else if (isDraft) {
+                btnGen.innerHTML = '<span class="btn-icon">🔄</span> 重新撰写/覆盖草稿箱推文';
+            } else {
+                btnGen.innerHTML = '<span class="btn-icon">🚀</span> 开始撰写此知识点';
+            }
+            btnGen.onclick = () => {
+                modal.style.display = 'none';
+                startGenerateNode(node.id);
+            };
+        }
+
+        // 手动标记按钮：根据当前状态动态显隐，始终可操作
+        const btnPub = document.getElementById('btn-override-published-modal');
+        const btnDraft = document.getElementById('btn-override-draft-modal');
+        const btnReset = document.getElementById('btn-override-reset-modal');
+        if (btnPub) btnPub.style.display = (statusClass === 'published' && statusText.includes('已群发')) ? 'none' : '';
+        if (btnDraft) btnDraft.style.display = (statusText.includes('草稿箱')) ? 'none' : '';
+        if (btnReset) btnReset.style.display = (statusClass === 'available' || statusClass === 'locked') ? 'none' : '';
+
+        modal.style.display = 'flex';
+    }
+
+    async function setNodeStatusOverride(status) {
+        if (!currentModalNode || !currentModalNode.id) return;
+        const modal = document.getElementById('skill-node-modal');
+        try {
+            const res = await fetch('/api/aikepu/set_node_status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ node_id: currentModalNode.id, status: status })
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                appendLog(`[Skill Tree] 🔧 节点 [${currentModalNode.id}] 状态已设为: ${status}`, 'system');
+                if (modal) modal.style.display = 'none';
+                loadSkillTreeVisualizer(true);
+                updateSkillTreeStats();
+            } else {
+                alert('节点状态变更失败: ' + (data.message || '未知错误'));
+            }
+        } catch (e) {
+            alert('网络请求失败: ' + e);
+        }
+    }
+
+    // Modal Status Override Buttons
+    const btnOverridePub = document.getElementById('btn-override-published-modal');
+    if (btnOverridePub) btnOverridePub.addEventListener('click', () => setNodeStatusOverride('published'));
+
+    const btnOverrideDraft = document.getElementById('btn-override-draft-modal');
+    if (btnOverrideDraft) btnOverrideDraft.addEventListener('click', () => setNodeStatusOverride('draft'));
+
+    const btnOverrideReset = document.getElementById('btn-override-reset-modal');
+    if (btnOverrideReset) btnOverrideReset.addEventListener('click', () => setNodeStatusOverride('reset'));
+
+    async function startGenerateNode(nodeId) {
+        try {
+            appendLog(`[Skill Tree] 🚀 用户选中节点 [${nodeId}]，准备发起 AI 科普图文撰写...`, 'system');
+            
+            // 切换到 Console
+            const consoleNav = document.getElementById('nav-console-link');
+            if (consoleNav) consoleNav.click();
+
+            // 选中 Task Radio 为 aikepu
+            const aikepuRadio = document.querySelector('input[name="task_type"][value="aikepu"]');
+            if (aikepuRadio) aikepuRadio.checked = true;
+
+            const res = await fetch('/api/aikepu/generate_node', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ node_id: nodeId })
+            });
+
+            const data = await res.json();
+            if (data.status === 'success') {
+                appendLog(`[Skill Tree] ✅ ${data.message}`, 'system');
+            } else {
+                appendLog(`[Skill Tree] ❌ 启动失败: ${data.message}`, 'error');
+            }
+        } catch (e) {
+            appendLog(`[Skill Tree] ❌ 请求异常: ${e}`, 'error');
+        }
+    }
+
+    // 事件绑定: 展开知识树按钮、微信同步按钮、刷新按钮、推荐按钮、Filter按钮、Modal关闭按钮
+    const btnOpenSkillTree = document.getElementById('btn-open-skill-tree');
+    if (btnOpenSkillTree) {
+        btnOpenSkillTree.addEventListener('click', () => {
+            const navSkillTree = document.getElementById('nav-skill-tree-link');
+            if (navSkillTree) navSkillTree.click();
+        });
+    }
+
+    const btnSyncWeChatSkillTree = document.getElementById('btn-sync-wechat-skill-tree');
+    if (btnSyncWeChatSkillTree) {
+        btnSyncWeChatSkillTree.addEventListener('click', async () => {
+            appendLog('[Skill Tree] 💬 正在与微信公众号 API 真实线上状态全量同步...', 'system');
+            btnSyncWeChatSkillTree.disabled = true;
+            try {
+                const res = await fetch('/api/aikepu/sync_wechat', { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    appendLog(`[Skill Tree] ✅ ${data.message}`, 'system');
+                    alert(data.message);
+                    loadSkillTreeVisualizer(true);
+                    updateSkillTreeStats();
+                } else {
+                    appendLog(`[Skill Tree] ❌ 微信同步失败: ${data.message}`, 'error');
+                    alert('微信同步失败: ' + data.message);
+                }
+            } catch (e) {
+                appendLog(`[Skill Tree] ❌ 微信同步请求异常: ${e}`, 'error');
+                alert('微信同步请求异常: ' + e);
+            } finally {
+                btnSyncWeChatSkillTree.disabled = false;
+            }
+        });
+    }
+
+    const btnRefreshSkillTree = document.getElementById('btn-refresh-skill-tree-view');
+    if (btnRefreshSkillTree) {
+        btnRefreshSkillTree.addEventListener('click', () => loadSkillTreeVisualizer(true));
+    }
+
+    const btnStartRecommended = document.getElementById('btn-start-recommended-node');
+    if (btnStartRecommended) {
+        btnStartRecommended.addEventListener('click', () => {
+            if (skillTreeDataCache && skillTreeDataCache.available_ids && skillTreeDataCache.available_ids.length > 0) {
+                startGenerateNode(skillTreeDataCache.available_ids[0]);
+            } else {
+                alert('当前暂无解锁的可生成节点');
+            }
+        });
+    }
+
+    // Filter Buttons
+    document.querySelectorAll('.tree-filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.tree-filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentFilterTier = btn.getAttribute('data-filter') || 'all';
+            renderSkillTreeGraph();
+        });
+    });
+
+    // Modal Close
+    const btnCloseNodeModal = document.getElementById('btn-close-node-modal');
+    const btnCancelNodeModal = document.getElementById('btn-cancel-node-modal');
+    const skillNodeModal = document.getElementById('skill-node-modal');
+
+    if (btnCloseNodeModal && skillNodeModal) {
+        btnCloseNodeModal.addEventListener('click', () => skillNodeModal.style.display = 'none');
+    }
+    if (btnCancelNodeModal && skillNodeModal) {
+        btnCancelNodeModal.addEventListener('click', () => skillNodeModal.style.display = 'none');
+    }
+
+    // 页面初始化时自动调一次以载入缓存/渲染拓扑图谱
+    loadSkillTreeVisualizer();
+
+    window.addEventListener('resize', () => {
+        const skillTreeSec = document.getElementById('skill-tree-view');
+        if (skillTreeDataCache && skillTreeSec && skillTreeSec.classList.contains('active')) {
+            renderSkillTreeGraph();
+        }
+    });
+
     // --- Adaptive Polling ---
     let pollTimer = null;
     function schedulePoll() {
-        const interval = isRunning ? 1000 : 8000;
+        const interval = isRunning ? 1000 : 5000;
         pollTimer = setTimeout(async () => {
             try {
                 const res = await fetch('/api/status');
@@ -326,6 +1019,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (data.is_running !== isRunning || data.is_paused !== isPaused) {
                     setRunningState(data.is_running, data.is_paused);
                 }
+
+                // 每次轮询同步刷新 Prompt Cache 状态与 AI 科普技能树进度
+                updateCacheMetrics();
+                updateSkillTreeStats();
             } catch (e) {
                 if (isRunning) {
                     const connLostText = currentLang === 'zh' ? '连接已断开' : 'Connection lost';
@@ -336,6 +1033,9 @@ document.addEventListener('DOMContentLoaded', () => {
             schedulePoll();
         }, interval);
     }
+    // 页面初次加载立即触发一次同步
+    updateCacheMetrics();
+    updateSkillTreeStats();
     schedulePoll();
 
     // --- Settings ---
@@ -574,8 +1274,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const pausedBadgeText = currentLang === 'zh' ? '已暂停' : 'Paused';
                 
                 const statusBadge = job.status === 'active' ? 
-                    `<span class="badge" style="background:#10B981; color:#000; padding:2px 6px;">${activeBadgeText}</span>` : 
-                    `<span class="badge" style="background:#F59E0B; color:#000; padding:2px 6px;">${pausedBadgeText}</span>`;
+                    `<span class="badge" style="background:#10B981; color:#ffffff; padding:2px 6px;">${activeBadgeText}</span>` : 
+                    `<span class="badge" style="background:#F59E0B; color:#ffffff; padding:2px 6px;">${pausedBadgeText}</span>`;
                 
                 const pauseBtnText = currentLang === 'zh' ? '暂停' : 'Pause';
                 const resumeBtnText = currentLang === 'zh' ? '恢复' : 'Resume';

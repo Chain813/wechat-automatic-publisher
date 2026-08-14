@@ -278,7 +278,7 @@ def _try_api_render(mermaid_code, output_path):
             # 兼容带有 class 定义的 mermaid 代码结构，附加样式声明
             mermaid_code = mermaid_code + style_template
             
-        b64_code = base64.b64encode(mermaid_code.encode('utf-8')).decode('utf-8')
+        b64_code = base64.urlsafe_b64encode(mermaid_code.encode('utf-8')).decode('utf-8').rstrip('=')
         url = f"https://mermaid.ink/img/{b64_code}"
         
         session = build_api_session()
@@ -505,19 +505,19 @@ def replace_diagram_placeholder(html_body, description, image_url):
 
     if image_url:
         replacement = (
-            '<div style="text-align:center;margin:28px 0;width:100%;">'
-            f'<img src="{image_url}" style="width:100%;max-width:800px;border-radius:12px;'
-            'box-shadow:0 6px 20px rgba(0,0,0,0.15);" alt="架构示意图">'
-            '<div style="max-width:800px;margin:10px auto 0 auto;padding:10px 16px;background:#f8fafc;'
+            '<section style="text-align:center;margin:28px 0;width:100%;box-sizing:border-box;">'
+            f'<img src="{image_url}" style="width:100%;max-width:100%;height:auto;border-radius:12px;'
+            'box-shadow:0 6px 20px rgba(0,0,0,0.15);box-sizing:border-box;" alt="架构示意图">'
+            '<section style="width:100%;max-width:100%;margin:10px auto 0 auto;padding:10px 16px;background:#f8fafc;'
             'border-left:4px solid #2563eb;border-radius:6px;text-align:left;box-sizing:border-box;">'
             f'<span style="font-size:13px;color:#334155;line-height:1.6;font-weight:500;display:block;">'
             f'💡 <strong>图解阅读指南：</strong> {description}</span>'
-            '</div></div>'
+            '</section></section>'
         )
     else:
         replacement = ""
 
-    return pattern.sub(replacement, html_body)
+    return pattern.sub(lambda m: replacement, html_body)
 
 
 def _generate_single_diagram(args):

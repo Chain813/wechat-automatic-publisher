@@ -10,8 +10,8 @@ from loguru import logger
 from config import IMAGE_GEN_MODEL
 from core.shared.llm import call_deepseek_with_retry
 
-# 配图占位符正则
-PLACEHOLDER_PATTERN = re.compile(r"【\s*此处插入配图\s*[：:]\s*(.*?)\s*】")
+# 配图/图表占位符正则（同时支持照片配图与技术图表占位符）
+PLACEHOLDER_PATTERN = re.compile(r"【\s*此处(?:插入配图|绘制图表)\s*[：:]\s*(.*?)\s*】")
 
 
 def extract_placeholders(article_text: str) -> list[str]:
@@ -149,7 +149,7 @@ def render_article_preview(article_text: str, article_title: str, images_mapping
     
     # Clean <p> around placeholders
     html_body = re.sub(
-        r'<p>\s*(【\s*此处插入配图\s*[：:].*?\s*】)\s*</p>',
+        r'<p>\s*(【\s*此处(?:插入配图|绘制图表)\s*[：:].*?\s*】)\s*</p>',
         r'\1',
         html_body,
         flags=re.DOTALL
@@ -180,8 +180,8 @@ def render_article_preview(article_text: str, article_title: str, images_mapping
             )
         
         # Replace this placeholder
-        pattern = re.compile(rf"【\s*此处插入配图\s*[：:]\s*{re.escape(kw)}\s*】")
-        html_body = pattern.sub(image_html, html_body)
+        pattern = re.compile(rf"【\s*此处(?:插入配图|绘制图表)\s*[：:]\s*{re.escape(kw)}\s*】")
+        html_body = pattern.sub(lambda m, h=image_html: h, html_body)
         
     # 5. Apply styling identical to article_utils.py
     html_body = html_body.replace(

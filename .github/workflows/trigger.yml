@@ -1,10 +1,10 @@
 name: "🚀 AutoWeChat 定时发布"
 
 on:
-  # 定时触发 (UTC 时间，北京时间 = UTC+8)
-  schedule:
-    # 每天早上 8:00 (北京时间) = 00:00 UTC
-    - cron: "0 0 * * *"
+  # 定时触发 (已暂停，如需恢复取消注释)
+  # schedule:
+  #   # 每天早上 8:00 (北京时间) = 00:00 UTC
+  #   - cron: "0 0 * * *"
 
   # 手动触发（GitHub 手机 App 或网页 → Actions → Run workflow）
   workflow_dispatch:

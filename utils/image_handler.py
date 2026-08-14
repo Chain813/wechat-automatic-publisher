@@ -76,18 +76,32 @@ def resize_for_wechat(img_path, purpose="body"):
             target_ratio = tw / th
             orig_ratio = orig_w / orig_h
 
-            if orig_ratio > target_ratio:
-                new_w = int(orig_h * target_ratio)
-                new_h = orig_h
-                left = (orig_w - new_w) // 2
-                img = raw.crop((left, 0, left + new_w, new_h))
+            # 对于图表/架构图/纵向长图，禁止强行中心切头切尾
+            is_diagram = purpose in ("diagram", "diagram_body") or "diagram" in os.path.basename(img_path).lower()
+            if is_diagram or (purpose == "body" and orig_ratio < 0.9):
+                # 保持图像完整性，等比例缩放并居中补白
+                img = Image.new("RGB", (tw, th), (255, 255, 255))
+                scale = min(tw / orig_w, th / orig_h)
+                nw, nh = int(orig_w * scale), int(orig_h * scale)
+                resized_raw = raw.resize((nw, nh), Image.LANCZOS)
+                if resized_raw.mode == 'RGBA':
+                    bg = Image.new('RGB', (nw, nh), (255, 255, 255))
+                    bg.paste(resized_raw, mask=resized_raw.split()[3])
+                    resized_raw = bg
+                img.paste(resized_raw, ((tw - nw) // 2, (th - nh) // 2))
             else:
-                new_w = orig_w
-                new_h = int(orig_w / target_ratio)
-                top = (orig_h - new_h) // 2
-                img = raw.crop((0, top, new_w, new_h))
+                if orig_ratio > target_ratio:
+                    new_w = int(orig_h * target_ratio)
+                    new_h = orig_h
+                    left = (orig_w - new_w) // 2
+                    img = raw.crop((left, 0, left + new_w, new_h))
+                else:
+                    new_w = orig_w
+                    new_h = int(orig_w / target_ratio)
+                    top = (orig_h - new_h) // 2
+                    img = raw.crop((0, top, new_w, new_h))
 
-            img = img.resize(target_size, Image.LANCZOS)
+                img = img.resize(target_size, Image.LANCZOS)
 
             if img.mode == 'RGBA':
                 background = Image.new('RGB', img.size, (255, 255, 255))
@@ -96,20 +110,19 @@ def resize_for_wechat(img_path, purpose="body"):
             elif img.mode != 'RGB':
                 img = img.convert('RGB')
 
-        # 检查文件大小：超过微信限制则压缩
+        # 检查文件大小：超高分辨率/SD生图 (6-8MB) 严格压缩至 1.8MB 以内 (符合微信封面 ≤2MB 限制与移动端体验)
         out_path = img_path
-        img.save(out_path, 'JPEG', quality=92)
+        img.save(out_path, 'JPEG', quality=90, optimize=True)
 
-        # 如果文件还是太大，降低质量
         file_size_mb = os.path.getsize(out_path) / (1024 * 1024)
-        max_mb = WECHAT_BODY_MAX_MB if purpose == "body" else 10
+        max_mb = 1.8  # 统一所有图片上限为 1.8MB (针对生图 6-8MB 进行自动优化)
         quality = 85
-        while file_size_mb > max_mb and quality > 30:
-            img.save(out_path, 'JPEG', quality=quality)
+        while file_size_mb > max_mb and quality > 25:
+            img.save(out_path, 'JPEG', quality=quality, optimize=True)
             file_size_mb = os.path.getsize(out_path) / (1024 * 1024)
             quality -= 15
 
-        logger.debug("  resize_for_wechat: {} -> {}x{}, {:.1f}MB",
+        logger.debug("  resize_for_wechat: {} -> {}x{}, {:.2f}MB",
                      os.path.basename(img_path), tw, th, file_size_mb)
         return out_path
     except Exception as e:
@@ -458,24 +471,6 @@ def _save_image_from_url(img_url, target_dir, prefix="free", timeout=15):
     return None
 
 
-def _try_unsplash_source(keyword, width, height):
-    """尝试 Unsplash Source 直接 URL（无需 API Key）"""
-    import requests
-    try:
-        # Unsplash Source — 直接返回一张匹配图片（可能已停止服务）
-        url = f"https://source.unsplash.com/{width}x{height}/?{keyword.replace(' ', ',')}"
-        resp = requests.head(url, timeout=8, allow_redirects=True)
-        final_url = resp.url
-        if "unsplash.com" in final_url and "source" not in final_url:
-            return final_url
-    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
-        logger.debug("  Unsplash Source 连接异常: {}", e)
-        raise e
-    except Exception:
-        pass
-    return None
-
-
 def _try_pexels_api(keyword, width, height):
     """尝试 Pexels API（需 PEXELS_API_KEY 环境变量）"""
     import requests
@@ -524,6 +519,58 @@ def _try_unsplash_api(keyword, width, height):
     return None
 
 
+def _try_baidu_api(keyword, target_dir, width=900, height=500):
+    """尝试百度图片搜索 API (针对中文热点实拍图极其精准高效)"""
+    import urllib.parse
+    import requests
+    clean_kw = _extract_concise_keywords(keyword)
+    if not clean_kw:
+        return None
+    q = urllib.parse.quote(clean_kw)
+    url = f"https://image.baidu.com/search/acjson?tn=resultjson_com&ipn=rj&word={q}&pn=0&rn=12"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    try:
+        resp = requests.get(url, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            res_json = resp.json()
+            data = res_json.get("data", [])
+            for item in data:
+                img_url = item.get("middleURL") or item.get("hoverURL") or item.get("thumbURL")
+                if img_url and img_url.startswith("http"):
+                    path = _save_image_from_url(img_url, target_dir, prefix="baidu", timeout=6)
+                    if path:
+                        return path
+    except Exception as e:
+        logger.debug("  百度图片搜索失败: {}", e)
+    return None
+
+
+def _try_pollinations_api(keyword, target_dir, width=900, height=500):
+    """尝试 Pollinations.ai 免费 AI 生图 (无需 API Key，全局可用)，含 retry + 429 退避"""
+    import urllib.parse
+    import requests
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            prompt_str = _build_pollinations_prompt(keyword)
+            encoded_prompt = urllib.parse.quote(prompt_str[:200])
+            url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={width}&height={height}&nologo=true"
+            path = _save_image_from_url(url, target_dir, prefix="pollinations", timeout=30)
+            if path:
+                return path
+            logger.debug("  Pollinations 第 {}/{} 次未返回有效图片", attempt, max_attempts)
+        except Exception as e:
+            logger.debug("  Pollinations AI 生图失败 (第 {}/{}): {}", attempt, max_attempts, e)
+        # 退避等待（处理 429 限流）
+        if attempt < max_attempts:
+            wait = 3 * attempt
+            logger.debug("  Pollinations 等待 {}s 后重试...", wait)
+            time.sleep(wait)
+    return None
+
+
 def _try_icrawler_bing(keyword, target_dir, max_images=3):
     """通过 icrawler 从 Bing 搜索下载图片（无需 API Key）"""
     try:
@@ -533,7 +580,6 @@ def _try_icrawler_bing(keyword, target_dir, max_images=3):
         tmp_dir = tempfile.mkdtemp(prefix="aw_img_")
         downloaded = []
 
-        # 用 icrawler 下载到临时目录
         crawler = BingImageCrawler(
             feeder_threads=1,
             parser_threads=1,
@@ -541,7 +587,6 @@ def _try_icrawler_bing(keyword, target_dir, max_images=3):
             storage={"root_dir": tmp_dir}
         )
 
-        # 重写下载完成回调，收集路径
         original_download = crawler.downloader.download
 
         def tracking_download(task, *args, **kwargs):
@@ -559,15 +604,12 @@ def _try_icrawler_bing(keyword, target_dir, max_images=3):
             file_idx_offset=0
         )
 
-        # 找到下载的图片
         for root, dirs, files in os.walk(tmp_dir):
             for f in files:
                 if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
                     src = os.path.join(root, f)
-                    # 移到目标目录
                     dst = os.path.join(target_dir, f"bing_{int(time.time())}_{f}")
                     os.rename(src, dst)
-                    # 验证图片有效
                     from PIL import Image
                     try:
                         img = Image.open(dst)
@@ -582,7 +624,6 @@ def _try_icrawler_bing(keyword, target_dir, max_images=3):
                         if os.path.exists(dst):
                             os.remove(dst)
 
-        # 清理临时目录
         import shutil
         try:
             shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -597,9 +638,62 @@ def _try_icrawler_bing(keyword, target_dir, max_images=3):
     return None
 
 
-def _enhance_search_keyword(keyword):
-    """将抽象中文概念转为更适合图片搜索的英文关键词"""
-    # 常见 AI 术语中英映射
+def _extract_concise_keywords(keyword):
+    """从长句子/标题中提取 2-4 个核心关键字，用于搜索引擎精准检索"""
+    if not keyword or not keyword.strip():
+        return ""
+
+    clean_text = keyword.strip()
+
+    try:
+        import jieba.analyse
+        tags = jieba.analyse.extract_tags(clean_text, topK=4)
+        if tags:
+            return " ".join(tags)
+    except Exception:
+        pass
+
+    clean_text = re.sub(r'[^\w\s\u4e00-\u9fa5]', ' ', clean_text)
+    words = [w for w in clean_text.split() if len(w) > 1]
+    return " ".join(words[:4]) if words else clean_text[:20]
+
+
+# ---- LLM 关键词翻译缓存 ----
+_keyword_translation_cache = {}
+
+
+def _translate_keyword_via_llm(keyword):
+    """用 DeepSeek 将中文关键词翻译为适合英文图片搜索的 2-5 个英文词"""
+    if keyword in _keyword_translation_cache:
+        return _keyword_translation_cache[keyword]
+
+    # 如果关键词本身就是纯英文，直接返回
+    if re.match(r'^[a-zA-Z0-9\s\-_.,]+$', keyword.strip()):
+        return keyword.strip()
+
+    try:
+        from core.shared.llm import call_deepseek_with_retry
+        system_prompt = (
+            "你是一个翻译引擎。将用户输入的中文关键词/标题翻译为 2-5 个最适合在 "
+            "Unsplash/Pexels 等英文图片网站搜索的英文关键词。\n"
+            "规则：只输出英文关键词，用空格分隔，不要解释，不要标点。\n"
+            "示例：输入'华为发布AI芯片' → 输出'Huawei AI chip technology'"
+        )
+        result = call_deepseek_with_retry(keyword, system_content=system_prompt)
+        if result and len(result.strip()) > 2:
+            translated = result.strip().split('\n')[0].strip()
+            _keyword_translation_cache[keyword] = translated
+            logger.info("  关键词翻译: '{}' → '{}'", keyword, translated)
+            return translated
+    except Exception as e:
+        logger.debug("  LLM 关键词翻译失败: {}", e)
+
+    # Fallback: 使用硬编码映射表
+    return _enhance_search_keyword_static(keyword)
+
+
+def _enhance_search_keyword_static(keyword):
+    """将抽象中文概念转为更适合图片搜索的英文关键词（静态映射表兜底）"""
     ai_term_map = {
         "注意力机制": "attention mechanism neural network diagram",
         "Transformer": "transformer architecture deep learning",
@@ -621,6 +715,23 @@ def _enhance_search_keyword(keyword):
         "卷积": "convolutional neural network",
         "编码器": "encoder transformer architecture",
         "解码器": "decoder transformer architecture",
+        "华为": "Huawei technology headquarters",
+        "芯片": "semiconductor microchip technology",
+        "半导体": "semiconductor manufacturing",
+        "中美": "US China technology competition",
+        "科技制裁": "technology sanctions global",
+        "航天": "space exploration rocket",
+        "量子计算": "quantum computing",
+        "自动驾驶": "autonomous driving car",
+        "机器人": "humanoid robot advanced",
+        "网络安全": "cybersecurity digital",
+        "数字经济": "digital economy smart city",
+        "区块链": "blockchain distributed ledger",
+        "新能源": "renewable energy solar wind",
+        "元宇宙": "metaverse virtual reality",
+        "脑机接口": "brain computer interface neural",
+        "5G": "5G network tower connected",
+        "数据安全": "data protection encryption",
     }
     for cn, en in ai_term_map.items():
         if cn in keyword:
@@ -628,13 +739,18 @@ def _enhance_search_keyword(keyword):
     return keyword
 
 
-# 记录图源健康状态
+def _enhance_search_keyword(keyword):
+    """将中文关键词转为适合英文图片搜索的关键词（优先 LLM 翻译，兜底静态映射）"""
+    return _translate_keyword_via_llm(keyword)
+
+
 _image_sources_status = {
     "unsplash_api": {"status": True, "last_check": 0},
     "pexels_api": {"status": True, "last_check": 0},
-    "unsplash_source": {"status": True, "last_check": 0},
+    "pollinations": {"status": True, "last_check": 0},
     "bing": {"status": True, "last_check": 0}
 }
+
 
 def is_source_available(source_name):
     """检查图源当前是否可用（避免被拉黑或墙掉后重复等待超时）"""
@@ -646,6 +762,7 @@ def is_source_available(source_name):
         return False
     return True
 
+
 def mark_source_failed(source_name):
     """将图源标记为失效"""
     _image_sources_status[source_name] = {
@@ -654,6 +771,7 @@ def mark_source_failed(source_name):
     }
     logger.warning("  ⚠️ 图源 {} 已标记为不可用，将在 5 分钟内跳过，防止请求持续超时", source_name)
 
+
 def mark_source_success(source_name):
     """标记图源成功"""
     _image_sources_status[source_name] = {
@@ -661,34 +779,60 @@ def mark_source_success(source_name):
         "last_check": time.time()
     }
 
+
 def _download_free_image(keyword, save_dir, purpose="body"):
     """
     免费图源降级下载（SD 不可用时自动启用）。
-    优先级：Unsplash API → Pexels API → Unsplash Source → Bing 搜索
-    自动将中文 AI 术语翻译为英文搜索词以提高匹配度。
+    优先级（无需 API Key 的源优先）：
+    1. Pollinations.ai 免费 AI 生图 (无需 Key, 高质量定制图)
+    2. icrawler Bing 搜图 (无需 Key, 实拍高清图)
+    3. Unsplash 官方 API (需 UNSPLASH_ACCESS_KEY, 有则用)
+    4. Pexels 官方 API (需 PEXELS_API_KEY, 有则用)
+    注：百度图片 API 已被反爬封杀 (Forbid spider access)，已移除。
     """
     import requests
     if not keyword or not keyword.strip():
         return None
 
-    if purpose == "cover":
-        width, height = 900, 383
-    else:
-        width, height = 900, 500
+    width, height = (900, 383) if purpose == "cover" else (900, 500)
 
     clean_kw = _sanitize_path(keyword)
     target_dir = os.path.join(save_dir, clean_kw)
     os.makedirs(target_dir, exist_ok=True)
 
-    # 增强搜索关键词（中→英，AI术语映射）
     search_keyword = _enhance_search_keyword(keyword)
-    if search_keyword != keyword:
-        logger.info("🖼️  免费图源: '{}' → 搜索 '{}'", keyword, search_keyword)
+    concise_keyword = _extract_concise_keywords(keyword)
 
-    logger.info("🖼️  免费图源下载 '{}' ...", keyword)
+    logger.info("🖼️  免费图源下载 '{}' (英文检索词: '{}')...", keyword, search_keyword)
 
-    # 1. Unsplash 官方 API（需 UNSPLASH_ACCESS_KEY）
-    if is_source_available("unsplash_api"):
+    # 1. Pollinations.ai 免费 AI 生图 (无需 API Key，最可靠的无 Key 图源)
+    if is_source_available("pollinations"):
+        try:
+            path = _try_pollinations_api(keyword, target_dir, width, height)
+            if path:
+                mark_source_success("pollinations")
+                return path
+            else:
+                mark_source_failed("pollinations")
+        except Exception as e:
+            logger.debug("  Pollinations AI 异常: {}", e)
+            mark_source_failed("pollinations")
+
+    # 2. icrawler Bing 搜索 (无需 API Key，使用英文翻译关键词)
+    if is_source_available("bing"):
+        try:
+            # 优先用 LLM 翻译后的英文关键词搜索
+            bing_keyword = search_keyword if search_keyword != keyword else concise_keyword
+            path = _try_icrawler_bing(bing_keyword, target_dir)
+            if path:
+                mark_source_success("bing")
+                return path
+        except Exception:
+            mark_source_failed("bing")
+
+    # 3. Unsplash 官方 API（有 Key 才尝试）
+    from config import UNSPLASH_ACCESS_KEY
+    if UNSPLASH_ACCESS_KEY and is_source_available("unsplash_api"):
         try:
             img_url = _try_unsplash_api(search_keyword, width, height)
             if img_url:
@@ -701,8 +845,9 @@ def _download_free_image(keyword, save_dir, purpose="body"):
         except Exception:
             pass
 
-    # 2. Pexels 官方 API（需 PEXELS_API_KEY）
-    if is_source_available("pexels_api"):
+    # 4. Pexels 官方 API（有 Key 才尝试）
+    from config import PEXELS_API_KEY
+    if PEXELS_API_KEY and is_source_available("pexels_api"):
         try:
             img_url = _try_pexels_api(search_keyword, width, height)
             if img_url:
@@ -714,32 +859,6 @@ def _download_free_image(keyword, save_dir, purpose="body"):
             mark_source_failed("pexels_api")
         except Exception:
             pass
-
-    # 3. Unsplash Source 直接 URL（无需 API Key）
-    if is_source_available("unsplash_source"):
-        try:
-            img_url = _try_unsplash_source(search_keyword, width, height)
-            if img_url:
-                path = _save_image_from_url(img_url, target_dir, prefix="unsplash_src")
-                if path:
-                    mark_source_success("unsplash_source")
-                    return path
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-            mark_source_failed("unsplash_source")
-        except Exception:
-            pass
-
-    # 4. icrawler Bing 搜索（首次用增强词，失败后用原词）
-    if is_source_available("bing"):
-        try:
-            path = _try_icrawler_bing(search_keyword, target_dir)
-            if not path and search_keyword != keyword:
-                path = _try_icrawler_bing(keyword, target_dir)
-            if path:
-                mark_source_success("bing")
-                return path
-        except Exception:
-            mark_source_failed("bing")
 
     logger.warning("  ⚠️ 所有免费图源均失败，'{}' 无配图", keyword)
     return None

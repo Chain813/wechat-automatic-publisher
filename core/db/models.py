@@ -15,4 +15,5 @@ class ArticleHistory(Base):
     is_published = Column(Boolean, default=False)
     media_id = Column(String(255), nullable=True)
     error_log = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+

@@ -90,14 +90,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </html>
 """
 
-def render_html_to_png(html_body: str, output_path: str, width: int = 700) -> bool:
+def render_html_to_png(html_body: str, output_path: str, width: int = 850) -> bool:
     """
     将 HTML 片段（含 Mermaid 代码或 LaTeX 公式）在本地渲染为 PNG
     
     Args:
         html_body: 包含要渲染的主体 HTML
         output_path: 保存的 PNG 路径
-        width: 浏览器视口宽度
+        width: 浏览器视口宽度（默认 850px，容纳 700px 卡片及外边距）
         
     Returns:
         bool: 渲染是否成功
@@ -117,30 +117,44 @@ def render_html_to_png(html_body: str, output_path: str, width: int = 700) -> bo
             f.write(full_html)
             temp_file = f.name
             
-        # 2. 启动 Headless 浏览器
+        # 2. 启动 Headless 浏览器（宽度设为 850px 充裕视口，避免卡片阴影/外边距右侧截断）
+        viewport_w = max(width, 850)
         browser = build_stealth_browser(headless=True)
-        browser.set_window_size(width, 1000) # 先设一个默认的高窗口
+        browser.set_window_size(viewport_w, 1200)
         
         # 3. 加载页面
         file_url = "file:///" + temp_file.replace(os.sep, "/")
         browser.get(file_url)
         
-        # 4. 等待页面加载完成以及 Mermaid 渲染完毕
-        # 预留一点时间加载 CDN 脚本和执行渲染
-        time.sleep(2.0)
-        
-        # 5. 查找渲染目标元素
-        target = browser.find_element(By.ID, "render-target")
-        
-        # 6. 动态调整浏览器高度以完美契合元素
-        # 获取渲染目标元素的实际尺寸
+        # 4. 动态等待 DOM 渲染完成与高度稳定（解决 CDN/Mermaid/KaTeX 延迟加载导致底部截断）
+        last_h = -1
+        stable_count = 0
+        target = None
+        for _ in range(25):  # 最多等待 5 秒 (25 * 0.2s)
+            try:
+                target = browser.find_element(By.ID, "render-target")
+                curr_h = target.size.get('height', 0)
+                if curr_h > 50 and curr_h == last_h:
+                    stable_count += 1
+                    if stable_count >= 2:  # 高度连续 2 次保持稳定，说明渲染完毕
+                        break
+                else:
+                    stable_count = 0
+                    last_h = curr_h
+            except Exception:
+                pass
+            time.sleep(0.2)
+
+        if not target:
+            target = browser.find_element(By.ID, "render-target")
+
+        # 5. 动态调整浏览器高度以完美契合元素
         size = target.size
-        # 稍微加点余量，避免出现滚动条或边缘裁剪
-        needed_height = max(int(size['height']) + 40, 200)
-        browser.set_window_size(width, needed_height)
-        time.sleep(0.2) # 稳定尺寸
+        needed_height = max(int(size['height']) + 50, 200)
+        browser.set_window_size(viewport_w, needed_height)
+        time.sleep(0.2)  # 稳定尺寸
         
-        # 7. 保存截图（Selenium 的 element.screenshot 会自动裁剪出该元素的区域）
+        # 6. 保存截图（Selenium 的 element.screenshot 会自动裁剪出该元素的区域）
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         target.screenshot(output_path)
         

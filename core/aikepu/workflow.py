@@ -25,14 +25,21 @@ def _generate_article_assets(topic_info, publisher):
     check_cancelled()
 
     import os
-    cover_path = os.path.join("assets", "default_aikepu_cover.jpg")
+    
+    # 强制固定使用用户指定的 AI 科普封面图
+    cover_path = os.path.abspath(os.path.join("assets", "default_aikepu_cover.png"))
     if not os.path.exists(cover_path):
+        print(f"⚠️ 找不到固定封面图: {cover_path}")
         cover_path = None
+
+    topic_title = topic_info.get("title", "AI 科普")
+    print(f"\n🎨 正在撰写 AI 科普文章: {topic_title}")
 
     article_text = generate_aikepu_article(topic_info)
     if not article_text:
         print("❌ AI科普文章生成失败，跳过。")
         return None
+
 
     print("\n🎨 正在执行排版优化与图表渲染...")
     final_html, review_data = process_article_content(
@@ -82,6 +89,7 @@ def _publish_single_topic(topic_info, publisher):
 
             generated = future_assets.result()
             if not generated:
+                release_reserved(node_id)  # 边界条件防护：生成失败也要释放锁
                 return topic_title, False, "文章生成失败", node_id
 
             final_html, review_data, thumb_id, article_text = generated
@@ -112,6 +120,19 @@ def _publish_single_topic(topic_info, publisher):
         if success:
             draft_id = result["media_id"]
             print(f"\n✅ 「{clean_title}」发布成功 → {draft_id}")
+
+            # 仅在发布成功后保存原始 Markdown 文档到本地
+            try:
+                import re as _re
+                os.makedirs(os.path.join("data", "markdown"), exist_ok=True)
+                safe_title = _re.sub(r'[^\w\u4e00-\u9fff\-]', '_', topic_info.get("title", "article"))
+                md_filename = f"{topic_info.get('node_id', 'topic')}_{safe_title}.md"
+                md_filepath = os.path.join("data", "markdown", md_filename)
+                with open(md_filepath, "w", encoding="utf-8") as f:
+                    f.write(article_text)
+                logger.info("  📄 原始 Markdown 文件已自动保存至: {}", md_filepath)
+            except Exception as md_err:
+                logger.warning("  保存 Markdown 文件失败: {}", md_err)
             
             # 写入 SQLite 数据库以供 WebUI 历史记录和查重使用
             try:
@@ -123,6 +144,7 @@ def _publish_single_topic(topic_info, publisher):
                     source_type="aikepu",
                     publish_date=datetime.now().strftime("%Y-%m-%d"),
                     success_status=True,
+                    is_published=False,
                     media_id=draft_id
                 )
                 session.add(ah)
@@ -131,32 +153,13 @@ def _publish_single_topic(topic_info, publisher):
             except Exception as db_err:
                 logger.warning("写入 SQLite 历史失败: {}", db_err)
 
-            mark_published(node_id, clean_title, draft_id=draft_id)
+            mark_published(node_id, clean_title, draft_id=draft_id, status="draft")
             return topic_title, True, None, node_id
         else:
             err = result.get("errmsg", "未知错误")
             print(f"❌ 「{clean_title}」发布失败：{err}")
-            
-            # 写入失败的 SQLite 数据库记录
-            try:
-                from core.db.manager import db_manager
-                from core.db.models import ArticleHistory
-                session = db_manager.get_session()
-                ah = ArticleHistory(
-                    title=clean_title,
-                    source_type="aikepu",
-                    publish_date=datetime.now().strftime("%Y-%m-%d"),
-                    success_status=False,
-                    media_id=None,
-                    error_log=err
-                )
-                session.add(ah)
-                session.commit()
-                db_manager.remove_session()
-            except Exception as db_err:
-                logger.warning("写入 SQLite 历史失败: {}", db_err)
-
-            release_reserved(node_id)  # 发布失败，释放节点以便重试
+            # 本地缓存(锁)处理: 释放保留状态以便下次重试，不写入失败的 ArticleHistory
+            release_reserved(node_id)
             return topic_title, False, err, node_id
 
     except Exception as exc:

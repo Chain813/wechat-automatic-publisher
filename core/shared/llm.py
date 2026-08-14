@@ -29,7 +29,8 @@ class LLMCacheMetrics:
     def get_stats(self):
         total_tokens = self.prompt_cache_hit_tokens + self.prompt_cache_miss_tokens
         hit_rate = (self.prompt_cache_hit_tokens / total_tokens * 100) if total_tokens > 0 else 0.0
-        saved_cny = round(self.prompt_cache_hit_tokens * 0.0000009, 4)
+        saving_rate = calculate_cache_saving_rate()
+        saved_cny = round(self.prompt_cache_hit_tokens * saving_rate, 4)
         return {
             "total_requests": self.total_requests,
             "hit_tokens": self.prompt_cache_hit_tokens,
@@ -37,8 +38,39 @@ class LLMCacheMetrics:
             "hit_rate_pct": round(hit_rate, 1),
             "saved_cny": saved_cny,
             "last_latency_ms": self.last_latency_ms,
-            "is_warm": self.last_warmup_time is not None and (time.time() - self.last_warmup_time < 300)
+            "is_warm": self.last_warmup_time is not None and (time.time() - self.last_warmup_time < 300),
+            "is_peak_hour": is_beijing_peak_hour()
         }
+
+
+def is_beijing_peak_hour():
+    """判断当前时间（北京时间 UTC+8）是否属于 DeepSeek API 峰值时段 (9:00-12:00, 14:00-18:00)"""
+    from datetime import datetime, timezone, timedelta
+    bj_time = datetime.now(timezone(timedelta(hours=8)))
+    hour = bj_time.hour
+    return (9 <= hour < 12) or (14 <= hour < 18)
+
+
+def calculate_cache_saving_rate(model_name: str = None):
+    """
+    根据模型与峰谷时段（2026-08-17生效）计算每 hit 1 个 token 节省的金额（元）。
+    - Flash: 空闲 1.45元/1M (miss 1.5 - hit 0.05), 高峰 2.90元/1M (miss 3.0 - hit 0.10)
+    - Pro:   空闲 4.35元/1M (miss 4.5 - hit 0.15), 高峰 8.70元/1M (miss 9.0 - hit 0.30)
+    """
+    if not model_name:
+        from config import LLM_MODEL
+        model_name = LLM_MODEL
+
+    is_peak = is_beijing_peak_hour()
+    model_lower = str(model_name).lower()
+
+    if "flash" in model_lower:
+        saving_per_1m = 2.90 if is_peak else 1.45
+    else:
+        saving_per_1m = 8.70 if is_peak else 4.35
+
+    return saving_per_1m / 1_000_000
+
 
 cache_metrics = LLMCacheMetrics()
 
@@ -110,9 +142,23 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
             latency_ms = int((time.time() - start_t) * 1000)
             result = response.json()
             usage = result.get('usage', {})
+            prompt_tokens = usage.get('prompt_tokens', 0)
             hit_tokens = usage.get('prompt_cache_hit_tokens', 0)
-            miss_tokens = usage.get('prompt_cache_miss_tokens', 0)
+            if not hit_tokens and 'prompt_tokens_details' in usage:
+                details = usage.get('prompt_tokens_details') or {}
+                hit_tokens = details.get('cached_tokens', 0)
+            miss_tokens = usage.get('prompt_cache_miss_tokens', max(0, prompt_tokens - hit_tokens))
+            
             cache_metrics.record(hit_tokens, miss_tokens, latency_ms)
+
+            # 控制台实时打出 Prompt Cache 命中与加速监控日志
+            if prompt_tokens > 0:
+                stats = cache_metrics.get_stats()
+                logger.info(
+                    "⚡ [DeepSeek Cache] 响应: {}ms | 缓存命中: {} tokens | 未命中: {} tokens | 累计命中率: {}% (估算已省 ¥{})",
+                    latency_ms, hit_tokens, miss_tokens, stats['hit_rate_pct'], stats['saved_cny']
+                )
+
             return result['choices'][0]['message']['content']
 
         except Exception as e:
