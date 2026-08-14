@@ -305,7 +305,8 @@ LLM_API_KEY="你的DeepSeek API Key"
 
 # ===== 可选 =====
 
-# LLM 模型（默认: deepseek-v4-pro）
+# LLM 模型（默认: deepseek-v4-pro，可选 deepseek-v4-flash）
+# 💡 降本提示：DeepSeek 采用峰谷定价，空闲时段 (0:00-9:00, 12:00-14:00, 18:00-24:00) 享受 50% 折扣！
 LLM_MODEL="deepseek-v4-pro"
 
 # GitHub API Token（可选，提高 API 速率限制，匿名60次/小时 → 认证5000次/小时）

@@ -219,7 +219,8 @@ WECHAT_APP_ID="your-wechat-appid"
 WECHAT_APP_SECRET="your-wechat-appsecret"
 LLM_API_KEY="your-deepseek-api-key"
 
-# Optional: LLM Model (default: deepseek-v4-pro)
+# Optional: LLM Model (default: deepseek-v4-pro, or deepseek-v4-flash)
+# 💡 Cost Tip: DeepSeek applies peak-offpeak pricing. Off-peak hours (0:00-9:00, 12:00-14:00, 18:00-24:00 UTC+8) feature a 50% discount!
 LLM_MODEL="deepseek-v4-pro"
 
 # Optional: GitHub API (for GitHub Trending articles, higher rate limit)

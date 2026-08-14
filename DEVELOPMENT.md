@@ -192,6 +192,18 @@ result = call_deepseek_with_retry(
 
 ## 测试方法
 
+### 自动化单元测试（推荐，<0.1s 极速响应）
+
+系统在 `tests/` 目录下提供纯内存隔离的单元测试套件，无需连接外网 API 即可验证核心逻辑与 Prompt Cache 计费公式：
+
+```bash
+# 使用 pytest 运行单元测试（推荐）
+python -m pytest tests/
+
+# 或使用 Python 标准库 unittest 运行
+python -m unittest discover tests
+```
+
 ### 语法检查
 
 ```bash

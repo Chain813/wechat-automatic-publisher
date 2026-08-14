@@ -38,6 +38,8 @@ This document provides detailed explanations of technical terms, tool names, and
 | **Three-Phase Map-Reduce Prompt Self-Optimization** | **(NEW)** A large model interaction architecture optimized for generating long educational articles. Phase 1 generates the outline; Phase 2 optimizes the prompts for each section with specific analogies, hooks, and forbidden overlaps to prevent chapter repetitions; Phase 3 generates the sections serially with preceding look-back context. |
 | **Dual-Channel Preview Mechanism** | **(NEW)** WebUI's article preview policy. It prioritizes local HTML preview caches (stored under `data/previews/`) to render article styling, falling back to WeChat Draft Box API. This enables previewing drafts even for failed publishing tasks. |
 | **Real-time Sources Health Polling** | **(NEW)** A synchronization mechanism for the WebUI data source monitoring page. When the Sources tab is active, polls the backend health API every 3 seconds to keep status in sync with workflow progress. |
+| **DeepSeek Peak-Offpeak Pricing** | **(NEW)** Dynamic pricing rule effective Aug 17, 2026. Splits into peak hours (9:00-12:00, 14:00-18:00) and off-peak hours (50% discount). AutoWeChat automatically detects current peak status and calculates prompt cache savings. |
+| **In-Memory Unit Test Suite** | **(NEW)** Isolated test collection in `tests/test_core.py`. Bypasses external network requests and completes core logic & pricing formula verification in <0.1 seconds. |
 
 ---
 
