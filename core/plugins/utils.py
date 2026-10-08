@@ -102,6 +102,13 @@ def _get_current_date_str():
     return now.strftime("%Y年%m月%d日")
 
 def _is_title_fresh(title):
+    if isinstance(title, str):
+        pass
+    elif hasattr(title, "title"):
+        title = title.title
+    else:
+        title = str(title)
+
     current_year = datetime.now().year
     old_year_match = re.findall(r'(20\d{2})年', title)
     for y in old_year_match:

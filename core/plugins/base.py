@@ -1,5 +1,27 @@
 from abc import ABC, abstractmethod
-from typing import List, Any
+from dataclasses import dataclass
+from typing import List, Any, Optional
+
+
+@dataclass
+class HotspotItem:
+    title: str
+    url: str = ""
+    source_id: str = ""
+    summary: str = ""
+    publish_time: Optional[str] = None
+    raw_content: str = ""
+    tier: int = 2
+
+    def __str__(self) -> str:
+        return self.title
+
+    def __len__(self) -> int:
+        return len(self.title)
+
+    def strip(self, *args, **kwargs) -> str:
+        return self.title.strip(*args, **kwargs)
+
 
 class BaseSourcePlugin(ABC):
     """
