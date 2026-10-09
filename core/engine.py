@@ -7,7 +7,6 @@ from core.hotspots.workflow import run_hotspots_workflow
 from core.github.workflow import run_github_workflow
 from core.aikepu.workflow import run_aikepu_workflow
 from daily_knowledge.workflow import run_daily_knowledge_workflow
-from utils.image_filter import ollama_startup, ollama_shutdown
 from core.shared.runtime import check_cancelled, WorkflowCancelled
 
 def sync_local_history_with_wechat(publisher):
@@ -90,7 +89,6 @@ def run_main(task_type="hotspots"):
     reset_source_health()
 
     try:
-        ollama_startup()
         publisher = WeChatPublisher(WECHAT_APP_ID, WECHAT_APP_SECRET)
         if not publisher.access_token:
             print("❌ 微信发布组件初始化失败，请检查公众号凭证配置。")
@@ -123,7 +121,5 @@ def run_main(task_type="hotspots"):
         raise
     except Exception as exc:
         logger.exception("系统核心崩溃: {}", exc)
-    finally:
-        ollama_shutdown()
 
 __all__ = ["run_main"]

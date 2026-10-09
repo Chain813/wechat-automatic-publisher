@@ -14,10 +14,10 @@ WECHAT_APP_SECRET = os.getenv("WECHAT_APP_SECRET", "")
 
 # 2. AI 配置 (DeepSeek)
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
+LLM_API_KEYS = [k.strip() for k in os.getenv("LLM_API_KEYS", "").split(",") if k.strip()]  # 多 Key 轮询（逗号分隔）
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.deepseek.com")
 
-# 3. Gemini Vision (图片智能评分，选填)
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+# 3. 视觉评估：统一走 DashScope 千问（见下方 QWEN_VL_* 配置）
 
 # 4. 企业微信机器人 (选填，留空则跳过通知)
 QYWECHAT_WEBHOOK = os.getenv("QYWECHAT_WEBHOOK", "")
@@ -37,7 +37,7 @@ HTTP_RETRY_TOTAL = int(os.getenv("HTTP_RETRY_TOTAL", "3"))
 HTTP_RETRY_BACKOFF = float(os.getenv("HTTP_RETRY_BACKOFF", "0.8"))
 
 # 7. LLM 模型参数 (可配置)
-LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-v4-pro")
+LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-v4-flash")
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.75"))
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "8192"))
 LLM_MAX_RETRIES = 3          # API 调用最大重试次数
@@ -61,7 +61,14 @@ RSS_FEEDS = [
     "https://www.ithome.com/rss/",                      # IT之家 RSS (直接)
     "https://sspai.com/feed",                           # 少数派
     "https://36kr.com/feed",                            # 36氪 RSS (直接)
+    "https://www.ifanr.com/feed",                       # 爱范儿 (直接)
+    "https://www.geekpark.net/rss",                     # 极客公园 (直接)
+    "https://www.qbitai.com/feed",                      # 量子位 (直接)
 ]
+
+# 9c. 知识体系连载（原 AI 科普技能树）主题包配置
+KNOWLEDGE_TREES_DIR = os.path.join("data", "knowledge_trees")
+KNOWLEDGE_TREE = os.getenv("KNOWLEDGE_TREE", "aikepu")  # 默认激活的主题包名
 
 # 10. 热点优先过滤类别 (按顺序匹配，三梯队优先级)
 #    第一梯队：AI + 时政交叉（最高优先）
@@ -101,22 +108,35 @@ WECHAT_BODY_HEIGHT = 500
 WECHAT_BODY_MAX_MB = 2
 
 # 12. 本地 Stable Diffusion & 生图模型配置
-IMAGE_GEN_MODEL = os.getenv("IMAGE_GEN_MODEL", "Google Gemini Imagen 3")
+IMAGE_GEN_MODEL = os.getenv("IMAGE_GEN_MODEL", "qwen-image-3.0")
+
+# 国内生图模型：通义万相 qwen-image-3.0 (DashScope/百炼, OpenAI 兼容接口)
+QWEN_IMAGE_API_KEY = os.getenv("QWEN_IMAGE_API_KEY", os.getenv("DASHSCOPE_API_KEY", ""))
+DASHSCOPE_API_KEYS = [k.strip() for k in os.getenv("DASHSCOPE_API_KEYS", "").split(",") if k.strip()]  # 多 Key 轮询（逗号分隔，可跨账号提并发上限）
+QWEN_IMAGE_API_BASE = os.getenv(
+    "QWEN_IMAGE_API_BASE",
+    "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+)
+QWEN_IMAGE_MODEL = os.getenv("QWEN_IMAGE_MODEL", "qwen-image-3.0")
+QWEN_IMAGE_TIMEOUT = int(os.getenv("QWEN_IMAGE_TIMEOUT", "120"))
+QWEN_IMAGE_PROMPT_EXTEND = os.getenv("QWEN_IMAGE_PROMPT_EXTEND", "1") == "1"
+QWEN_IMAGE_SIZE = os.getenv("QWEN_IMAGE_SIZE", "1280*720")  # 锁 720p 控成本（≈¥0.35/张），微信配图够用
+QWEN_IMAGE_MIN_INTERVAL = float(os.getenv("QWEN_IMAGE_MIN_INTERVAL", "4"))   # 生图最小间隔秒（4s ≈ 15张/分钟，低于百炼 QPM）
+QWEN_IMAGE_MAX_CONCURRENCY = int(os.getenv("QWEN_IMAGE_MAX_CONCURRENCY", "1"))  # 生图并发上限（防突发限流）
+QWEN_IMAGE_REDRAW_MODEL = os.getenv("QWEN_IMAGE_REDRAW_MODEL", "qwen-image-3.0-pro")  # 参考图重绘用 Pro（质量优先）
+
+# 国内识图模型：通义千问 Qwen-VL（图片质量 AI 评估，OpenAI 兼容接口）
+QWEN_VL_MODEL = os.getenv("QWEN_VL_MODEL", "qwen-vl-max")
+QWEN_VL_API_BASE = os.getenv("QWEN_VL_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 SD_ENABLED = os.getenv("SD_ENABLED", "True").lower() == "true"
 SD_API_URL = os.getenv("SD_API_URL", "http://127.0.0.1:7860")
 SD_TIMEOUT = int(os.getenv("SD_TIMEOUT", "120"))        # 单次生图超时秒数
 SD_STEPS = int(os.getenv("SD_STEPS", "15"))              # 采样步数（15 兼顾速度与质量）
 SD_MAX_RETRIES = int(os.getenv("SD_MAX_RETRIES", "2"))   # 最大重试次数（不含首次）
 
-# 12b. 免费图源 API Key（选填，SD 不可用时自动降级）
-PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")
-UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY", "")
+# 12b. 图源说明：默认链路为 千问生图 → Bing 搜图 → 本地文字卡兜底（全国内可用，无需境外 Key）
 
-# 13. Ollama 本地视觉模型配置
-OLLAMA_DEFAULT_MODEL = os.getenv("OLLAMA_DEFAULT_MODEL", "gemma4:e2b-it-q4_K_M")
-OLLAMA_VISION_MODEL = os.getenv("OLLAMA_VISION_MODEL", "gemma3:4b")
-
-# 14. 微信敏感词列表 (部分示例，根据实际情况补充)
+# 13. 微信敏感词列表 (部分示例，根据实际情况补充)
 SENSITIVE_WORDS = []  # 留空则跳过敏感词过滤
 
 # 15. 工作流参数
@@ -137,3 +157,8 @@ GITHUB_FIXED_COVER = os.path.join("static", "images", "github_fixed_cover.png")
 # 18. 云端部署配置
 CLOUD_MODE = os.getenv("CLOUD_MODE", "").strip() == "1"
 WEBUI_TOKEN = os.getenv("WEBUI_TOKEN", "").strip()
+
+# 19. 事实核验与外部检索配置
+ENABLE_FACT_SEARCH = os.getenv("ENABLE_FACT_SEARCH", "True").lower() == "true"
+MAX_FACT_SNIPPETS = int(os.getenv("MAX_FACT_SNIPPETS", "4"))
+

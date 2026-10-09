@@ -1,6 +1,6 @@
 """
 ============================================================
-  AI 科普文章生成器 v3.0 (三阶段 Map-Reduce 架构)
+  体系连载文章生成器 v3.0 (三阶段 Map-Reduce 架构)
   阶段1: 大纲生成
   阶段2: LLM 提示词自优化 (跨节一致性保障)
   阶段3: 串行生成 + 上文衔接
@@ -14,19 +14,32 @@ from loguru import logger
 from config import BRAND_NAME
 from core.shared.llm import call_deepseek_with_retry
 
-SYSTEM_PROMPT = f"""
+def _active_theme():
+    """当前激活知识主题包名（用于提示词动态注入）"""
+    try:
+        from core.aikepu.skill_tree import load_skill_tree
+        meta = load_skill_tree().get("meta") or {}
+        return meta.get("column_name") or meta.get("name") or "知识专栏"
+    except Exception:
+        return "知识专栏"
+
+
+def build_system_prompt():
+    """按当前激活主题包动态构建系统提示词"""
+    theme = _active_theme()
+    return f"""
 # 你是谁
 
-你是「{BRAND_NAME}」的 AI 科普专栏作者，一个在 AI 领域深耕多年的技术布道者。你不是在写学术论文——你是在给一群对 AI 充满好奇、但基础参差不齐的普通读者做「知识翻译」。你的人生信条是：没有难懂的技术，只有蹩脚的解释。
+你是「{BRAND_NAME}」的{theme}专栏作者，一个在{theme}领域深耕多年的专业写作者。你不是在写学术论文——你是在给一群对{theme}充满好奇、但基础参差不齐的普通读者做「知识翻译」。你的人生信条是：没有难懂的知识，只有蹩脚的解释。
 
-你的读者可能是产品经理、设计师、创业者、学生，或者单纯对 AI 感兴趣的职场人。他们不是来看代码的——他们是来「搞懂」的。
+你的读者可能是产品经理、设计师、创业者、学生，或者单纯对{theme}感兴趣的职场人。他们不是来看代码的——他们是来「搞懂」的。
 
 # 你的思维习惯
 
-每当你面对一个 AI 概念时，你的第一反应是：
+每当你面对一个复杂概念时，你的第一反应是：
 - "怎么用三句话让完全不懂的人明白这是干什么的？"
 - "日常生活里有什么类比可以解释这个？"
-- "这个概念在整个 AI 知识图谱里处于什么位置？"
+- "这个概念在整个知识体系里处于什么位置？"
 
 你对「类比」有执念——你相信一个好的类比胜过十段技术描述。你会花大量心思找到一个精准的类比，让读者会心一笑：「原来如此！」
 
@@ -60,8 +73,8 @@ SYSTEM_PROMPT = f"""
 ## 红色加粗（全文最核心的 3-5 个「顿悟时刻」）
 用 **{{你的核心洞察}}** 格式。花括号会被系统转为红色高亮。
 这是读者读完会拍大腿的点，是你整篇文章的价值所在。
-- **{{注意力机制的本质，是让模型学会「选择性遗忘」——忽略噪音，聚焦关键}}**
-- **{{RAG 不是简单的「搜索+生成」，而是给大模型装了一个会自己翻书的外脑}}**
+- **{{真正的成长，是把复杂概念拆解成一个个「原来如此」的顿悟时刻}}**
+- **{{掌握一个领域的标志，不是记住多少术语，而是能用自己的话把它讲给外行听懂}}**
 
 ## 黑色加粗（关键概念、逻辑推导与因果转折）
 每段至少 1-2 处。必须重点加粗关于逻辑连贯的核心节点：
@@ -71,7 +84,8 @@ SYSTEM_PROMPT = f"""
 让读者仅凭扫读加粗部分即可一目了然串联起整篇文章的因果脉络与逻辑推理线索。
 """
 
-# AI科普文章的额外要求：技术图表与公式/对比卡片
+
+# 知识连载文章的额外要求：结构化图表与对比卡片
 DIAGRAM_HINTS = """
 在文章中，请在需要图解或展示数学公式的关键位置插入图表占位符（而非照片配图）。
 格式：【此处绘制图表：描述】
@@ -130,8 +144,9 @@ def _generate_outline(title, summary, diff_label, tags_str, custom_prompt=""):
     输出 JSON 数组，每节包含 title、description、complexity。
     """
     custom_prompt_block = f"\n## 本节专属定制策略\n{custom_prompt}\n请确保大纲的结构设计（概念引入、核心拆解）严格符合上述策略的指导。" if custom_prompt else ""
+    theme = _active_theme()
     
-    outline_prompt = f"""# 任务：为 AI 科普长文设计分节大纲
+    outline_prompt = f"""# 任务：为{theme}长文设计分节大纲
 
 ## 文章主题
 标题：{title}
@@ -218,9 +233,10 @@ def _optimize_section_prompts(title, diff_label, sections, custom_prompt=""):
 
     custom_prompt_block = f"\n## 本文专属定制策略（请融入到各节的写作指令中）\n{custom_prompt}\n" if custom_prompt else ""
 
-    optimize_prompt = f"""# 任务：为 AI 科普长文的每一节生成高度定制化的写作指令
+    theme = _active_theme()
+    optimize_prompt = f"""# 任务：为{theme}长文的每一节生成高度定制化的写作指令
 
-你是一位资深的科普编辑总监。下面是一篇关于「{title}」（难度：{diff_label}）的 AI 科普长文大纲。
+你是一位资深的专栏编辑总监。下面是一篇关于「{title}」（难度：{diff_label}）的{theme}长文大纲。
 {custom_prompt_block}
 ## 完整大纲
 {sections_overview}
@@ -315,16 +331,22 @@ def _fallback_to_basic_prompts(sections):
 #  阶段 3: 串行生成 + 上文衔接
 # ==========================================
 def load_aikepu_skill_prompt() -> str:
-    """加载 prompts/aikepu_writing_skill.md 独立 Skill 规则文件给大模型"""
+    """加载写作 Skill 规则文件：优先 prompts/{主题包名}_skill.md（定制内容的核心载体），
+    不存在则回退 prompts/aikepu_writing_skill.md，最后回退动态系统提示词"""
     import os
-    skill_path = os.path.join("prompts", "aikepu_writing_skill.md")
-    if os.path.exists(skill_path):
-        try:
-            with open(skill_path, "r", encoding="utf-8") as f:
-                return f.read().strip()
-        except Exception as e:
-            logger.warning("加载 Skill 文件失败: {}", e)
-    return SYSTEM_PROMPT
+    from core.aikepu.skill_tree import get_active_tree_name
+    candidates = [
+        os.path.join("prompts", f"{get_active_tree_name()}_skill.md"),
+        os.path.join("prompts", "aikepu_writing_skill.md"),
+    ]
+    for skill_path in candidates:
+        if os.path.exists(skill_path):
+            try:
+                with open(skill_path, "r", encoding="utf-8") as f:
+                    return f.read().strip()
+            except Exception as e:
+                logger.warning("加载 Skill 文件失败: {}", e)
+    return build_system_prompt()
 
 
 def _generate_section(title, diff_label, opt_section, prev_tail, section_index, total_sections, custom_prompt=""):
@@ -357,7 +379,8 @@ def _generate_section(title, diff_label, opt_section, prev_tail, section_index, 
 
     custom_prompt_block = f"\n## 本文专属定制策略 (全局最高优先级)\n你需要时刻牢记以下宏观策略基调：\n{custom_prompt}\n" if custom_prompt else ""
 
-    section_prompt = f"""# 任务：撰写 AI 科普长文的第 {section_index + 1} 节（共 {total_sections} 节）
+    theme = _active_theme()
+    section_prompt = f"""# 任务：撰写{theme}长文的第 {section_index + 1} 节（共 {total_sections} 节）
 
 ## 全文信息
 全文标题：{title}
@@ -502,7 +525,7 @@ def generate_digest(topic_title, article_text=None):
         context = f"\n文章开头：{article_text[:500]}\n"
 
     prompt = (
-        f"为以下 AI 科普文章写一条微信摘要（用于推送通知）。\n"
+        f"为以下 体系连载文章写一条微信摘要（用于推送通知）。\n"
         f"标题：{topic_title}{context}\n"
         f"要求：\n"
         f"- 字数严格 ≤{WECHAT_DIGEST_MAX_LEN} 字\n"

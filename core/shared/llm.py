@@ -3,6 +3,8 @@ import time
 import requests
 from loguru import logger
 from utils.http_client import build_api_session
+from utils.key_pool import ApiKeyPool
+
 from config import (
     LLM_API_KEY, LLM_BASE_URL, LLM_TIMEOUT,
     LLM_MODEL, LLM_TEMPERATURE, LLM_MAX_TOKENS, LLM_MAX_RETRIES,
@@ -74,12 +76,24 @@ def calculate_cache_saving_rate(model_name: str = None):
 
 cache_metrics = LLMCacheMetrics()
 
+_llm_key_pool = None
+
+
+def _get_llm_key_pool():
+    """懒加载 DeepSeek Key 轮询池（LLM_API_KEYS 逗号分隔 > 单 LLM_API_KEY）"""
+    global _llm_key_pool
+    if _llm_key_pool is None:
+        from config import LLM_API_KEYS
+        keys = list(LLM_API_KEYS) if LLM_API_KEYS else ([LLM_API_KEY] if LLM_API_KEY else [])
+        _llm_key_pool = ApiKeyPool(keys)
+    return _llm_key_pool
+
 
 def warmup_deepseek_cache():
     """轻量级预热 DeepSeek 节点 Prompt Cache"""
     try:
-        from core.aikepu.processor import SYSTEM_PROMPT
-        call_deepseek_with_retry("ping warmup", system_content=SYSTEM_PROMPT, max_tokens=1)
+        from core.aikepu.processor import build_system_prompt
+        call_deepseek_with_retry("ping warmup", system_content=build_system_prompt(), max_tokens=1)
         cache_metrics.last_warmup_time = time.time()
         return True
     except Exception as e:
@@ -111,15 +125,20 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
         max_tokens = LLM_MAX_TOKENS
     
     target_model = model or LLM_MODEL
-
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {LLM_API_KEY}"
-    }
+    key_pool = _get_llm_key_pool()
+    if key_pool.size == 0:
+        logger.error("未配置 LLM_API_KEY / LLM_API_KEYS")
+        return ""
 
     for attempt in range(1, max_retries + 1):
         # 每次重试前和调用前检查中断/暂停信号
         check_cancelled()
+
+        api_key = key_pool.get_key()
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}"
+        }
 
         try:
             data = {
@@ -159,6 +178,7 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
                     latency_ms, hit_tokens, miss_tokens, stats['hit_rate_pct'], stats['saved_cny']
                 )
 
+            key_pool.report_success(api_key)
             return result['choices'][0]['message']['content']
 
         except Exception as e:
@@ -173,7 +193,8 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
             if isinstance(e, requests.exceptions.HTTPError):
                 status = getattr(e.response, 'status_code', 500)
                 if status == 429:
-                    logger.warning("AI 限流 429 (第 {}/{} 次)，退避重试", attempt, max_retries)
+                    logger.warning("AI 限流 429 (第 {}/{} 次)，切换 Key 退避重试", attempt, max_retries)
+                    key_pool.report_failure(api_key)
                     if attempt < max_retries:
                         _interruptible_sleep(backoff_base * (2 ** attempt))
                     continue
@@ -181,6 +202,10 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
                     logger.error("AI 服务端错误 {} (第 {}/{} 次)", status, attempt, max_retries)
                     if attempt < max_retries:
                         _interruptible_sleep(backoff_base * (2 ** (attempt - 1)))
+                    continue
+                if status in (401, 403) and attempt < max_retries:
+                    logger.warning("AI 认证失败 {}，切换下一个 Key 重试", status)
+                    key_pool.report_failure(api_key, cooldown_seconds=300)
                     continue
                 logger.error("AI 客户端错误 {}，不重试: {}", status, e)
                 return ""

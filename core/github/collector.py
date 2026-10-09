@@ -72,10 +72,7 @@ LANG_DIAGRAM_MAP = {
 
 
 def _get_github_client():
-    """获取 PyGithub 客户端（支持可选 token）"""
-    token = os.getenv("GITHUB_TOKEN", "")
-    if token:
-        return Github(token)
+    """获取 PyGithub 客户端（匿名模式，无需 Token；GitHub API 国内可直连）"""
     return Github()
 
 
@@ -121,14 +118,90 @@ def _find_other_docs_files(repo):
 
 
 # ================================================================
-#  Demo URL 多策略检测
+#  Demo URL 多策略检测 & 安全域名白名单
 # ================================================================
-# 已知部署平台域名
-_DEPLOY_PLATFORMS = [
-    'vercel.app', 'netlify.app', 'github.io', 'onrender.com',
-    'fly.dev', 'railway.app', 'herokuapp.com', 'surge.sh',
-    'pages.dev', 'workers.dev', 'glitch.me', 'repl.co',
+# 截图安全域名白名单
+SAFE_SCREENSHOT_DOMAINS = [
+    'github.io', 'vercel.app', 'netlify.app', 'pages.dev',
+    'workers.dev', 'fly.dev', 'railway.app', 'onrender.com',
+    'herokuapp.com', 'surge.sh', 'glitch.me', 'repl.co',
+    'huggingface.co', 'hf.space', 'streamlit.app',
 ]
+_DEPLOY_PLATFORMS = SAFE_SCREENSHOT_DOMAINS
+
+
+def is_safe_screenshot_url(url: str) -> bool:
+    """
+    检查在线 UI / Demo 链接是否属于安全可信任域名白名单。
+    非白名单域名一律拒绝启动无头浏览器截图，防止钓鱼和恶意网页。
+    """
+    if not url or not isinstance(url, str):
+        return False
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url.strip())
+        if parsed.scheme not in ("http", "https"):
+            return False
+        hostname = (parsed.hostname or "").lower()
+        if not hostname:
+            return False
+        for domain in SAFE_SCREENSHOT_DOMAINS:
+            domain = domain.lower()
+            if hostname == domain or hostname.endswith("." + domain):
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def is_qualified_repository(repo) -> tuple[bool, str]:
+    """
+    GitHub 真实性四维过滤器：
+    1. 拦截已归档仓库 (archived)
+    2. 拦截空壳 PPT 仓库 (size < 50KB)
+    3. 拦截刷 Star 仓库 (forks/stars 比例 < 0.015)
+
+    返回: (is_qualified: bool, reason: str)
+    """
+    if repo is None:
+        return False, "无效的仓库对象"
+
+    # 1. 归档检测
+    archived = getattr(repo, "archived", None)
+    if archived is None and isinstance(repo, dict):
+        archived = repo.get("archived", False)
+    if archived:
+        return False, "仓库已归档 (archived)"
+
+    # 2. 空壳检测 (size < 50KB)
+    size = getattr(repo, "size", None)
+    if size is None and isinstance(repo, dict):
+        size = repo.get("size", 0)
+    size = size if size is not None else 0
+    if size < 50:
+        return False, f"仓库体积过小 ({size}KB < 50KB)，疑似空壳项目"
+
+    # 3. 刷 Star 检测 (forks/stars 比例 < 0.015)
+    stars = getattr(repo, "stargazers_count", None)
+    if stars is None:
+        stars = getattr(repo, "stars", None)
+    if stars is None and isinstance(repo, dict):
+        stars = repo.get("stargazers_count", repo.get("stars", 0))
+    stars = stars if stars is not None else 0
+
+    forks = getattr(repo, "forks_count", None)
+    if forks is None:
+        forks = getattr(repo, "forks", None)
+    if forks is None and isinstance(repo, dict):
+        forks = repo.get("forks_count", repo.get("forks", 0))
+    forks = forks if forks is not None else 0
+
+    if stars > 0:
+        ratio = forks / stars
+        if ratio < 0.015:
+            return False, f"Fork/Star 比例过低 ({ratio:.4f} < 0.015)，疑似刷量仓库"
+
+    return True, "合格"
 
 
 def _detect_demo_url(repo, chinese_readme_excerpt, readme_excerpt):
@@ -239,6 +312,10 @@ def fetch_one_worthy_project():
                 raw_repos = list(g.search_repositories(query=query, sort="stars", order="desc")[offset:offset+20])
                 for repo in raw_repos:
                     if repo.full_name not in history:
+                        qualified, reason = is_qualified_repository(repo)
+                        if not qualified:
+                            logger.info(f"  ⏭️ 过滤不合格仓库 {repo.full_name}: {reason}")
+                            continue
                         candidates.append(repo)
                         if len(candidates) >= 20:
                             break
@@ -905,14 +982,16 @@ def take_live_ui_screenshot(repo_name, homepage_url, save_dir="assets"):
     """
     通过无头浏览器直接访问项目的主页/在线 Demo 地址，并截取 UI 截图。
     放弃本地 Clone/部署策略，规避安全风险与依赖构建失败问题。
+    包含安全域名白名单防护，非白名单链接绝不启动 Selenium 访问。
     """
     import os
     from PIL import Image
-    from utils.spider import build_stealth_browser
 
-    if not homepage_url or not homepage_url.startswith("http"):
-        logger.warning(f"  跳过在线 UI 截图：主页地址 '{homepage_url}' 无效")
+    if not homepage_url or not is_safe_screenshot_url(homepage_url):
+        logger.warning(f"  跳过在线 UI 截图：主页地址 '{homepage_url}' 不在安全域名白名单中或无效")
         return None
+
+    from utils.spider import build_stealth_browser
 
     logger.info(f"  🖥️ 正在截取在线 UI 页面: {homepage_url}")
     os.makedirs(save_dir, exist_ok=True)
@@ -958,4 +1037,14 @@ def take_live_ui_screenshot(repo_name, homepage_url, save_dir="assets"):
                 browser.quit()
             except Exception:
                 pass
-__all__ = ["fetch_one_worthy_project", "generate_code_screenshot", "get_repo_code_snippet", "save_github_history", "take_github_readme_screenshot", "take_live_ui_screenshot"]
+__all__ = [
+    "fetch_one_worthy_project",
+    "generate_code_screenshot",
+    "get_repo_code_snippet",
+    "is_qualified_repository",
+    "is_safe_screenshot_url",
+    "SAFE_SCREENSHOT_DOMAINS",
+    "save_github_history",
+    "take_github_readme_screenshot",
+    "take_live_ui_screenshot",
+]

@@ -21,18 +21,42 @@ from core.db.models import ArticleHistory
 
 # --- 辅助方法 ---
 
+def _jsdelivr_mirror(url):
+    """raw.githubusercontent.com → cdn.jsdelivr.net 国内可直连镜像"""
+    import re as _re
+    m = _re.match(r"https?://raw\.githubusercontent\.com/([^/]+)/([^/]+)/([^/]+)/(.+)$", url)
+    if m:
+        user, repo, branch, path = m.groups()
+        return f"https://cdn.jsdelivr.net/gh/{user}/{repo}@{branch}/{path}"
+    return url
+
+
 def _download_and_upload_url(url, publisher, prefix="remote"):
     from utils.http_client import build_api_session
     tmp_path = None
+    candidates = [url]
+    if "raw.githubusercontent.com" in url:
+        candidates.append(_jsdelivr_mirror(url))
     try:
         session = build_api_session()
-        res = session.get(url, timeout=15)
-        if res.status_code != 200:
-            logger.warning("  下载失败 status={}: {}", res.status_code, url[:80])
+        res = None
+        used_url = url
+        for cand in candidates:
+            try:
+                r = session.get(cand, timeout=15)
+                if r.status_code == 200 and len(r.content) > 5000:
+                    res, used_url = r, cand
+                    break
+            except Exception:
+                res = None
+        if res is None or res.status_code != 200:
+            logger.warning("  下载失败 status={}: {}", getattr(res, "status_code", "网络异常"), url[:80])
             return None
         if len(res.content) <= 5000:
             logger.warning("  图片太小 ({} bytes): {}", len(res.content), url[:80])
             return None
+        if used_url != url:
+            logger.info("  🌐 已切换 jsdelivr 镜像下载: {}", url[:60])
 
         ext = ".jpg"
         if ".png" in url.lower():
@@ -247,7 +271,7 @@ class PublishGithubNode(BaseNode):
         for warning in title_warnings:
             print(f"  ⚠️ 标题警告: {warning}")
 
-        _print_review_report(
+        all_ok = _print_review_report(
             title=clean_title,
             word_count=review_data["word_count"],
             image_count=review_data["image_count"],
@@ -255,6 +279,16 @@ class PublishGithubNode(BaseNode):
             cover_ok=thumb_id is not None,
             digest=digest,
         )
+
+        # 主编审校门禁 (Critic & Quality Gate)
+        from core.pipeline.critic import evaluate_article_quality, format_critic_report
+        review_res = evaluate_article_quality(clean_title, final_html)
+        print(format_critic_report(review_res))
+
+        if not review_res["passed"] or not all_ok:
+            err = f"未通过主编质量门禁 ({review_res['score']}分): {'; '.join(review_res['critic_issues'])}"
+            print(f"❌ 门禁拦截发布：「{clean_title}」— {err}")
+            return False
 
         print("\n🚀 正在同步至微信公众号云端草稿箱...")
         success, result = publisher.publish_and_notify(clean_title, final_html, thumb_id, digest)
@@ -269,6 +303,7 @@ class PublishGithubNode(BaseNode):
         save_github_history(repo_names)
         
         try:
+            primary_repo_url = f"https://github.com/{projects[0]['repo']}" if projects else ""
             session = db_manager.get_session()
             ah = ArticleHistory(
                 title=clean_title,
@@ -276,7 +311,10 @@ class PublishGithubNode(BaseNode):
                 publish_date=datetime.now().strftime("%Y-%m-%d"),
                 success_status=True,
                 media_id=draft_id,
-                error_log=None
+                error_log=None,
+                quality_score=review_res["score"],
+                source_url=primary_repo_url,
+                status="DRAFT"
             )
             session.add(ah)
             session.commit()

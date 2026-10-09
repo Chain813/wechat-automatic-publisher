@@ -1,6 +1,6 @@
 """
 ============================================================
-  AI 科普发布流水线 v1.0
+  体系连载发布流水线 v1.0
   技能树选题 → 教育风文章生成 → 图表渲染 → 微信草稿箱
 ============================================================
 """
@@ -26,14 +26,14 @@ def _generate_article_assets(topic_info, publisher):
 
     import os
     
-    # 强制固定使用用户指定的 AI 科普封面图
+    # 强制固定使用用户指定的 体系连载封面图
     cover_path = os.path.abspath(os.path.join("assets", "default_aikepu_cover.png"))
     if not os.path.exists(cover_path):
         print(f"⚠️ 找不到固定封面图: {cover_path}")
         cover_path = None
 
-    topic_title = topic_info.get("title", "AI 科普")
-    print(f"\n🎨 正在撰写 AI 科普文章: {topic_title}")
+    topic_title = topic_info.get("title", "体系连载")
+    print(f"\n🎨 正在撰写 体系连载文章: {topic_title}")
 
     article_text = generate_aikepu_article(topic_info)
     if not article_text:
@@ -101,7 +101,7 @@ def _publish_single_topic(topic_info, publisher):
             digest = future_digest.result()
             digest_text = digest[:120] if digest else ""
 
-        _print_review_report(
+        all_ok = _print_review_report(
             title=clean_title,
             word_count=review_data["word_count"],
             image_count=review_data["image_count"],
@@ -110,6 +110,17 @@ def _publish_single_topic(topic_info, publisher):
             digest=digest_text,
             is_long_article=True,
         )
+
+        # 主编审校门禁 (Critic & Quality Gate)
+        from core.pipeline.critic import evaluate_article_quality, format_critic_report
+        review_res = evaluate_article_quality(clean_title, final_html)
+        print(format_critic_report(review_res))
+
+        if not review_res["passed"] or not all_ok:
+            err = f"未通过主编质量门禁 ({review_res['score']}分): {'; '.join(review_res['critic_issues'])}"
+            print(f"❌ 门禁拦截发布：「{clean_title}」— {err}")
+            release_reserved(node_id)
+            return topic_title, False, err, node_id
 
         # 发布到微信草稿箱
         success, result = publisher.publish_and_notify(
@@ -145,7 +156,10 @@ def _publish_single_topic(topic_info, publisher):
                     publish_date=datetime.now().strftime("%Y-%m-%d"),
                     success_status=True,
                     is_published=False,
-                    media_id=draft_id
+                    media_id=draft_id,
+                    quality_score=review_res["score"],
+                    source_url=f"aikepu://node/{node_id}",
+                    status="DRAFT"
                 )
                 session.add(ah)
                 session.commit()
@@ -170,7 +184,7 @@ def _publish_single_topic(topic_info, publisher):
 
 def run_aikepu_workflow(publisher):
     """
-    AI 科普发布主流水线：
+    体系连载发布主流水线：
     1. 从技能树中选择下一个可发布节点
     2. 生成教育风格文章
     3. 智能配图

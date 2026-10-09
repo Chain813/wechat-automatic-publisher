@@ -5,10 +5,140 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AutoWeChat - AI Console</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet" href="/static/css/image-studio.css">
+    <style>
+        .audit-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 13px;
+        }
+        .audit-table th {
+            text-align: left;
+            padding: 12px 14px;
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-secondary, #94a3b8);
+            font-weight: 600;
+            font-size: 12px;
+            border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+            white-space: nowrap;
+        }
+        .audit-table td {
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border-light, rgba(255, 255, 255, 0.05));
+            vertical-align: middle;
+            color: var(--text, #f1f5f9);
+        }
+        .audit-table tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+        .badge-score-high {
+            background: rgba(16, 185, 129, 0.15);
+            color: #10b981;
+            border: 1px solid rgba(16, 185, 129, 0.35);
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 11px;
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+        }
+        .badge-score-mid {
+            background: rgba(245, 158, 11, 0.15);
+            color: #f59e0b;
+            border: 1px solid rgba(245, 158, 11, 0.35);
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 11px;
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+        }
+        .badge-score-low {
+            background: rgba(239, 68, 68, 0.15);
+            color: #ef4444;
+            border: 1px solid rgba(239, 68, 68, 0.35);
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 11px;
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+        }
+        .badge-pending {
+            background: rgba(245, 158, 11, 0.15);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.4);
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .badge-approved {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.4);
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .source-link-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            color: #38bdf8;
+            text-decoration: none;
+            font-size: 12px;
+            margin-top: 4px;
+            max-width: 320px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .source-link-tag:hover {
+            text-decoration: underline;
+            color: #7dd3fc;
+        }
+        .btn-audit-approve {
+            background: rgba(16, 185, 129, 0.18);
+            border: 1px solid #10b981;
+            color: #10b981;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-audit-approve:hover {
+            background: #10b981;
+            color: #fff;
+        }
+        .btn-audit-preview {
+            background: rgba(56, 189, 248, 0.12);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            color: #38bdf8;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-audit-preview:hover {
+            background: #0284c7;
+            color: #fff;
+        }
+    </style>
 </head>
 <body>
+    <canvas id="threejs-bg"></canvas>
     <div class="app-container">
         <aside class="sidebar glass-panel">
             <div class="brand">
@@ -21,7 +151,7 @@
                     <span class="icon">📊</span> <span data-i18n="nav-console">Console</span>
                 </a>
                 <a href="#" class="nav-item" data-target="skill-tree-view" id="nav-skill-tree-link">
-                    <span class="icon">🎓</span> <span data-i18n="nav-skill-tree">Skill Tree</span>
+                    <span class="icon">🎓</span> <span data-i18n="nav-skill-tree">体系连载</span>
                 </a>
                 <a href="#" class="nav-item" data-target="history" id="nav-history-link">
                     <span class="icon">📜</span> <span data-i18n="nav-history">History</span>
@@ -90,8 +220,8 @@
                     <div class="module-card glass-panel" style="padding: 20px; display: flex; flex-direction: column; justify-content: space-between;">
                         <div>
                             <div style="font-size: 24px; margin-bottom: 8px;">🎓</div>
-                            <h3 style="margin-bottom: 8px; font-size: 16px;" data-i18n="task-aikepu">AI 科普</h3>
-                            <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5;">基于技能树前置依赖，智能解锁下一个图谱节点，生成体系化的硬核教程。</p>
+                            <h3 style="margin-bottom: 8px; font-size: 16px;" data-i18n="task-aikepu">体系连载</h3>
+                            <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5;">基于知识体系前置依赖，智能解锁下一个主题节点，生成体系化的深度连载。支持自定义知识库。</p>
                         </div>
                         <button class="btn btn-primary glow-effect btn-module-start" data-task="aikepu" style="width: 100%;">
                             <span class="btn-icon">▶</span> <span data-i18n="btn-start">Start</span>
@@ -165,7 +295,7 @@
                 <div class="glass-panel aikepu-tree-panel mb-4" style="padding: 16px 20px; margin-top: 16px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
                         <div style="font-weight: 700; font-size: 14px; display:flex; align-items:center; gap:8px;">
-                            <span>🎓 AI 科普技能树动态进度 (微信同步)</span>
+                            <span>🎓 体系连载动态进度 (微信同步)</span>
                             <span id="skill-tree-badge" class="badge" style="background: rgba(37, 99, 235, 0.1); color: #2563eb; font-size: 11px; padding: 2px 8px; border-radius: 12px;">自动对齐已发表记录</span>
                         </div>
                         <div style="display:flex; align-items:center; gap:12px;">
@@ -180,7 +310,7 @@
                     </div>
                     <div style="font-size: 12px; color: #94a3b8; display:flex; align-items:center; gap: 6px;">
                         <span>🎯 动态解锁下一个最佳选题：</span>
-                        <strong id="skill-tree-next-topic" style="color: #0f172a; font-weight: 600;">加载中...</strong>
+                        <strong id="skill-tree-next-topic" style="color: var(--text); font-weight: 600;">加载中...</strong>
                     </div>
                 </div>
                 <div class="terminal-container glass-panel mt-4">
@@ -203,10 +333,15 @@
             <section id="skill-tree-view" class="view-section">
                 <header class="view-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
                     <div>
-                        <h2>⚡ AI 全栈科普 30 核心知识点全景拓扑图谱</h2>
-                        <p>知识图谱 DAG 有向无环图 · 严谨先修依赖校验 · 微信全量同步状态</p>
+                        <h2 id="skill-tree-view-title">⚡ 知识体系全景拓扑图谱</h2>
+                        <p>知识图谱 DAG 有向无环图 · 严谨先修依赖校验 · 微信全量同步状态 · 支持自定义知识库</p>
                     </div>
-                    <div style="display:flex; gap:10px;">
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <select id="knowledge-tree-select" class="form-control" style="width:auto; min-width:160px; font-size:13px; padding:6px 10px;" title="切换知识体系主题包"></select>
+                        <button id="btn-import-tree" class="btn btn-secondary" style="font-size:13px; padding:6px 14px;">
+                            <span class="btn-icon">📥</span> 导入自定义知识库
+                        </button>
+                        <input type="file" id="tree-file-input" accept=".json,application/json" style="display:none;">
                         <button id="btn-sync-wechat-skill-tree" class="btn btn-secondary" style="font-size:13px; padding:6px 14px; border-color: rgba(16, 185, 129, 0.4); color: #10b981;">
                             <span class="btn-icon">💬</span> 微信同步
                         </button>
@@ -269,26 +404,34 @@
                 </div>
             </section>
 
-            <!-- History -->
+            <!-- History & Audit Review Workbench -->
             <section id="history" class="view-section">
                 <header class="view-header">
-                    <h2 data-i18n="history-title">History</h2>
-                    <p data-i18n="history-subtitle">Published articles and results</p>
+                    <h2 data-i18n="history-title">历史记录与人机待审工作台</h2>
+                    <p data-i18n="history-subtitle">人机协同审核、质量评分、信源溯源与微信草稿箱发布</p>
                 </header>
                 <div class="history-header-actions">
                     <div class="history-tabs">
-                        <button class="history-tab active" id="tab-history-unsent" data-tab="unsent" data-i18n="tab-unsent">未发送</button>
-                        <button class="history-tab" id="tab-history-sent" data-tab="sent" data-i18n="tab-sent">已发送</button>
+                        <button class="history-tab active" id="tab-history-all" data-tab="all">全部文章</button>
+                        <button class="history-tab" id="tab-history-pending" data-tab="pending">⏳ 待审池</button>
+                        <button class="history-tab" id="tab-history-approved" data-tab="approved">✨ 高分通过</button>
+                        <button class="history-tab" id="tab-history-unsent" data-tab="unsent" data-i18n="tab-unsent">📝 草稿箱</button>
+                        <button class="history-tab" id="tab-history-sent" data-tab="sent" data-i18n="tab-sent">🚀 已群发</button>
                     </div>
-                    <button class="btn btn-danger btn-delete-batch" id="btn-delete-selected" disabled>
-                        <span class="btn-icon">🗑</span> <span data-i18n="btn-delete-selected">批量删除</span>
-                    </button>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <button class="btn btn-secondary" id="btn-refresh-history" style="font-size:12px; padding:6px 14px;">
+                            <span class="btn-icon">🔄</span> 刷新列表
+                        </button>
+                        <button class="btn btn-danger btn-delete-batch" id="btn-delete-selected" disabled style="display:none;">
+                            <span class="btn-icon">🗑</span> <span data-i18n="btn-delete-selected">批量删除</span>
+                        </button>
+                    </div>
                 </div>
                 <div class="history-select-all-container" id="history-select-all-box" style="display:none;">
                     <input type="checkbox" id="chk-history-select-all" class="history-select-checkbox">
                     <label for="chk-history-select-all" data-i18n="label-select-all" style="cursor:pointer; user-select:none;">全选</label>
                 </div>
-                <div id="history-content" class="glass-panel history-panel">
+                <div id="history-content" class="glass-panel history-panel" style="overflow-x:auto;">
                     <div class="log-line system">Loading...</div>
                 </div>
             </section>
@@ -324,7 +467,8 @@
                             <select id="sched-task-type" class="form-control">
                                 <option value="hotspots">Hotspots</option>
                                 <option value="github">GitHub</option>
-                                <option value="aikepu">AI 科普</option>
+                                <option value="aikepu">体系连载</option>
+                                <option value="daily_knowledge">每日小知识</option>
                             </select>
                         </div>
                         <div class="col">
@@ -365,14 +509,30 @@
                         <input type="password" id="llm-apikey" name="LLM_API_KEY" class="form-control" placeholder="sk-xxxx">
                     </div>
                     <div class="form-group">
-                        <label for="gemini-apikey" data-i18n="label-gemini-apikey">Gemini API Key (optional)</label>
-                        <input type="password" id="gemini-apikey" name="GEMINI_API_KEY" class="form-control" placeholder="AIzaSy...">
+                        <label for="dashscope-apikey">DashScope API Key（千问 · 生图+识图，必填）</label>
+                        <input type="password" id="dashscope-apikey" name="DASHSCOPE_API_KEY" class="form-control" placeholder="sk-...">
+                    </div>
+                    <div class="form-group row">
+                        <div class="col">
+                            <label>生图模型（Qwen-Image）</label>
+                            <select id="qwen-image-model" name="QWEN_IMAGE_MODEL" class="form-control">
+                                <option value="qwen-image-3.0">qwen-image-3.0（标准 · 省钱）</option>
+                                <option value="qwen-image-3.0-pro">qwen-image-3.0-pro（Pro · 高质量）</option>
+                            </select>
+                        </div>
+                        <div class="col">
+                            <label>识图模型（Qwen-VL）</label>
+                            <select id="qwen-vl-model" name="QWEN_VL_MODEL" class="form-control">
+                                <option value="qwen-vl-max">qwen-vl-max（旗舰）</option>
+                                <option value="qwen3-vl-flash">qwen3-vl-flash（省钱）</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label for="llm-model" data-i18n="label-llm-model">LLM Model</label>
                         <select id="llm-model" name="LLM_MODEL" class="form-control">
+                            <option value="deepseek-v4-flash" selected>DeepSeek V4 Flash</option>
                             <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
-                            <option value="deepseek-v4-flash">DeepSeek V4 Flash</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -381,13 +541,13 @@
                     </div>
                     <div class="form-group">
                         <label for="image-gen-model" data-i18n="label-image-gen-model">提示词目标生图模型 (Image Model)</label>
-                        <input type="text" id="image-gen-model" name="IMAGE_GEN_MODEL" class="form-control" placeholder="Google Gemini Imagen 3 / Midjourney v6 / FLUX.1">
+                        <input type="text" id="image-gen-model" name="IMAGE_GEN_MODEL" class="form-control" placeholder="qwen-image-3.0 / Midjourney v6 / FLUX.1">
                     </div>
                     <div class="form-group">
                         <label for="diagram-workers" data-i18n="label-diagram-workers">图表并行线程数</label>
                         <input type="number" id="diagram-workers" name="DIAGRAM_PARALLEL_WORKERS" class="form-control" min="1" max="8" placeholder="3">
                     </div>
-                    <div class="form-group mb-4" style="background: rgba(255, 255, 255, 0.03); padding: 12px 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                    <div class="form-group mb-4" style="background: var(--bg); padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border);">
                         <label style="display:block; margin-bottom:6px; font-weight:600;" data-i18n="label-sd-status">生图引擎在线状态</label>
                         <div id="sd-status-badge" style="font-size:13px; color:#94a3b8;">
                             <span class="log-line system">正在检测生图服务...</span>
@@ -404,7 +564,7 @@
             <section id="image-studio" class="view-section">
                 <header class="view-header">
                     <h2 data-i18n="image-studio-title">🖼️ Image Studio</h2>
-                    <p data-i18n="image-studio-subtitle">Generate Imagen 3 prompts, drag &amp; drop images to embed in articles</p>
+                    <p data-i18n="image-studio-subtitle">Generate Qwen-Image / Imagen 3 prompts, drag &amp; drop images to embed in articles</p>
                 </header>
 
                 <div class="image-studio-container">
@@ -429,11 +589,24 @@
                         </div>
                     </div>
 
+                    <div class="glass-panel" style="padding:20px; margin-top:16px;">
+                        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                            <div style="flex:1; min-width:280px;">
+                                <div style="font-size:13px; color:var(--text-2); margin-bottom:6px; font-weight:600;">🔁 参考图重绘（合规二次创作）</div>
+                                <input type="text" id="studio-redraw-url" class="form-control" placeholder="粘贴公众号文章链接，自动抓图 → Qwen-Image Pro 重绘为全新原创配图">
+                            </div>
+                            <button id="btn-studio-redraw" class="btn btn-secondary" style="font-size:13px;">
+                                <span class="btn-icon">🎨</span> 抓图并重绘
+                            </button>
+                        </div>
+                        <div id="studio-redraw-results" style="display:flex; gap:12px; flex-wrap:wrap; margin-top:14px;"></div>
+                    </div>
+
                     <div id="prompt-cards-container">
                         <div class="studio-empty">
                             <div class="studio-empty-icon">🖼️</div>
                             <div class="studio-empty-text">粘贴文章并点击「生成英文提示词」</div>
-                            <div class="studio-empty-hint">系统将自动提取配图占位符，生成 Gemini Imagen 3 英文 Prompt</div>
+                            <div class="studio-empty-hint">系统将自动提取配图占位符，生成 Qwen-Image / Imagen 3 等模型的英文 Prompt</div>
                         </div>
                     </div>
                 </div>
@@ -468,7 +641,7 @@
                     <span id="node-modal-id" style="font-family:var(--font-mono); font-size:11px; color:var(--text-secondary);">id: math-basics</span>
                     <span id="node-modal-status-badge" style="margin-left:auto;"></span>
                 </div>
-                <h3 id="node-modal-heading" style="font-size: 1.1rem; color: #0f172a; margin-bottom: 12px; font-weight:600;">--</h3>
+                <h3 id="node-modal-heading" style="font-size: 1.1rem; color: var(--text); margin-bottom: 12px; font-weight:600;">--</h3>
                 <p id="node-modal-summary" style="font-size: 0.88rem; color: #475569; line-height: 1.6; background: #f8fafc; padding:12px 14px; border-radius:8px; margin-bottom:14px; border:1px solid var(--border-color);">--</p>
                 
                 <div style="margin-bottom:14px;">
@@ -503,5 +676,312 @@
 
     <script src="/static/js/app.js"></script>
     <script src="/static/js/image-studio.js"></script>
+    <script src="/static/js/three-bg.js"></script>
+
+    <!-- 待审工作台与审计表格控制器 -->
+    <script>
+    (function() {
+        let auditArticles = [];
+        let activeAuditTab = 'all';
+
+        function extractArticleList(data) {
+            const list = [];
+            const seenIds = new Set();
+            
+            const rawItems = [...(data.unsent || []), ...(data.sent || [])];
+            for (const item of rawItems) {
+                if (item && item.id && !seenIds.has(item.id)) {
+                    seenIds.add(item.id);
+                    list.push(item);
+                }
+            }
+
+            if (data.history) {
+                for (const date of Object.keys(data.history)) {
+                    const entry = data.history[date];
+                    if (entry && Array.isArray(entry.results)) {
+                        for (const item of entry.results) {
+                            if (item && item.id && !seenIds.has(item.id)) {
+                                seenIds.add(item.id);
+                                list.push(item);
+                            }
+                        }
+                    }
+                }
+            }
+            return list;
+        }
+
+        function filterArticles(list, tab) {
+            if (tab === 'pending') {
+                return list.filter(a => a.status === 'PENDING_REVIEW');
+            } else if (tab === 'approved') {
+                return list.filter(a => a.status === 'APPROVED' || (a.quality_score >= 80 && a.status !== 'REJECTED'));
+            } else if (tab === 'unsent') {
+                return list.filter(a => !a.is_published);
+            } else if (tab === 'sent') {
+                return list.filter(a => a.is_published);
+            }
+            return list;
+        }
+
+        function renderAuditWorkbench(data) {
+            const container = document.getElementById('history-content');
+            if (!container) return;
+
+            if (data) {
+                auditArticles = extractArticleList(data);
+            }
+
+            const filtered = filterArticles(auditArticles, activeAuditTab);
+
+            if (filtered.length === 0) {
+                container.innerHTML = `
+                    <div style="text-align:center; padding: 48px 20px; color: var(--text-secondary, #94a3b8);">
+                        <div style="font-size: 2.2rem; margin-bottom: 10px;">📭</div>
+                        <div style="font-size: 14px; font-weight: 500;">当前分类暂无文章记录</div>
+                    </div>
+                `;
+                return;
+            }
+
+            let tableHtml = `
+                <table class="audit-table">
+                    <thead>
+                        <tr>
+                            <th style="min-width: 220px;">文章标题与信源</th>
+                            <th style="width: 100px;">选题分类</th>
+                            <th style="width: 110px;">质量评分</th>
+                            <th style="width: 140px;">事实核查</th>
+                            <th style="width: 130px;">审核状态</th>
+                            <th style="width: 130px;">时间</th>
+                            <th style="width: 170px; text-align: right;">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            for (const item of filtered) {
+                const score = typeof item.quality_score === 'number' ? item.quality_score : 0.0;
+                let scoreBadge = '';
+                if (score >= 80) {
+                    scoreBadge = `<span class="badge-score-high" title="高分通过 (≥80)">⭐ ${score.toFixed(1)}</span>`;
+                } else if (score >= 60) {
+                    scoreBadge = `<span class="badge-score-mid" title="及格质量 (≥60)">⚡ ${score.toFixed(1)}</span>`;
+                } else {
+                    scoreBadge = `<span class="badge-score-low" title="待审查/低分 (<60)">⚠️ ${score.toFixed(1)}</span>`;
+                }
+
+                const sourceUrl = item.source_url;
+                let sourceLinkHtml = '';
+                if (sourceUrl) {
+                    let domain = '';
+                    try {
+                        domain = new URL(sourceUrl).hostname;
+                    } catch (e) {
+                        domain = sourceUrl.replace(/^https?:\/\//, '').split('/')[0];
+                    }
+                    sourceLinkHtml = `
+                        <div>
+                            <a href="${sourceUrl}" target="_blank" rel="noopener noreferrer" class="source-link-tag" title="${sourceUrl}">
+                                🔗 <span>${domain || '查看信源'}</span>
+                            </a>
+                        </div>
+                    `;
+                }
+
+                let factCheckHtml = '<span style="color:var(--text-secondary, #94a3b8); font-size:12px;">--</span>';
+                if (item.fact_check_result) {
+                    const fcText = String(item.fact_check_result);
+                    factCheckHtml = `
+                        <span class="badge" style="background:rgba(56,189,248,0.12); color:#38bdf8; border:1px solid rgba(56,189,248,0.3); font-size:11px; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:inline-block;" title="${fcText}">
+                            🛡️ ${fcText}
+                        </span>
+                    `;
+                }
+
+                let statusBadge = '';
+                const st = item.status || 'PENDING_REVIEW';
+                if (st === 'APPROVED' || (score >= 80 && item.success)) {
+                    statusBadge = `<span class="badge-approved">✨ 高分通过</span>`;
+                } else if (st === 'PENDING_REVIEW') {
+                    statusBadge = `<span class="badge-pending">⏳ 待审池</span>`;
+                } else if (item.is_published) {
+                    statusBadge = `<span class="badge-published">🚀 已群发</span>`;
+                } else if (item.draft_id) {
+                    statusBadge = `<span class="badge-draft">📝 草稿箱</span>`;
+                } else if (!item.success) {
+                    statusBadge = `<span class="badge" style="background:rgba(239,68,68,0.15); color:#ef4444; border:1px solid rgba(239,68,68,0.3);">❌ 失败</span>`;
+                } else {
+                    statusBadge = `<span class="badge">${st}</span>`;
+                }
+
+                const topic = item.topic || '无标题';
+                const escapedTopic = topic.replace(/"/g, '&quot;');
+                const previewId = item.preview_id || (item.draft_id ? item.draft_id : '');
+
+                let approveBtn = '';
+                if (st === 'PENDING_REVIEW' || (!item.success && !item.draft_id)) {
+                    approveBtn = `
+                        <button class="btn-audit-approve" data-id="${item.id}" title="人工核准并推送至微信草稿箱">
+                            🚀 核准推送
+                        </button>
+                    `;
+                }
+
+                let previewBtn = '';
+                if (previewId) {
+                    previewBtn = `
+                        <button class="btn-audit-preview" data-preview-id="${previewId}" data-title="${escapedTopic}">
+                            👁️ 预览
+                        </button>
+                    `;
+                }
+
+                const timeStr = (item.date || '') + ' ' + (item.time || '');
+
+                tableHtml += `
+                    <tr>
+                        <td>
+                            <div style="font-weight:600; font-size:13.5px; margin-bottom:2px;">${topic}</div>
+                            ${sourceLinkHtml}
+                            ${item.error ? `<div style="color:#ef4444; font-size:11px; margin-top:2px;">⚠️ ${item.error}</div>` : ''}
+                        </td>
+                        <td>
+                            <span class="badge" style="background:rgba(255,255,255,0.06); font-size:11px;">
+                                ${item.source_type || 'default'}
+                            </span>
+                        </td>
+                        <td>${scoreBadge}</td>
+                        <td>${factCheckHtml}</td>
+                        <td>${statusBadge}</td>
+                        <td style="font-size:12px; color:var(--text-secondary, #94a3b8); white-space:nowrap;">${timeStr}</td>
+                        <td style="text-align:right; white-space:nowrap;">
+                            <div style="display:inline-flex; gap:6px; justify-content:flex-end;">
+                                ${approveBtn}
+                                ${previewBtn}
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }
+
+            tableHtml += `
+                    </tbody>
+                </table>
+            `;
+
+            container.innerHTML = tableHtml;
+
+            // 绑定核准按钮事件
+            container.querySelectorAll('.btn-audit-approve').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    const articleId = btn.getAttribute('data-id');
+                    if (!articleId) return;
+                    btn.disabled = true;
+                    btn.textContent = '核准中...';
+                    try {
+                        const res = await fetch('/api/review/approve', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ id: parseInt(articleId) })
+                        });
+                        const resData = await res.json();
+                        if (resData.status === 'success') {
+                            btn.textContent = '✅ 已核准';
+                            btn.style.borderColor = '#10b981';
+                            fetchHistoryData();
+                        } else {
+                            alert('核准失败: ' + (resData.message || '未知错误'));
+                            btn.disabled = false;
+                            btn.textContent = '🚀 核准推送';
+                        }
+                    } catch (err) {
+                        alert('请求异常: ' + err);
+                        btn.disabled = false;
+                        btn.textContent = '🚀 核准推送';
+                    }
+                });
+            });
+
+            // 绑定预览按钮事件
+            container.querySelectorAll('.btn-audit-preview').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const pId = btn.getAttribute('data-preview-id');
+                    const title = btn.getAttribute('data-title');
+                    const modal = document.getElementById('preview-modal');
+                    const iframe = document.getElementById('preview-iframe');
+                    const modalTitle = document.getElementById('preview-modal-title');
+                    if (modal && iframe) {
+                        if (modalTitle) modalTitle.textContent = title;
+                        iframe.src = '/api/preview/' + pId;
+                        modal.style.display = 'flex';
+                    }
+                });
+            });
+        }
+
+        async function fetchHistoryData() {
+            try {
+                const res = await fetch('/api/history');
+                const data = await res.json();
+                renderAuditWorkbench(data);
+            } catch (err) {
+                console.error('加载历史记录审计失败:', err);
+            }
+        }
+
+        function bindAuditTabs() {
+            const tabs = document.querySelectorAll('.history-tab');
+            tabs.forEach(tab => {
+                tab.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    tabs.forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    activeAuditTab = tab.getAttribute('data-tab') || 'all';
+                    renderAuditWorkbench();
+                });
+            });
+
+            const refreshBtn = document.getElementById('btn-refresh-history');
+            if (refreshBtn) {
+                refreshBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    fetchHistoryData();
+                });
+            }
+        }
+
+        // 劫持 window.fetch 捕获 /api/history
+        const _origFetch = window.fetch;
+        window.fetch = async function(...args) {
+            const response = await _origFetch.apply(this, args);
+            try {
+                const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url);
+                if (url && url.includes('/api/history') && !url.includes('/mark_published')) {
+                    const cloned = response.clone();
+                    cloned.json().then(data => {
+                        setTimeout(() => {
+                            renderAuditWorkbench(data);
+                        }, 50);
+                    }).catch(() => {});
+                }
+            } catch (e) {}
+            return response;
+        };
+
+        window.fetchAuditHistoryData = fetchHistoryData;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            bindAuditTabs();
+            const historySec = document.getElementById('history');
+            if (historySec && historySec.classList.contains('active')) {
+                fetchHistoryData();
+            }
+        });
+    })();
+    </script>
 </body>
 </html>

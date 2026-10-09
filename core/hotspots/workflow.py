@@ -27,7 +27,7 @@ def _save_history(topics):
             session.add(ah)
     session.commit()
 
-def _save_publish_result(topic, success, draft_id=None, error=None):
+def _save_publish_result(topic, success, draft_id=None, error=None, quality_score=0.0, source_url="", status=None):
     session = db_manager.get_session()
     existing = session.query(ArticleHistory).filter_by(title=topic, source_type="hotspots").order_by(ArticleHistory.id.desc()).first()
     if existing:
@@ -35,12 +35,28 @@ def _save_publish_result(topic, success, draft_id=None, error=None):
             existing.success_status = success
             existing.media_id = draft_id
             existing.error_log = None
+            if quality_score:
+                existing.quality_score = quality_score
+            if source_url:
+                existing.source_url = source_url
+            if status:
+                existing.status = status
         else:
             # 发布失败：删除本地缓存，以便下次重试
             session.delete(existing)
     else:
         if success:
-            ah = ArticleHistory(title=topic, source_type="hotspots", publish_date=datetime.now().strftime("%Y-%m-%d"), success_status=success, media_id=draft_id, error_log=None)
+            ah = ArticleHistory(
+                title=topic,
+                source_type="hotspots",
+                publish_date=datetime.now().strftime("%Y-%m-%d"),
+                success_status=success,
+                media_id=draft_id,
+                error_log=None,
+                quality_score=quality_score,
+                source_url=source_url,
+                status=status or "DRAFT"
+            )
             session.add(ah)
     session.commit()
 
@@ -197,7 +213,7 @@ class ParallelPublishNode(BaseNode):
                 digest = future_digest.result()
                 digest_text = digest[:120] if digest else ""
 
-            _print_review_report(
+            all_ok = _print_review_report(
                 title=clean_title,
                 word_count=review_data["word_count"],
                 image_count=review_data["image_count"],
@@ -206,16 +222,28 @@ class ParallelPublishNode(BaseNode):
                 digest=digest,
             )
 
+            # 主编审校门禁 (Critic & Quality Gate)
+            from core.pipeline.critic import evaluate_article_quality, format_critic_report
+            review_res = evaluate_article_quality(clean_title, final_html)
+            print(format_critic_report(review_res))
+
+            if not review_res["passed"] or not all_ok:
+                err = f"未通过主编质量门禁 ({review_res['score']}分): {'; '.join(review_res['critic_issues'])}"
+                print(f"❌ 门禁拦截发布：「{clean_title}」— {err}")
+                _save_publish_result(clean_title, success=False, error=err, quality_score=review_res["score"], status="REJECTED")
+                return topic, False, err
+
+            source_url = getattr(topic, "url", "") if hasattr(topic, "url") else ""
             success, result = pub.publish_and_notify(clean_title, final_html, thumb_id, digest_text)
             if success:
                 draft_id = result["media_id"]
                 print(f"\n✅ 「{clean_title}」发布成功 → {draft_id}")
-                _save_publish_result(clean_title, success=True, draft_id=draft_id)
+                _save_publish_result(clean_title, success=True, draft_id=draft_id, quality_score=review_res["score"], source_url=source_url, status="DRAFT")
                 return topic, True, None
             else:
                 err = result.get("errmsg", "未知错误")
                 print(f"❌ 「{clean_title}」发布失败：{err}")
-                _save_publish_result(clean_title, success=False, error=err)
+                _save_publish_result(clean_title, success=False, error=err, quality_score=review_res["score"], source_url=source_url, status="FAILED")
                 return topic, False, err
 
         except Exception as exc:
