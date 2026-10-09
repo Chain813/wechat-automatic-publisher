@@ -18,83 +18,107 @@ from core.hotspots.collector import fetch_all_hotspots
 # --- 辅助方法 ---
 
 def _save_history(topics):
-    session = db_manager.get_session()
-    today = datetime.now().strftime("%Y-%m-%d")
-    for topic in topics:
-        topic_title = topic.title if hasattr(topic, "title") else str(topic)
-        existing = session.query(ArticleHistory).filter_by(title=topic_title, source_type="hotspots").first()
-        if not existing:
-            source_url = getattr(topic, "url", "") if hasattr(topic, "url") else ""
-            ah = ArticleHistory(
-                title=topic_title,
-                source_type="hotspots",
-                publish_date=today,
-                success_status=False,
-                source_url=source_url,
-                status="PENDING_REVIEW"
-            )
-            session.add(ah)
-    session.commit()
+    try:
+        session = db_manager.get_session()
+        today = datetime.now().strftime("%Y-%m-%d")
+        for topic in topics:
+            raw_title = topic.title if hasattr(topic, "title") else str(topic)
+            clean_title, _ = validate_title(raw_title)
+            existing = session.query(ArticleHistory).filter(
+                ArticleHistory.source_type == "hotspots",
+                ArticleHistory.title.in_([clean_title, raw_title])
+            ).first()
+            if not existing:
+                source_url = getattr(topic, "url", "") if hasattr(topic, "url") else ""
+                ah = ArticleHistory(
+                    title=clean_title,
+                    source_type="hotspots",
+                    publish_date=today,
+                    success_status=False,
+                    source_url=source_url,
+                    status="PENDING_REVIEW"
+                )
+                session.add(ah)
+        session.commit()
+    except Exception as e:
+        logger.warning("保存历史候选话题异常: {}", e)
+    finally:
+        db_manager.remove_session()
 
 def _save_publish_result(topic, success, draft_id=None, error=None, quality_score=0.0, source_url="", status=None, preview_html=None, thumb_id=None, fact_check_result=""):
-    session = db_manager.get_session()
-    topic_str = topic.title if hasattr(topic, "title") else str(topic)
-    
-    # 1. 保存本地 HTML 预览供 WebUI 人机工作台查看或审批
-    if preview_html:
-        try:
-            import hashlib
-            title_hash = hashlib.md5(topic_str.encode('utf-8')).hexdigest()
-            os.makedirs(os.path.join("data", "previews"), exist_ok=True)
-            preview_filename = f"{draft_id}.html" if draft_id else f"fail_{title_hash}.html"
-            preview_path = os.path.join("data", "previews", preview_filename)
-            with open(preview_path, "w", encoding="utf-8") as f:
-                f.write(preview_html)
-        except Exception as pe:
-            logger.debug("保存预览 HTML 异常: {}", pe)
+    try:
+        session = db_manager.get_session()
+        topic_str = topic.title if hasattr(topic, "title") else str(topic)
+        clean_title, _ = validate_title(topic_str)
+        
+        # 1. 保存本地 HTML 预览供 WebUI 人机工作台查看或审批
+        if preview_html:
+            try:
+                import hashlib
+                title_hash = hashlib.md5(clean_title.encode('utf-8')).hexdigest()
+                os.makedirs(os.path.join("data", "previews"), exist_ok=True)
+                preview_filename = f"{draft_id}.html" if draft_id else f"fail_{title_hash}.html"
+                preview_path = os.path.join("data", "previews", preview_filename)
+                with open(preview_path, "w", encoding="utf-8") as f:
+                    f.write(preview_html)
+            except Exception as pe:
+                logger.debug("保存预览 HTML 异常: {}", pe)
 
-    existing = session.query(ArticleHistory).filter_by(title=topic_str, source_type="hotspots").order_by(ArticleHistory.id.desc()).first()
-    if existing:
-        existing.success_status = success
-        existing.media_id = draft_id
-        existing.error_log = error if not success else None
-        if quality_score:
-            existing.quality_score = quality_score
-        if source_url:
-            existing.source_url = source_url
-        if status:
-            existing.status = status
-        elif not success:
-            existing.status = "REJECTED"
-        if thumb_id and hasattr(existing, 'thumb_media_id'):
-            existing.thumb_media_id = thumb_id
-        if fact_check_result and hasattr(existing, 'fact_check_result'):
-            existing.fact_check_result = fact_check_result
-    else:
-        ah = ArticleHistory(
-            title=topic_str,
-            source_type="hotspots",
-            publish_date=datetime.now().strftime("%Y-%m-%d"),
-            success_status=success,
-            media_id=draft_id,
-            error_log=error if not success else None,
-            quality_score=quality_score,
-            source_url=source_url,
-            status=status or ("DRAFT" if success else "REJECTED"),
-            fact_check_result=fact_check_result or None
-        )
-        if thumb_id and hasattr(ah, 'thumb_media_id'):
-            ah.thumb_media_id = thumb_id
-        session.add(ah)
-    session.commit()
+        existing = session.query(ArticleHistory).filter(
+            ArticleHistory.source_type == "hotspots",
+            ArticleHistory.title.in_([clean_title, topic_str])
+        ).order_by(ArticleHistory.id.desc()).first()
+
+        if existing:
+            existing.title = clean_title
+            existing.success_status = success
+            if draft_id:
+                existing.media_id = draft_id
+            existing.error_log = error if not success else None
+            if quality_score:
+                existing.quality_score = quality_score
+            if source_url:
+                existing.source_url = source_url
+            if status:
+                existing.status = status
+            elif not success:
+                existing.status = "REJECTED"
+            if thumb_id and hasattr(existing, 'thumb_media_id'):
+                existing.thumb_media_id = thumb_id
+            if fact_check_result and hasattr(existing, 'fact_check_result'):
+                existing.fact_check_result = fact_check_result
+        else:
+            ah = ArticleHistory(
+                title=clean_title,
+                source_type="hotspots",
+                publish_date=datetime.now().strftime("%Y-%m-%d"),
+                success_status=success,
+                media_id=draft_id,
+                error_log=error if not success else None,
+                quality_score=quality_score,
+                source_url=source_url,
+                status=status or ("DRAFT" if success else "REJECTED"),
+                fact_check_result=fact_check_result or None
+            )
+            if thumb_id and hasattr(ah, 'thumb_media_id'):
+                ah.thumb_media_id = thumb_id
+            session.add(ah)
+        session.commit()
+    except Exception as e:
+        logger.warning("保存发布结果异常: {}", e)
+    finally:
+        db_manager.remove_session()
 
 def _get_past_topics(days=7):
     from datetime import timedelta
     from core.plugins.base import HotspotItem
-    session = db_manager.get_session()
-    cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-    records = session.query(ArticleHistory).filter(ArticleHistory.source_type == "hotspots", ArticleHistory.publish_date >= cutoff_date).all()
-    return [HotspotItem(title=r.title, url=r.source_url or "") for r in records]
+    try:
+        session = db_manager.get_session()
+        cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        records = session.query(ArticleHistory).filter(ArticleHistory.source_type == "hotspots", ArticleHistory.publish_date >= cutoff_date).all()
+        return [HotspotItem(title=r.title, url=r.source_url or "") for r in records]
+    finally:
+        db_manager.remove_session()
 
 def _dedup_topics_against_each_other(topics, threshold=70):
     from core.shared.publisher import _normalize_title
@@ -237,6 +261,7 @@ class ParallelPublishNode(BaseNode):
 
                 generated = future_assets.result()
                 if not generated:
+                    _save_publish_result(topic, success=False, error="文章生成失败", status="FAILED")
                     return topic_str, False, "文章生成失败"
 
                 final_html, review_data, thumb_id = generated
@@ -314,6 +339,7 @@ class ParallelPublishNode(BaseNode):
 
         except Exception as exc:
             logger.warning("并行发布异常: {}", exc)
+            _save_publish_result(topic, success=False, error=str(exc), status="FAILED")
             return str(topic), False, str(exc)
 
     def execute(self, context: dict) -> bool:
@@ -336,8 +362,6 @@ class ParallelPublishNode(BaseNode):
                     published_count += 1
                 elif error:
                     logger.warning("  「{}」发布失败: {}", topic, error)
-                    # 边界条件防护：如果是因文章生成异常等早期流程退出的，统一在这里清理本地占位历史缓存
-                    _save_publish_result(topic, success=False, error=error)
 
         print(f"\n{'⭐' * 30}\n  本次运行完成：成功发布 {published_count}/{len(valid_topics)} 篇\n{'⭐' * 30}")
         return True

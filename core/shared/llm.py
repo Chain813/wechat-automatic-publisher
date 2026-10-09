@@ -235,6 +235,12 @@ def validate_title(title: str):
             clean_title = clean_title.replace(word, "")
             warnings.append(f"已移除标题党词汇: '{word}'")
 
+    # 自动剥离微信禁止的末尾标点（句号、问号、感叹号、冒号、逗号等）
+    forbidden_endings = ("。", "！", "？", "!", "?", "：", ":", "，", ",")
+    while clean_title and clean_title.endswith(forbidden_endings):
+        warnings.append(f"已自动剥离标题末尾禁止标点: '{clean_title[-1]}'")
+        clean_title = clean_title[:-1].strip()
+
     if len(clean_title) > WECHAT_TITLE_MAX_LEN:
         warnings.append(f"标题超长 ({len(clean_title)} > {WECHAT_TITLE_MAX_LEN})，已截断")
         clean_title = clean_title[:WECHAT_TITLE_MAX_LEN]

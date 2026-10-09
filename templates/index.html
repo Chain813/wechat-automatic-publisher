@@ -714,7 +714,7 @@
 
         function filterArticles(list, tab) {
             if (tab === 'pending') {
-                return list.filter(a => a.status === 'PENDING_REVIEW');
+                return list.filter(a => a.status === 'PENDING_REVIEW' || a.status === 'REJECTED');
             } else if (tab === 'approved') {
                 return list.filter(a => a.status === 'APPROVED' || (a.quality_score >= 80 && a.status !== 'REJECTED'));
             } else if (tab === 'unsent') {
@@ -810,6 +810,8 @@
                     statusBadge = `<span class="badge-published">🚀 已群发</span>`;
                 } else if (item.draft_id) {
                     statusBadge = `<span class="badge-draft">📝 草稿箱</span>`;
+                } else if (st === 'REJECTED') {
+                    statusBadge = `<span class="badge" style="background:rgba(239,68,68,0.18); color:#ef4444; border:1px solid rgba(239,68,68,0.4); font-weight:600;">🛑 门禁拦截</span>`;
                 } else if (!item.success) {
                     statusBadge = `<span class="badge" style="background:rgba(239,68,68,0.15); color:#ef4444; border:1px solid rgba(239,68,68,0.3);">❌ 失败</span>`;
                 } else {
