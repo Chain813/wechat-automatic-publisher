@@ -119,6 +119,35 @@ def _publish_single_topic(topic_info, publisher):
         if not review_res["passed"] or not all_ok:
             err = f"未通过主编质量门禁 ({review_res['score']}分): {'; '.join(review_res['critic_issues'])}"
             print(f"❌ 门禁拦截发布：「{clean_title}」— {err}")
+            try:
+                import hashlib
+                import os
+                title_hash = hashlib.md5(clean_title.encode('utf-8')).hexdigest()
+                os.makedirs(os.path.join("data", "previews"), exist_ok=True)
+                with open(os.path.join("data", "previews", f"fail_{title_hash}.html"), "w", encoding="utf-8") as f:
+                    f.write(final_html)
+
+                from core.db.manager import db_manager
+                from core.db.models import ArticleHistory
+                session = db_manager.get_session()
+                ah = ArticleHistory(
+                    title=clean_title,
+                    source_type="aikepu",
+                    publish_date=datetime.now().strftime("%Y-%m-%d"),
+                    success_status=False,
+                    media_id=None,
+                    error_log=err,
+                    quality_score=review_res["score"],
+                    source_url=f"aikepu://node/{node_id}",
+                    thumb_media_id=thumb_id,
+                    status="REJECTED"
+                )
+                session.add(ah)
+                session.commit()
+                db_manager.remove_session()
+            except Exception as e:
+                logger.warning("保存 AI科普 门禁拦截记录异常: {}", e)
+
             release_reserved(node_id)
             return topic_title, False, err, node_id
 
@@ -159,6 +188,7 @@ def _publish_single_topic(topic_info, publisher):
                     media_id=draft_id,
                     quality_score=review_res["score"],
                     source_url=f"aikepu://node/{node_id}",
+                    thumb_media_id=thumb_id,
                     status="DRAFT"
                 )
                 session.add(ah)

@@ -22,6 +22,8 @@ from config import SD_TIMEOUT, SD_STEPS, SD_MAX_RETRIES, WECHAT_COVER_WIDTH, WEC
 
 from loguru import logger
 
+from utils.key_pool import ApiKeyPool, RateLimiter
+
 # ---- 微信图片规格 ----
 WECHAT_COVER_SIZE = (WECHAT_COVER_WIDTH, WECHAT_COVER_HEIGHT)
 WECHAT_BODY_SIZE = (WECHAT_BODY_WIDTH, WECHAT_BODY_HEIGHT)
@@ -131,9 +133,9 @@ def resize_for_wechat(img_path, purpose="body"):
 
 
 # ==========================================
-#  Pollinations.ai 免费 AI 生图
+#  英文生图提示词构建
 # ==========================================
-def _build_pollinations_prompt(keyword):
+def _build_image_prompt(keyword):
     """将中文关键词转为适合 AI 生图的英文 prompt，优先使用 LLM 增强"""
     from core.shared.llm import call_deepseek_with_retry
     
@@ -271,7 +273,7 @@ def _try_local_sd(keyword, directory, width=1024, height=576, max_retries=None, 
         return None
 
     if prompt is None:
-        prompt = _build_pollinations_prompt(keyword)
+        prompt = _build_image_prompt(keyword)
     logger.info("  本地 Stable Diffusion 生图中 ({}x{}, steps={}): {}", width, height, SD_STEPS, prompt[:60])
 
     payload = {
@@ -388,7 +390,7 @@ def _build_github_project_prompt(repo_name, description, lang, topics=None):
 
     # Fallback: 使用通用的 prompt 构建器
     fallback_keyword = f"{repo_name.split('/')[-1]} {lang} open source project"
-    return _build_pollinations_prompt(fallback_keyword)
+    return _build_image_prompt(fallback_keyword)
 
 
 def download_project_image_for_github(repo_name, description, lang, topics=None, save_dir="assets"):
@@ -471,111 +473,314 @@ def _save_image_from_url(img_url, target_dir, prefix="free", timeout=15):
     return None
 
 
-def _try_pexels_api(keyword, width, height):
-    """尝试 Pexels API（需 PEXELS_API_KEY 环境变量）"""
+_qwen_key_pool = None
+_qwen_image_limiter = None
+_qwen_image_sem = None
+
+
+def _qwen_image_throttle():
+    """懒加载生图节流器 + 并发信号量（按 config 可调）"""
+    global _qwen_image_limiter, _qwen_image_sem
+    if _qwen_image_sem is None:
+        from config import QWEN_IMAGE_MIN_INTERVAL, QWEN_IMAGE_MAX_CONCURRENCY
+        _qwen_image_limiter = RateLimiter(QWEN_IMAGE_MIN_INTERVAL)
+        _qwen_image_sem = threading.Semaphore(max(1, QWEN_IMAGE_MAX_CONCURRENCY))
+    return _qwen_image_limiter, _qwen_image_sem
+
+
+def _get_qwen_key_pool():
+    """懒加载千问 Key 轮询池（DASHSCOPE_API_KEYS 逗号分隔 > 单 DASHSCOPE_API_KEY）"""
+    global _qwen_key_pool
+    if _qwen_key_pool is None:
+        from config import DASHSCOPE_API_KEYS, QWEN_IMAGE_API_KEY
+        keys = list(DASHSCOPE_API_KEYS) if DASHSCOPE_API_KEYS else ([QWEN_IMAGE_API_KEY] if QWEN_IMAGE_API_KEY else [])
+        _qwen_key_pool = ApiKeyPool(keys)
+    return _qwen_key_pool
+
+
+def _qwen_post_with_rotation(base_url, body, timeout):
+    """千问接口带 Key 轮询的 POST：限流/欠费/被禁自动切 Key 重试。
+    返回 (status_code, json_data)，全失败返回 (None, None)。"""
     import requests
-    from config import PEXELS_API_KEY
-    if not PEXELS_API_KEY:
-        return None
-    try:
-        resp = requests.get("https://api.pexels.com/v1/search", params={
-            "query": keyword, "per_page": 3, "orientation": "landscape"
-        }, headers={"Authorization": PEXELS_API_KEY}, timeout=10)
-        if resp.status_code == 200:
-            photos = resp.json().get("photos", [])
-            for photo in photos:
-                src = photo.get("src", {}).get("large") or photo.get("src", {}).get("original")
-                if src:
-                    return src
-    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
-        logger.debug("  Pexels API 连接异常: {}", e)
-        raise e
-    except Exception as e:
-        logger.debug("  Pexels API 失败: {}", e)
-    return None
-
-
-def _try_unsplash_api(keyword, width, height):
-    """尝试 Unsplash 官方 API（需 UNSPLASH_ACCESS_KEY 环境变量）"""
-    import requests
-    from config import UNSPLASH_ACCESS_KEY
-    if not UNSPLASH_ACCESS_KEY:
-        return None
-    try:
-        resp = requests.get("https://api.unsplash.com/search/photos", params={
-            "query": keyword, "per_page": 3, "orientation": "landscape"
-        }, headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"}, timeout=10)
-        if resp.status_code == 200:
-            results = resp.json().get("results", [])
-            for r in results:
-                raw_url = r.get("urls", {}).get("raw")
-                if raw_url:
-                    return f"{raw_url}&w={width}&h={height}&fit=crop"
-    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
-        logger.debug("  Unsplash API 连接异常: {}", e)
-        raise e
-    except Exception as e:
-        logger.debug("  Unsplash API 失败: {}", e)
-    return None
-
-
-def _try_baidu_api(keyword, target_dir, width=900, height=500):
-    """尝试百度图片搜索 API (针对中文热点实拍图极其精准高效)"""
-    import urllib.parse
-    import requests
-    clean_kw = _extract_concise_keywords(keyword)
-    if not clean_kw:
-        return None
-    q = urllib.parse.quote(clean_kw)
-    url = f"https://image.baidu.com/search/acjson?tn=resultjson_com&ipn=rj&word={q}&pn=0&rn=12"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    try:
-        resp = requests.get(url, headers=headers, timeout=5)
-        if resp.status_code == 200:
-            res_json = resp.json()
-            data = res_json.get("data", [])
-            for item in data:
-                img_url = item.get("middleURL") or item.get("hoverURL") or item.get("thumbURL")
-                if img_url and img_url.startswith("http"):
-                    path = _save_image_from_url(img_url, target_dir, prefix="baidu", timeout=6)
-                    if path:
-                        return path
-    except Exception as e:
-        logger.debug("  百度图片搜索失败: {}", e)
-    return None
-
-
-def _try_pollinations_api(keyword, target_dir, width=900, height=500):
-    """尝试 Pollinations.ai 免费 AI 生图 (无需 API Key，全局可用)，含 retry + 429 退避"""
-    import urllib.parse
-    import requests
-    max_attempts = 3
-    for attempt in range(1, max_attempts + 1):
+    pool = _get_qwen_key_pool()
+    if pool.size == 0:
+        return None, None
+    max_attempts = min(max(2, pool.size), 5)
+    for _ in range(max_attempts):
+        key = pool.get_key()
+        if not key:
+            break
         try:
-            prompt_str = _build_pollinations_prompt(keyword)
-            encoded_prompt = urllib.parse.quote(prompt_str[:200])
-            url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={width}&height={height}&nologo=true"
-            path = _save_image_from_url(url, target_dir, prefix="pollinations", timeout=30)
+            resp = None
+            for inner in range(3):
+                resp = requests.post(
+                    base_url,
+                    headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
+                    json=body, timeout=timeout,
+                )
+                if resp.status_code != 429:
+                    break
+                wait = 5 * (inner + 1)
+                logger.warning("  千问限流 429，等待 {}s 后就地重试（第 {}/3 次）", wait, inner + 1)
+                time.sleep(wait)
+            if resp is None:
+                pool.report_failure(key)
+                continue
+            if resp.status_code == 200:
+                pool.report_success(key)
+                try:
+                    return resp.status_code, resp.json()
+                except Exception:
+                    return resp.status_code, None
+            if resp.status_code in (401, 403, 429, 500, 502, 503):
+                if resp.status_code == 429:
+                    logger.warning("  千问 429 明细: {}", resp.text[:200])
+                elif resp.status_code in (401, 403):
+                    body_lower = (resp.text or "").lower()
+                    if "quota" in body_lower or "fund" in body_lower or "exhausted" in body_lower:
+                        logger.error(
+                            "  💸 千问账户免费额度已耗尽或欠费：请到百炼控制台充值/关闭免费档。响应: {}",
+                            resp.text[:160],
+                        )
+                    else:
+                        logger.warning("  千问认证失败 {}: {}", resp.status_code, resp.text[:160])
+                pool.report_failure(key, cooldown_seconds=120 if resp.status_code == 429 else 300)
+                continue
+            return resp.status_code, None
+        except Exception as e:
+            logger.debug("  千问接口请求异常（切换 Key）: {}", e)
+            pool.report_failure(key)
+    return None, None
+
+
+def _try_qwen_image_batch(prompt, target_dir, count, width=900, height=500):
+    """一次请求生成 count 张图（n 参数批量，节省 QPM 与额度）。返回本地路径列表。"""
+    from config import QWEN_IMAGE_API_BASE, QWEN_IMAGE_MODEL, QWEN_IMAGE_TIMEOUT, QWEN_IMAGE_PROMPT_EXTEND, QWEN_IMAGE_SIZE
+    import base64
+    body = {
+        "model": QWEN_IMAGE_MODEL,
+        "input": {
+            "messages": [
+                {"role": "user", "content": [{"text": prompt}]}
+            ]
+        },
+        "parameters": {"prompt_extend": QWEN_IMAGE_PROMPT_EXTEND, "size": QWEN_IMAGE_SIZE, "n": int(count)},
+    }
+    limiter, sem = _qwen_image_throttle()
+    with sem:
+        limiter.wait()
+        status, data = _qwen_post_with_rotation(QWEN_IMAGE_API_BASE, body, QWEN_IMAGE_TIMEOUT)
+    if status != 200 or not data:
+        logger.warning("  批量生图失败 HTTP {}", status)
+        return []
+    choices = ((data.get("output") or {}).get("choices") or [])
+    contents = (choices[0].get("message") or {}).get("content") if choices else []
+    paths = []
+    for i, item in enumerate(contents or []):
+        ref = item.get("image") or ""
+        if not ref:
+            continue
+        try:
+            if ref.startswith("data:"):
+                b64 = ref.split(",", 1)[1]
+                raw = base64.b64decode(b64)
+                p = os.path.join(target_dir, f"qwen_batch_{int(time.time())}_{i}.png")
+                with open(p, "wb") as f:
+                    f.write(raw)
+                paths.append(p)
+            else:
+                p = _save_image_from_url(ref, target_dir, prefix=f"qwen_batch_{i}", timeout=60)
+                if p:
+                    paths.append(p)
+        except Exception as e:
+            logger.debug("  批量图解析失败 #{}: {}", i, e)
+    logger.info("  批量生图返回 {} 张", len(paths))
+    return paths
+
+
+def generate_article_images_batch(title, article_text, keywords, save_dir="assets", max_images=4):
+    """每篇文章一次生图请求：用文章标题+各占位符主题构建分项提示词，一次生成多张配图。
+    返回与 keywords 等长的本地路径列表（失败或重复项为 None），调用方回退逐关键词下载。"""
+    from config import QWEN_IMAGE_API_KEY
+    if not QWEN_IMAGE_API_KEY or not keywords:
+        return [None] * len(keywords)
+    kws = keywords[:max_images]
+    excerpt = re.sub(r"[\n\r\t ]+", " ", article_text or "")[:300]
+    
+    prompt_parts = [f"图#{i+1}主题：{kw}" for i, kw in enumerate(kws)]
+    prompt = (
+        f"为公众号文章《{title}》生成一组风格统一但画面主体完全不同的高清配图插画。\n"
+        f"文章摘要：{excerpt}。\n"
+        f"共需 {len(kws)} 张图：\n" + "；".join(prompt_parts) + "\n"
+        "要求：每张图必须紧扣对应主题，画风现代简洁，色调统一，无文字与水印。"
+    )
+    clean_title = _sanitize_path(title)[:24] if title else "batch"
+    target_dir = os.path.join(save_dir, clean_title or "batch")
+    os.makedirs(target_dir, exist_ok=True)
+    paths = _try_qwen_image_batch(prompt, target_dir, len(kws))
+    
+    result = [None] * len(keywords)
+    if not paths:
+        return result
+
+    from .image_filter import compute_perceptual_hash
+    for i in range(min(len(kws), len(paths))):
+        p = paths[i]
+        if p and os.path.exists(p):
+            phash = compute_perceptual_hash(p)
+            if phash and not _is_too_similar_to_existing(phash):
+                result[i] = p
+                _register_hash(phash)
+            else:
+                logger.debug("  批量生成的第 {} 张图与已有图片高度相似，舍弃并回退独立下载", i + 1)
+    return result
+
+
+def _build_image_prompt(keyword):
+    """为关键词构建具体、个性化且不重复的通义万相 AI 插画生图提示词"""
+    if not keyword or not keyword.strip():
+        return "高清科技感公众号插画，现代概念，无文字水印"
+    clean_kw = keyword.strip()
+    return (
+        f"一幅高清 16:9 现代科技概念插画，主题内容：【{clean_kw}】。"
+        "画面效果：视角独特，构图大气，色彩调和细腻，具有强烈的视觉冲击力与空间层次感，画面中绝对不包含任何文字、字母或水印。"
+    )
+
+
+def _save_image_from_url(url, target_dir, prefix="img", timeout=60):
+    """从网络 URL 下载图片并保存到 target_dir"""
+    if not url:
+        return None
+    import requests
+    os.makedirs(target_dir, exist_ok=True)
+    try:
+        resp = requests.get(url, timeout=timeout)
+        if resp.status_code == 200:
+            content_type = resp.headers.get("Content-Type", "").lower()
+            ext = ".png" if "png" in content_type else ".jpg"
+            filename = f"{prefix}_{int(time.time() * 1000)}{ext}"
+            save_path = os.path.join(target_dir, filename)
+            with open(save_path, "wb") as f:
+                f.write(resp.content)
+            return save_path
+        else:
+            logger.warning("  下载图片 URL 失败 HTTP {}", resp.status_code)
+    except Exception as e:
+        logger.warning("  从 URL 保存图片异常: {}", e)
+    return None
+
+
+def _parse_qwen_image_response(data, target_dir, prefix):
+    """解析 Qwen-Image 生成结果（content[].image 为 URL 或 base64 data URI），返回本地路径"""
+    import base64
+    choices = ((data.get("output") or {}).get("choices") or [])
+    contents = (choices[0].get("message") or {}).get("content") if choices else []
+    for item in contents or []:
+        image_ref = item.get("image") or ""
+        if not image_ref:
+            continue
+        try:
+            if image_ref.startswith("data:"):
+                b64 = image_ref.split(",", 1)[1]
+                raw = base64.b64decode(b64)
+                path = os.path.join(target_dir, f"{prefix}_{int(time.time())}.png")
+                with open(path, "wb") as f:
+                    f.write(raw)
+                return path
+            path = _save_image_from_url(image_ref, target_dir, prefix=prefix, timeout=60)
             if path:
                 return path
-            logger.debug("  Pollinations 第 {}/{} 次未返回有效图片", attempt, max_attempts)
         except Exception as e:
-            logger.debug("  Pollinations AI 生图失败 (第 {}/{}): {}", attempt, max_attempts, e)
-        # 退避等待（处理 429 限流）
-        if attempt < max_attempts:
-            wait = 3 * attempt
-            logger.debug("  Pollinations 等待 {}s 后重试...", wait)
-            time.sleep(wait)
+            logger.debug("  Qwen-Image 结果解析失败: {}", e)
     return None
 
 
-def _try_icrawler_bing(keyword, target_dir, max_images=3):
+def _try_qwen_image_gen(keyword, target_dir, width=900, height=500):
+    """通义万相 Qwen-Image-3.0 文本生图（DashScope/百炼，国内直连）"""
+    from config import QWEN_IMAGE_API_BASE, QWEN_IMAGE_MODEL, QWEN_IMAGE_TIMEOUT, QWEN_IMAGE_PROMPT_EXTEND, QWEN_IMAGE_SIZE
+    prompt = _build_image_prompt(keyword)
+    body = {
+        "model": QWEN_IMAGE_MODEL,
+        "input": {
+            "messages": [
+                {"role": "user", "content": [{"text": prompt}]}
+            ]
+        },
+        "parameters": {"prompt_extend": QWEN_IMAGE_PROMPT_EXTEND, "size": QWEN_IMAGE_SIZE},
+    }
+    status, data = _qwen_post_with_rotation(QWEN_IMAGE_API_BASE, body, QWEN_IMAGE_TIMEOUT)
+    if status != 200 or not data:
+        logger.warning("  Qwen-Image 生图失败 HTTP {}", status)
+        return None
+    return _parse_qwen_image_response(data, target_dir, "qwen")
+
+
+def _try_qwen_image_redraw(image_path, instruction, target_dir, width=900, height=500):
+    """基于参考图重绘（Qwen-Image 图生图）：合规二次创作，生成全新原创画面"""
+    from config import QWEN_IMAGE_API_BASE, QWEN_IMAGE_REDRAW_MODEL, QWEN_IMAGE_TIMEOUT, QWEN_IMAGE_SIZE
+    if not image_path or not os.path.exists(image_path):
+        return None
+    import base64
+    mime = "image/png" if image_path.lower().endswith(".png") else "image/jpeg"
+    with open(image_path, "rb") as f:
+        data_uri = f"data:{mime};base64," + base64.b64encode(f.read()).decode()
+    prompt = (
+        f"{instruction}。要求：生成一幅全新原创画面，保持参考图的主题与构图，"
+        "去除图中所有水印、logo 与文字标识，画质高清、风格统一，适合微信公众号配图。"
+    )
+    body = {
+        "model": QWEN_IMAGE_REDRAW_MODEL,
+        "input": {
+            "messages": [
+                {"role": "user", "content": [{"image": data_uri}, {"text": prompt}]}
+            ]
+        },
+        "parameters": {"size": QWEN_IMAGE_SIZE},
+    }
+    status, data = _qwen_post_with_rotation(QWEN_IMAGE_API_BASE, body, QWEN_IMAGE_TIMEOUT)
+    if status != 200 or not data:
+        logger.warning("  Qwen-Image 重绘失败 HTTP {}", status)
+        return None
+    return _parse_qwen_image_response(data, target_dir, "qwen_redraw")
+
+
+def scrape_article_images(article_url, limit=10):
+    """抓取公众号文章内的图片 URL 列表（供参考图/合规重绘使用）"""
+    try:
+        import requests
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+        }
+        resp = requests.get(article_url, headers=headers, timeout=15)
+        if resp.status_code != 200:
+            return []
+        html = resp.text
+        urls = re.findall(r'data-src="(https?://mmbiz\.qpic\.cn/[^"]+)"', html)
+        if not urls:
+            urls = re.findall(r'<img[^>]+src="(https?://[^"]+)"', html)
+        out, seen = [], set()
+        for u in urls:
+            u = u.replace("&amp;", "&")
+            if u in seen:
+                continue
+            seen.add(u)
+            out.append(u)
+            if len(out) >= limit:
+                break
+        return out
+    except Exception as e:
+        logger.debug("抓取文章图片失败: {}", e)
+        return []
+
+
+def _try_icrawler_bing(keyword, target_dir, max_images=5):
     """通过 icrawler 从 Bing 搜索下载图片（无需 API Key）"""
     try:
         from icrawler.builtin import BingImageCrawler
         import tempfile
+        from PIL import Image
+        from .image_filter import compute_perceptual_hash
 
         tmp_dir = tempfile.mkdtemp(prefix="aw_img_")
         downloaded = []
@@ -599,30 +804,40 @@ def _try_icrawler_bing(keyword, target_dir, max_images=3):
 
         crawler.crawl(
             keyword=keyword,
-            max_num=min(max_images, 2),
+            max_num=min(max_images, 5),
             min_size=(200, 150),
             file_idx_offset=0
         )
 
+        valid_files = []
         for root, dirs, files in os.walk(tmp_dir):
-            for f in files:
+            for f in sorted(files):
                 if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
-                    src = os.path.join(root, f)
-                    dst = os.path.join(target_dir, f"bing_{int(time.time())}_{f}")
-                    os.rename(src, dst)
-                    from PIL import Image
-                    try:
-                        img = Image.open(dst)
-                        img.verify()
-                        img = Image.open(dst)
-                        if img.width >= 200 and img.height >= 150:
-                            logger.info("  icrawler Bing 下载成功: {} ({}x{})", os.path.basename(dst), img.width, img.height)
-                            return dst
-                        else:
-                            os.remove(dst)
-                    except Exception:
-                        if os.path.exists(dst):
-                            os.remove(dst)
+                    valid_files.append(os.path.join(root, f))
+
+        for src in valid_files:
+            fname = os.path.basename(src)
+            dst = os.path.join(target_dir, f"bing_{int(time.time())}_{fname}")
+            try:
+                os.rename(src, dst)
+                img = Image.open(dst)
+                img.verify()
+                img = Image.open(dst)
+                if img.width >= 200 and img.height >= 150:
+                    phash = compute_perceptual_hash(dst)
+                    if not _is_too_similar_to_existing(phash):
+                        logger.info("  icrawler Bing 下载成功 (独特画面): {} ({}x{})", os.path.basename(dst), img.width, img.height)
+                        import shutil
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
+                        return dst
+                    else:
+                        logger.debug("  icrawler Bing 候选图片 {} 与已有图片重复，尝试下一张", fname)
+                        os.remove(dst)
+                else:
+                    os.remove(dst)
+            except Exception:
+                if os.path.exists(dst):
+                    os.remove(dst)
 
         import shutil
         try:
@@ -675,7 +890,7 @@ def _translate_keyword_via_llm(keyword):
         from core.shared.llm import call_deepseek_with_retry
         system_prompt = (
             "你是一个翻译引擎。将用户输入的中文关键词/标题翻译为 2-5 个最适合在 "
-            "Unsplash/Pexels 等英文图片网站搜索的英文关键词。\n"
+            "Bing 等英文图片网站搜索的英文关键词。\n"
             "规则：只输出英文关键词，用空格分隔，不要解释，不要标点。\n"
             "示例：输入'华为发布AI芯片' → 输出'Huawei AI chip technology'"
         )
@@ -745,9 +960,7 @@ def _enhance_search_keyword(keyword):
 
 
 _image_sources_status = {
-    "unsplash_api": {"status": True, "last_check": 0},
-    "pexels_api": {"status": True, "last_check": 0},
-    "pollinations": {"status": True, "last_check": 0},
+    "qwen": {"status": True, "last_check": 0},
     "bing": {"status": True, "last_check": 0}
 }
 
@@ -780,17 +993,12 @@ def mark_source_success(source_name):
     }
 
 
-def _download_free_image(keyword, save_dir, purpose="body"):
+def _download_free_image(keyword, save_dir, purpose="body", max_retries=3):
     """
-    免费图源降级下载（SD 不可用时自动启用）。
-    优先级（无需 API Key 的源优先）：
-    1. Pollinations.ai 免费 AI 生图 (无需 Key, 高质量定制图)
-    2. icrawler Bing 搜图 (无需 Key, 实拍高清图)
-    3. Unsplash 官方 API (需 UNSPLASH_ACCESS_KEY, 有则用)
-    4. Pexels 官方 API (需 PEXELS_API_KEY, 有则用)
-    注：百度图片 API 已被反爬封杀 (Forbid spider access)，已移除。
+    AI 生图引擎调度（全线采用 AI 文本/批量生图，禁用免费搜索网络爬虫）。
+    使用通义万相 qwen-image-3.0 生图 (需 DASHSCOPE_API_KEY, 高质量定制 AI 原创图)
+    内置 3 次重试与指数退避机制。
     """
-    import requests
     if not keyword or not keyword.strip():
         return None
 
@@ -800,67 +1008,33 @@ def _download_free_image(keyword, save_dir, purpose="body"):
     target_dir = os.path.join(save_dir, clean_kw)
     os.makedirs(target_dir, exist_ok=True)
 
-    search_keyword = _enhance_search_keyword(keyword)
-    concise_keyword = _extract_concise_keywords(keyword)
+    logger.info("🎨 正在使用通义万相 (qwen-image-3.0) AI 生图: '{}'...", keyword)
 
-    logger.info("🖼️  免费图源下载 '{}' (英文检索词: '{}')...", keyword, search_keyword)
-
-    # 1. Pollinations.ai 免费 AI 生图 (无需 API Key，最可靠的无 Key 图源)
-    if is_source_available("pollinations"):
-        try:
-            path = _try_pollinations_api(keyword, target_dir, width, height)
-            if path:
-                mark_source_success("pollinations")
-                return path
-            else:
-                mark_source_failed("pollinations")
-        except Exception as e:
-            logger.debug("  Pollinations AI 异常: {}", e)
-            mark_source_failed("pollinations")
-
-    # 2. icrawler Bing 搜索 (无需 API Key，使用英文翻译关键词)
-    if is_source_available("bing"):
-        try:
-            # 优先用 LLM 翻译后的英文关键词搜索
-            bing_keyword = search_keyword if search_keyword != keyword else concise_keyword
-            path = _try_icrawler_bing(bing_keyword, target_dir)
-            if path:
-                mark_source_success("bing")
-                return path
-        except Exception:
-            mark_source_failed("bing")
-
-    # 3. Unsplash 官方 API（有 Key 才尝试）
-    from config import UNSPLASH_ACCESS_KEY
-    if UNSPLASH_ACCESS_KEY and is_source_available("unsplash_api"):
-        try:
-            img_url = _try_unsplash_api(search_keyword, width, height)
-            if img_url:
-                path = _save_image_from_url(img_url, target_dir, prefix="unsplash")
+    # 1. 通义万相 qwen-image-3.0 生图 (带 3 次重试与退避机制)
+    if is_source_available("qwen"):
+        for attempt in range(1, max_retries + 1):
+            try:
+                # 重试时如果上一轮未成功，变体微调关键词
+                current_kw = keyword if attempt == 1 else f"{keyword} 画面视角{attempt}"
+                path = _try_qwen_image_gen(current_kw, target_dir, width, height)
                 if path:
-                    mark_source_success("unsplash_api")
+                    mark_source_success("qwen")
                     return path
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-            mark_source_failed("unsplash_api")
-        except Exception:
-            pass
+                
+                logger.warning("  ⚠️ 通义万相 AI 生图第 {}/{} 次未返回图片: '{}'{}", 
+                               attempt, max_retries, keyword,
+                               f"（将在 {attempt * 2}s 后发起重试）" if attempt < max_retries else "（已耗尽最大重试次数）")
+                if attempt < max_retries:
+                    time.sleep(attempt * 2)
+            except Exception as e:
+                logger.warning("  Qwen-Image AI 生图第 {}/{} 次尝试异常: {}", attempt, max_retries, e)
+                if attempt < max_retries:
+                    time.sleep(attempt * 2)
 
-    # 4. Pexels 官方 API（有 Key 才尝试）
-    from config import PEXELS_API_KEY
-    if PEXELS_API_KEY and is_source_available("pexels_api"):
-        try:
-            img_url = _try_pexels_api(search_keyword, width, height)
-            if img_url:
-                path = _save_image_from_url(img_url, target_dir, prefix="pexels")
-                if path:
-                    mark_source_success("pexels_api")
-                    return path
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-            mark_source_failed("pexels_api")
-        except Exception:
-            pass
+        # 只有在 3 次重试全部失败后才标记图源暂时冷却
+        mark_source_failed("qwen")
 
-    logger.warning("  ⚠️ 所有免费图源均失败，'{}' 无配图", keyword)
+    logger.warning("  ⚠️ 通义万相 AI 生图在 {} 次重试后仍未成功: '{}'", max_retries, keyword)
     return None
 
 
@@ -961,8 +1135,11 @@ def generate_default_cover(title, save_path, purpose="cover"):
 # ==========================================
 def download_image(keyword, save_dir="assets"):
     """
-    下载正文配图：优先本地 SD，不可用时自动降级到免费图源。
-    若全部失效，则自动调用本地 Pillow 引擎绘制高颜值文字卡片配图兜底。
+    下载正文配图：100% AI 生图架构。
+    1. 优先通义万相 Qwen-Image-3.0 AI 生图；
+    2. 备选本地 Stable Diffusion AI 生图；
+    3. 兜底本地高颜值卡片。
+    已彻底禁用 Bing 搜索引擎网络爬虫。
     """
     if not keyword or not keyword.strip():
         return None
@@ -975,24 +1152,24 @@ def download_image(keyword, save_dir="assets"):
     if not os.path.exists(specific_dir):
         os.makedirs(specific_dir)
 
-    # 1. 高清真实网络图源 (Unsplash / Pexels / Bing)
-    logger.info("正在搜寻网络高清实拍图源: '{}'...", keyword)
+    # 1. 优先通义万相 Qwen-Image-3.0 AI 生图
+    logger.info("🎨 正在发起通义万相 (Qwen-Image) AI 配图生成: '{}'...", keyword)
     best = _download_free_image(keyword, save_dir, purpose="body")
     if best:
         best = _finalize_image(best, "body")
         if best:
             return best
 
-    # 3. 降级到本地 SD 引擎 (弱显卡备选)
-    logger.info("搜寻本地 SD 生图: '{}'...", keyword)
+    # 2. 备选本地 Stable Diffusion AI 生图
+    logger.info("🎨 正在发起本地 Stable Diffusion AI 配图生成: '{}'...", keyword)
     best = _try_local_sd(keyword, specific_dir, width=1024, height=576)
     if best:
         best = _finalize_image(best, "body")
         if best:
             return best
 
-    # 3. 终极兜底：当所有免费图源也失效时，自动在本地绘制文字卡片配图
-    logger.warning("  ⚠️ 正文配图图源全部失效，启用本地文字卡片自动兜底机制...")
+    # 3. 兜底本地高颜值文字卡片
+    logger.warning("  ⚠️ AI 生图服务未就绪，启用本地高颜值卡片兜底: '{}'", keyword)
     fallback_path = os.path.join(specific_dir, f"body_fallback_{int(time.time())}.jpg")
     try:
         generate_default_cover(keyword, fallback_path, purpose="body")
@@ -1006,8 +1183,11 @@ def download_image(keyword, save_dir="assets"):
 
 def download_cover_image(keyword, save_dir="assets"):
     """
-    下载封面图：优先本地 SD，不可用时自动降级到免费图源。
-    若全部失效，则自动调用本地 Pillow 引擎绘制高颜值文字卡片封面兜底。
+    下载封面图：100% AI 生图架构。
+    1. 优先通义万相 Qwen-Image-3.0 AI 封面生图；
+    2. 备选本地 Stable Diffusion AI 封面生图；
+    3. 兜底本地高颜值卡片。
+    已彻底禁用 Bing 搜索引擎网络爬虫。
     """
     if not keyword or not keyword.strip():
         return None
@@ -1017,24 +1197,24 @@ def download_cover_image(keyword, save_dir="assets"):
     if not os.path.exists(specific_dir):
         os.makedirs(specific_dir)
 
-    # 1. 高清真实网络图源 (Unsplash / Pexels / Bing)
-    logger.info("正在搜寻网络高清实拍封面图源: '{}'...", keyword)
+    # 1. 优先通义万相 Qwen-Image-3.0 AI 封面生图
+    logger.info("🎨 正在发起通义万相 (Qwen-Image) AI 封面图生成: '{}'...", keyword)
     best = _download_free_image(keyword, save_dir, purpose="cover")
     if best:
         best = _finalize_image(best, "cover")
         if best:
             return best
 
-    # 3. 降级到本地 SD 引擎
-    logger.info("搜寻本地 SD 封面生图: '{}'...", keyword)
+    # 2. 备选本地 Stable Diffusion AI 封面生图
+    logger.info("🎨 正在发起本地 Stable Diffusion AI 封面生成: '{}'...", keyword)
     best = _try_local_sd(keyword, specific_dir, width=1280, height=545)
     if best:
         best = _finalize_image(best, "cover")
         if best:
             return best
 
-    # 3. 终极兜底：当所有免费图源也失效时，自动在本地绘制文字卡片封面
-    logger.warning("  ⚠️ 封面图源全部失效，启用本地文字卡片自动兜底机制...")
+    # 3. 兜底本地高颜值文字卡片
+    logger.warning("  ⚠️ AI 封面生图服务未就绪，启用本地高颜值卡片封面兜底: '{}'", keyword)
     fallback_path = os.path.join(specific_dir, f"cover_fallback_{int(time.time())}.jpg")
     try:
         generate_default_cover(keyword, fallback_path, purpose="cover")

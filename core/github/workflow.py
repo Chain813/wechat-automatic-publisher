@@ -282,12 +282,37 @@ class PublishGithubNode(BaseNode):
 
         # 主编审校门禁 (Critic & Quality Gate)
         from core.pipeline.critic import evaluate_article_quality, format_critic_report
-        review_res = evaluate_article_quality(clean_title, final_html)
+        review_res = evaluate_article_quality(clean_title, final_html, article_type="github")
         print(format_critic_report(review_res))
 
         if not review_res["passed"] or not all_ok:
             err = f"未通过主编质量门禁 ({review_res['score']}分): {'; '.join(review_res['critic_issues'])}"
             print(f"❌ 门禁拦截发布：「{clean_title}」— {err}")
+            try:
+                import hashlib
+                title_hash = hashlib.md5(clean_title.encode('utf-8')).hexdigest()
+                os.makedirs(os.path.join("data", "previews"), exist_ok=True)
+                with open(os.path.join("data", "previews", f"fail_{title_hash}.html"), "w", encoding="utf-8") as f:
+                    f.write(final_html)
+
+                primary_repo_url = f"https://github.com/{projects[0]['repo']}" if projects else ""
+                session = db_manager.get_session()
+                ah = ArticleHistory(
+                    title=clean_title,
+                    source_type="github",
+                    publish_date=datetime.now().strftime("%Y-%m-%d"),
+                    success_status=False,
+                    media_id=None,
+                    error_log=err,
+                    quality_score=review_res["score"],
+                    source_url=primary_repo_url,
+                    thumb_media_id=thumb_id,
+                    status="REJECTED"
+                )
+                session.add(ah)
+                session.commit()
+            except Exception as e:
+                logger.warning("保存 GitHub 门禁拦截记录异常: {}", e)
             return False
 
         print("\n🚀 正在同步至微信公众号云端草稿箱...")
@@ -314,6 +339,7 @@ class PublishGithubNode(BaseNode):
                 error_log=None,
                 quality_score=review_res["score"],
                 source_url=primary_repo_url,
+                thumb_media_id=thumb_id,
                 status="DRAFT"
             )
             session.add(ah)

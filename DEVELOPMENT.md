@@ -47,7 +47,6 @@ cp .env.example .env
 | 组件 | 用途 | 安装方式 |
 |------|------|---------|
 | [Stable Diffusion WebUI](https://github.com/AUTOMATIC1111/stable-diffusion-webui) | AI 生图 | 启动时加 `--api` 参数 |
-| [Ollama](https://ollama.com) | 本地视觉 AI 评估 | `ollama pull gemma3:4b` |
 | [Graphviz](https://graphviz.org/download/) | 架构图渲染 | 安装后添加到系统 PATH |
 | Chrome 浏览器 | Selenium 截图 | 自动由 webdriver-manager 管理 |
 
@@ -111,6 +110,10 @@ AI科普文章（三阶段 Map-Reduce）：
 | Map-Reduce 提示词自优化 | 专门用于超长科普文生成。用第2步的大纲优化逻辑，设定排他规则和衔接钩子，消除多章节内容“失忆”和比喻重复。 |
 | 双通道预览机制 | `/api/preview/<preview_id>` 接口优先读取本地 `data/previews/*.html` 静态缓存，若不存在则回退请求微信 API。不仅提供离线预览，还支持了“发布失败”任务的稿件排版预览。 |
 | 实时信源健康轮询 | 前端信源 Tab 激活后，启动 3 秒一次的定时轮询 (`setInterval`)，实现无刷新健康状态同步，切换离开时自动销毁。 |
+| 前端浅色主题重构 | WebUI 由暗色玻璃拟态重写为浅色主题：全部颜色收敛到 `static/css/style.css` 的 `:root` 设计 token，背景为 Three.js 3D 粒子网络（`static/js/three-bg.js`），旧变量名（`--text-secondary` 等）在 `:root` 末尾保留别名，兼容页面内联样式与 JS 动态模板。 |
+| 知识体系泛化 | AI 科普技能树泛化为多主题「体系连载」引擎：`data/knowledge_trees/*.json` 模板包 + `/api/kepu/trees|active|import` 接口，WebUI 支持切换/导入自定义知识库，提示词按 meta.column_name 动态注入。 |
+| 国内视觉全链路 | 生图接入通义万相 Qwen-Image-3.0（DashScope multimodal-generation 接口，T2I + 参考图 I2I 重绘）；识图唯一模型 Qwen-VL-Max（compatible-mode）；图源链收敛为 Qwen 生图 → Bing 搜图 → 本地文字卡；GitHub 图片下载自动降级 jsdelivr 镜像；已移除全部境外依赖（Gemini/Pexels/Unsplash/Pixabay/Pollinations/GitHub Token）。 |
+| API Key 轮询池 | `utils/key_pool.py` 通用多 Key 轮询：`LLM_API_KEYS` / `DASHSCOPE_API_KEYS` 逗号分隔配置，限流(429)/欠费(401)/被禁(403)自动切换 Key 并冷却退避（429 冷却 120s，401/403 冷却 300s），全部冷却中自动取最早恢复者。同一账号多 Key 共享账号级 QPM，跨账号 Key 才能叠加并发上限。 |
 | Graphviz Windows PATH 自动注入 | 在 `utils/lite_render.py` 中，如果检测到 Windows 平台且默认安装路径 `C:\Program Files\Graphviz\bin` 存在但未加入系统 PATH，运行时会自动将其动态添加到 `os.environ["PATH"]`，极大降低了本地部署和运行难度。 |
 | LLM 提示词在 processor.py | 集中管理，方便调优。 |
 | 微信 API 封装在 publisher.py | Token 自动刷新、线程安全、标题去重。 |
@@ -258,6 +261,10 @@ python main.py --task hotspots
 # Web UI 测试
 python webui.py
 # 浏览器访问 http://127.0.0.1:5000
+# 云端模式（设置 WEBUI_TOKEN）访问 / 会先出现登录页；/static/ 静态资源已豁免认证
+
+# 视觉链路健康检查（CV / Qwen-VL 自检，可指定图片路径）
+python scratch/vision_check.py [图片路径]
 ```
 
 ### 测试文件
@@ -348,6 +355,13 @@ git push origin main
 - 热点配图：`core/shared/article_utils.py` 的 `process_article_content()`
 - GitHub 配图：`core/github/workflow.py` 的 `_ensure_deep_images()`
 - 图片评分：`utils/image_filter.py` 的 `evaluate_image()`
+
+### 调整 WebUI 主题与样式
+
+- 设计 token：`static/css/style.css` 的 `:root`（`--accent`、`--bg`、`--radius` 等；旧变量名在末尾保留别名）
+- 3D 粒子背景：`static/js/three-bg.js`（粒子数量、连线距离、颜色数组、鼠标跟随参数）
+- 主页面模板：`templates/index.html`（`id` / `data-i18n` / `data-target` / `data-task` 属性不可删，JS 逻辑依赖）
+- 登录页模板：`templates/login.html`（云端 Token 模式；`/static/` 已在 `webui.py` 豁免认证）
 
 ---
 

@@ -25,6 +25,64 @@
         if (btnPreview) {
             btnPreview.addEventListener('click', onPreviewArticle);
         }
+        initStudioRedraw();
+    }
+
+    // ---- 参考图重绘（抓文章图 → Qwen-Image Pro 重绘为全新原创配图） ----
+    function initStudioRedraw() {
+        const btn = $id('btn-studio-redraw');
+        const urlInput = $id('studio-redraw-url');
+        const resultsBox = $id('studio-redraw-results');
+        if (!btn || !urlInput || !resultsBox) return;
+
+        btn.addEventListener('click', async () => {
+            const url = urlInput.value.trim();
+            if (!url.startsWith('http')) {
+                showStudioToast('请先粘贴有效的文章链接', 'warning');
+                return;
+            }
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-icon">⏳</span> 重绘中...';
+            resultsBox.innerHTML = '<div class="studio-loading"><div class="studio-spinner"></div><span>正在抓图并重绘，约 30-90 秒...</span></div>';
+            try {
+                const res = await fetch('/api/image-studio/redraw', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ article_url: url, count: 4 })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    resultsBox.innerHTML = '';
+                    (data.images || []).forEach(img => {
+                        const wrap = document.createElement('div');
+                        wrap.style.cssText = 'border:1px solid var(--border); border-radius:10px; overflow:hidden; width:180px; background:var(--bg-panel);';
+                        wrap.innerHTML = '<img src="' + img.url + '" style="width:100%; display:block; cursor:pointer;" title="点击复制图片路径">';
+                        wrap.querySelector('img').addEventListener('click', () => {
+                            const abs = new URL(img.url, window.location.origin).href;
+                            if (navigator.clipboard) {
+                                navigator.clipboard.writeText(abs).then(
+                                    () => showStudioToast('已复制图片路径', 'success'),
+                                    () => showStudioToast(abs, 'warning')
+                                );
+                            } else {
+                                showStudioToast(abs, 'warning');
+                            }
+                        });
+                        resultsBox.appendChild(wrap);
+                    });
+                    showStudioToast('重绘完成，共 ' + data.images.length + ' 张（点击图片复制路径）', 'success');
+                } else {
+                    resultsBox.innerHTML = '<div class="studio-empty-text" style="color:var(--red); font-size:13px;">' + data.message + '</div>';
+                    showStudioToast(data.message, 'error');
+                }
+            } catch (e) {
+                resultsBox.innerHTML = '';
+                showStudioToast('重绘请求异常: ' + e, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<span class="btn-icon">🎨</span> 抓图并重绘';
+            }
+        });
     }
 
     // ---- 生成提示词 ----

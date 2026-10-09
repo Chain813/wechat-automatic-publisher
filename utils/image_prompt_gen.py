@@ -1,7 +1,7 @@
 """
 ============================================================
-  图片提示词生成器 — 将中文关键词转化为 Imagen 3 英文 Prompt
-  供用户手动在 Gemini 网页版生图后拖拽到 WebUI 图片工作台
+  图片提示词生成器 — 将中文关键词转化为目标生图模型的英文 Prompt
+  供用户用 Qwen-Image 等模型生图后拖拽到 WebUI 图片工作台
 ============================================================
 """
 import re
@@ -155,33 +155,37 @@ def render_article_preview(article_text: str, article_title: str, images_mapping
         flags=re.DOTALL
     )
     
-    # 4. Replace placeholders with images or placeholder block
-    for i, kw in enumerate(placeholders):
-        idx_str = str(i + 1)
-        img_url = images_mapping.get(idx_str)
-        
+    # 4. Replace placeholders sequentially with single-pass matching
+    slot_cursor = 0
+    pattern_placeholder = re.compile(r"【\s*此处(?:插入配图|绘制图表)\s*[：:]\s*(.*?)\s*】")
+
+    def _replace_preview_placeholder(match):
+        nonlocal slot_cursor
+        current_idx = slot_cursor
+        slot_cursor += 1
+        idx_str = str(current_idx + 1)
+        kw = match.group(1).strip()
+        img_url = images_mapping.get(idx_str) or images_mapping.get(current_idx)
+
         if img_url:
-            image_html = (
+            return (
                 '<p style="text-align:center;margin: 20px 0;">'
                 f'<img src="{img_url}" style="width:100%;max-width:600px;border-radius:12px;'
                 'box-shadow: 0 4px 12px rgba(0,0,0,0.1);">'
-                "</p>"
+                '</p>'
             )
         else:
-            # Render a nice placeholder box in the preview
-            image_html = (
+            return (
                 '<div style="margin: 20px auto; max-width: 600px; padding: 30px; text-align: center; '
                 'border: 2px dashed rgba(148, 163, 184, 0.3); border-radius: 12px; background: rgba(30, 41, 59, 0.2); '
                 'color: #94a3b8; font-family: sans-serif;">'
                 f'<div style="font-size: 24px; margin-bottom: 8px;">📷</div>'
-                f'<div style="font-size: 14px; font-weight: 600;">配图 #{i+1}：{kw}</div>'
+                f'<div style="font-size: 14px; font-weight: 600;">配图 #{current_idx+1}：{kw}</div>'
                 '<div style="font-size: 12px; margin-top: 4px; color: rgba(148, 163, 184, 0.6);">（尚未上传图片，拖拽图片到上方卡片进行配图）</div>'
                 '</div>'
             )
-        
-        # Replace this placeholder
-        pattern = re.compile(rf"【\s*此处(?:插入配图|绘制图表)\s*[：:]\s*{re.escape(kw)}\s*】")
-        html_body = pattern.sub(lambda m, h=image_html: h, html_body)
+
+    html_body = pattern_placeholder.sub(_replace_preview_placeholder, html_body)
         
     # 5. Apply styling identical to article_utils.py
     html_body = html_body.replace(

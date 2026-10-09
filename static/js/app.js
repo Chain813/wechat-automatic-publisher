@@ -14,7 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
             "run-workflow-desc": "扫描最新热点/开源项目，使用大模型生成推文，自动匹配精美插图并推送到微信草稿箱。",
             "task-hotspots": "今日热点",
             "task-github": "GitHub 趋势",
-            "task-aikepu": "🎓 AI 科普",
+            "task-aikepu": "🎓 体系连载",
             "btn-start": "开始",
             "btn-pause": "暂停",
             "btn-resume": "恢复",
@@ -40,7 +40,6 @@ document.addEventListener('DOMContentLoaded', () => {
             "label-wechat-appid": "微信 AppID",
             "label-wechat-secret": "微信 AppSecret",
             "label-llm-apikey": "DeepSeek API 密钥",
-            "label-gemini-apikey": "Gemini API 密钥 (可选)",
             "label-llm-model": "LLM 模型",
             "label-qywechat-webhook": "企业微信 Webhook (可选)",
             "label-diagram-workers": "图表并行线程数",
@@ -68,7 +67,7 @@ document.addEventListener('DOMContentLoaded', () => {
             "run-workflow-desc": "Scan hotspots, generate articles with DeepSeek, add images, publish to WeChat drafts.",
             "task-hotspots": "Hotspots",
             "task-github": "GitHub Trending",
-            "task-aikepu": "🎓 AI 科普",
+            "task-aikepu": "🎓 Series",
             "btn-start": "Start",
             "btn-pause": "Pause",
             "btn-resume": "Resume",
@@ -93,7 +92,6 @@ document.addEventListener('DOMContentLoaded', () => {
             "label-wechat-appid": "WeChat AppID",
             "label-wechat-secret": "WeChat AppSecret",
             "label-llm-apikey": "DeepSeek API Key",
-            "label-gemini-apikey": "Gemini API Key (optional)",
             "label-llm-model": "LLM Model",
             "label-qywechat-webhook": "QYWeChat Webhook (optional)",
             "label-diagram-workers": "Diagram Parallel Workers",
@@ -390,7 +388,33 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // --- AI 科普技能树进度更新 ---
+    // --- 知识体系主题包加载（下拉框 + 标题 + 徽标） ---
+    async function loadKnowledgeTreePicker() {
+        const select = document.getElementById('knowledge-tree-select');
+        if (!select) return;
+        try {
+            const res = await fetch('/api/kepu/trees');
+            const data = await res.json();
+            if (data.status !== 'success') return;
+            select.innerHTML = '';
+            (data.trees || []).forEach(t => {
+                const opt = document.createElement('option');
+                opt.value = t.name;
+                opt.textContent = `${t.title} (${t.node_count} 节点)`;
+                if (t.name === data.active) opt.selected = true;
+                select.appendChild(opt);
+            });
+            const active = (data.trees || []).find(t => t.name === data.active);
+            const titleEl = document.getElementById('skill-tree-view-title');
+            if (titleEl && active) titleEl.textContent = `⚡ ${active.title} · 全景拓扑图谱`;
+            const badge = document.getElementById('skill-tree-badge');
+            if (badge && active) badge.textContent = `当前主题: ${active.title}`;
+        } catch (e) {
+            appendLog(`[体系连载] ❌ 主题包加载失败: ${e}`, 'error');
+        }
+    }
+
+    // --- 体系连载进度更新 ---
     async function updateSkillTreeStats() {
         try {
             const res = await fetch('/api/aikepu/tree_stats');
@@ -894,7 +918,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function startGenerateNode(nodeId) {
         try {
-            appendLog(`[Skill Tree] 🚀 用户选中节点 [${nodeId}]，准备发起 AI 科普图文撰写...`, 'system');
+            appendLog(`[Skill Tree] 🚀 用户选中节点 [${nodeId}]，准备发起体系连载图文撰写...`, 'system');
             
             // 切换到 Console
             const consoleNav = document.getElementById('nav-console-link');
@@ -971,6 +995,62 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    // --- 知识体系主题包管理（切换 / 导入自定义知识库） ---
+    const treeSelect = document.getElementById('knowledge-tree-select');
+    if (treeSelect) {
+        treeSelect.addEventListener('change', async () => {
+            try {
+                const res = await fetch('/api/kepu/active', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: treeSelect.value })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    appendLog(`[体系连载] ✅ 已切换主题: ${data.title} (${data.node_count} 节点)`, 'system');
+                    loadSkillTreeVisualizer(true);
+                    updateSkillTreeStats();
+                } else {
+                    alert('切换失败: ' + data.message);
+                }
+            } catch (e) {
+                alert('切换异常: ' + e);
+            }
+        });
+    }
+
+    const btnImportTree = document.getElementById('btn-import-tree');
+    const treeFileInput = document.getElementById('tree-file-input');
+    if (btnImportTree && treeFileInput) {
+        btnImportTree.addEventListener('click', () => treeFileInput.click());
+        treeFileInput.addEventListener('change', async () => {
+            const file = treeFileInput.files[0];
+            if (!file) return;
+            const fd = new FormData();
+            fd.append('file', file);
+            const safeName = file.name.replace(/\.json$/i, '').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 48);
+            fd.append('name', safeName);
+            try {
+                const res = await fetch('/api/kepu/import', { method: 'POST', body: fd });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    appendLog(`[体系连载] ✅ 已导入知识库 [${data.name}] (${data.node_count} 节点)`, 'system');
+                    alert('导入成功！已自动切换到新知识库。');
+                    loadKnowledgeTreePicker();
+                    loadSkillTreeVisualizer(true);
+                    updateSkillTreeStats();
+                } else {
+                    alert('导入失败: ' + data.message);
+                }
+            } catch (e) {
+                alert('导入异常: ' + e);
+            }
+            treeFileInput.value = '';
+        });
+    }
+
+    loadKnowledgeTreePicker();
 
     // Filter Buttons
     document.querySelectorAll('.tree-filter-btn').forEach(btn => {
@@ -1049,9 +1129,13 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('wechat-appid').value = data.WECHAT_APP_ID || '';
             document.getElementById('wechat-secret').value = data.WECHAT_APP_SECRET || '';
             document.getElementById('llm-apikey').value = data.LLM_API_KEY || '';
-            document.getElementById('gemini-apikey').value = data.GEMINI_API_KEY || '';
+            document.getElementById('dashscope-apikey').value = data.DASHSCOPE_API_KEY || '';
+            const qwenImgSel = document.getElementById('qwen-image-model');
+            if (qwenImgSel && data.QWEN_IMAGE_MODEL && [...qwenImgSel.options].some(o => o.value === data.QWEN_IMAGE_MODEL)) qwenImgSel.value = data.QWEN_IMAGE_MODEL;
+            const qwenVlSel = document.getElementById('qwen-vl-model');
+            if (qwenVlSel && data.QWEN_VL_MODEL && [...qwenVlSel.options].some(o => o.value === data.QWEN_VL_MODEL)) qwenVlSel.value = data.QWEN_VL_MODEL;
             document.getElementById('qywechat-webhook').value = data.QYWECHAT_WEBHOOK || '';
-            document.getElementById('image-gen-model').value = data.IMAGE_GEN_MODEL || 'Google Gemini Imagen 3';
+            document.getElementById('image-gen-model').value = data.IMAGE_GEN_MODEL || 'qwen-image-3.0';
             document.getElementById('diagram-workers').value = data.DIAGRAM_PARALLEL_WORKERS || '3';
             const sel = document.getElementById('llm-model');
             if (data.LLM_MODEL && [...sel.options].some(o => o.value === data.LLM_MODEL)) {

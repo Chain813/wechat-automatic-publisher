@@ -46,17 +46,16 @@ def evaluate_article_quality(
     article_text: str,
     fact_context: str = "",
     min_pass_score: int = 75,
+    article_type: str = "long",
 ) -> Dict[str, Any]:
     """
     对生成的文稿进行多维质量评分与门禁核验。
     
-    返回包含:
-    - score: 0-100 综合得分
-    - passed: 是否达到及格线发布标准
-    - critic_issues: 扣分原因与待修正问题列表
-    - char_count: 纯汉字数量
-    - cliche_hits: 命中的套话列表
-    - title: 审核标题
+    :param title: 文章标题
+    :param article_text: 文章 HTML 或 Markdown 正文
+    :param fact_context: 事实基座内容（可选）
+    :param min_pass_score: 门禁合格分（默认 75 分）
+    :param article_type: 文章类型，'github' 代表开源项目剖析，'long'/'hotspots'/'aikepu' 代表深度长文
     """
     issues: List[str] = []
     score = 100
@@ -76,20 +75,31 @@ def evaluate_article_quality(
         score -= deduction
         issues.append(f"命中刻板 AI 套话 {len(cliche_hits)} 次: {distinct_cliches}")
 
-    # 2. 汉字字数达标审查
+    # 2. 汉字字数达标审查（根据文章类型动态调控，杜绝一刀切）
     chinese_chars = len(re.findall(r"[\u4e00-\u9fa5]", plain_text))
-    if chinese_chars < 1800:
-        score -= 25
-        issues.append(f"正文汉字字数不足 ({chinese_chars} < 1800)")
-    if chinese_chars < 800:
-        score -= 25
-        issues.append(f"正文内容严重过短 ({chinese_chars} < 800)")
+    if article_type.lower() == "github":
+        if chinese_chars < 800:
+            score -= 20
+            issues.append(f"GitHub 推荐文汉字字数不足 ({chinese_chars} < 800)")
+        if chinese_chars < 450:
+            score -= 25
+            issues.append(f"GitHub 推荐文内容严重过短 ({chinese_chars} < 450)")
+    else:
+        if chinese_chars < 1500:
+            score -= 20
+            issues.append(f"深度长文汉字字数不足 ({chinese_chars} < 1500)")
+        if chinese_chars < 800:
+            score -= 25
+            issues.append(f"正文内容严重过短 ({chinese_chars} < 800)")
 
-    # 3. 标题格式审查
+    # 3. 标题格式与长度审查
     clean_title = (title or "").strip()
     if not clean_title or len(clean_title) < 5:
         score -= 15
         issues.append(f"标题字数过短 ({len(clean_title)} < 5)")
+    if len(clean_title) > 64:
+        score -= 20
+        issues.append(f"标题字数超出微信 64 字符上限 ({len(clean_title)} > 64)")
 
     forbidden_endings = ("。", "！", "？", "!", "?", "：", ":", "，", ",")
     if clean_title and clean_title.endswith(forbidden_endings):

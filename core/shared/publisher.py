@@ -33,7 +33,8 @@ except ImportError:
 
 def _normalize_title(title):
     """去除标点/空格，统一小写，用于字符级模糊匹配"""
-    return ''.join(c.lower() for c in title if c.isalnum())
+    title_str = title.title if hasattr(title, "title") else str(title)
+    return ''.join(c.lower() for c in title_str if c.isalnum())
 
 
 def _extract_keywords(title):
@@ -43,14 +44,15 @@ def _extract_keywords(title):
     - 中文：使用 2~4 字滑动窗口生成 n-gram，弥补无分词器的缺陷
       例如 "脑机接口人体试验" → {"脑机", "机接", "接口", "口人", "脑机接口", ...}
     """
+    title_str = title.title if hasattr(title, "title") else str(title)
     keywords = set()
     # 英文单词和数字
-    for m in re.finditer(r'[a-zA-Z][a-zA-Z0-9]*|[0-9]+', title):
+    for m in re.finditer(r'[a-zA-Z][a-zA-Z0-9]*|[0-9]+', title_str):
         token = m.group().lower()
         if len(token) >= 2:
             keywords.add(token)
     # 中文 n-gram (2~4 字滑动窗口)
-    chinese_chunks = re.findall(r'[\u4e00-\u9fff]+', title)
+    chinese_chunks = re.findall(r'[\u4e00-\u9fff]+', title_str)
     for chunk in chinese_chunks:
         for n in (2, 3, 4):
             for i in range(len(chunk) - n + 1):
@@ -439,21 +441,23 @@ class WeChatPublisher:
         3. 关键词 n-gram 重叠匹配
         4. AI 语义查重 (DeepSeek，~300 tokens，兜底)
         """
-        existing = self.get_all_active_titles()
+        new_title_str = new_title.title if hasattr(new_title, "title") else str(new_title)
+        raw_existing = self.get_all_active_titles()
         if extra_existing:
-            existing = existing + extra_existing
+            raw_existing = raw_existing + extra_existing
             
+        existing = [t.title if hasattr(t, "title") else str(t) for t in raw_existing]
         if not existing:
             return False, None
 
-        new_keywords = _extract_keywords(new_title)
+        new_keywords = _extract_keywords(new_title_str)
         for old in existing:
             # 策略 1: 精确匹配
-            if new_title == old:
+            if new_title_str == old:
                 return True, old
 
             # 策略 2: 字符级模糊匹配
-            similarity = self._title_similarity(new_title, old)
+            similarity = self._title_similarity(new_title_str, old)
             if similarity >= TITLE_DUPLICATE_RATIO:
                 logger.info("命中相似标题(模糊{}%): {}", similarity, old)
                 return True, old

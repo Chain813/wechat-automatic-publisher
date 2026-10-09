@@ -43,6 +43,7 @@ class DBManager:
                     ("source_url", "TEXT"),
                     ("quality_score", "FLOAT DEFAULT 0.0"),
                     ("status", "VARCHAR(50) DEFAULT 'PENDING_REVIEW'"),
+                    ("thumb_media_id", "VARCHAR(255)"),
                     ("fact_check_result", "TEXT"),
                 ]
                 for col_name, col_def in columns_to_add:

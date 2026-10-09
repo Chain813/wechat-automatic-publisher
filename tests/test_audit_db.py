@@ -86,6 +86,7 @@ def test_db_migration_alter_table(tmp_path):
             ("source_url", "TEXT"),
             ("quality_score", "FLOAT DEFAULT 0.0"),
             ("status", "VARCHAR(50) DEFAULT 'PENDING_REVIEW'"),
+            ("thumb_media_id", "VARCHAR(255)"),
             ("fact_check_result", "TEXT"),
         ]:
             try:

@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python: 3.8+](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![DeepSeek: Powered](https://img.shields.io/badge/LLM-DeepSeek-green.svg)](https://api.deepseek.com)
-[![Gemini Vision](https://img.shields.io/badge/Vision-Gemini%20Flash-orange.svg)](https://ai.google.dev/)
+[![Qwen-VL](https://img.shields.io/badge/Vision-Qwen%20VL-blue.svg)](https://www.alibabacloud.com/help/en/model-studio/vision)
 
 微信公众号全自动内容生产与发布系统。集成实时热点监控、AI 选题、深度文章创作、智能配图、一键发布。
 
@@ -56,12 +56,12 @@ graph TD
     subgraph Workflows ["动态工作流插件 (Workflows)"]
         D["🌐 12 大全网热点源"]:::plugin
         E["🐙 GitHub 趋势挖掘"]:::plugin
-        F["🎓 AI 科普技能树 DAG"]:::plugin
+        F["🎓 知识体系连载引擎 (DAG)"]:::plugin
     end
 
     subgraph AIEngines ["人工智能引擎 (AI Engines)"]
         G{"🧠 DeepSeek LLM\n(深度长文生成)"}:::llm
-        H{"👁️ Gemini / Ollama\n(视觉质量评估)"}:::vision
+        H{"👁️ Qwen-VL 千问\n(视觉质量评估)"}:::vision
     end
 
     subgraph Publishing ["持久化与发布模块 (Publishing)"]
@@ -112,12 +112,12 @@ graph TD
 
 每个数据源独立健康监控（绿/黄/红状态），故障时自动降级，不影响其他源。
 
-### 🎓 AI 知识普及（技能树驱动）
+### 🎓 体系连载（知识库驱动）
 
-基于预设 AI 技能树 DAG，系统化输出从入门到前沿的教育科普文章：
+基于知识体系 DAG，系统化输出从入门到前沿的深度连载文章，主题可自由切换（AI 科普 / 职场成长 / 健康科普 / 自定义知识库）：
 
 - **三阶段 Map-Reduce 提示词自优化** (🆕 v4.2)：系统化生成超长科普文章（≥ 15000字）。大纲生成（Phase 1）→ 提示词自优化（Phase 2，LLM 自主设定每节的类比分工、衔接钩子及排他内容，杜绝跨章节比喻重复或内容“撞车”）→ 串行生成与上文传递（Phase 3，每节引入前一节末尾 500 字，一气呵成）。
-- **融合技能树**：30 个知识点节点覆盖 数学基础 → 深度学习 → Transformer → LLM → Agent 全链路，有明确的先修依赖关系。
+- **多主题知识库**：内置 AI 科普（30 节点）、职场成长（10 节点）、健康科普（8 节点）三套知识体系，支持 WebUI 一键切换与上传自定义知识库 JSON。
 - **拓扑排序选题**：自动选择「先修已发布」的节点中出度最高的枢纽节点，确保循序渐进。
 - **教育风格文章**：独立的教育风 SYSTEM_PROMPT——类比驱动、图解思维、从 WHY→HOW→WHAT 逐层展开。
 - **路线感知**：每篇文章末尾标注在技能树中的位置和下一步学习建议。
@@ -127,7 +127,7 @@ graph TD
 # CLI 运行
 python main.py --task aikepu
 
-# 或 WebUI 中选择 "🎓 AI 科普"
+# 或 WebUI 中选择 "🎓 体系连载"
 ```
 
 ### AI 深度创作
@@ -150,7 +150,7 @@ python main.py --task aikepu
 - **6 维评分体系**：从分辨率、宽高比、清晰度、文字密度、色彩丰富度、文件大小 6 个维度对候选图片打分
 - **感知哈希去重**：使用 pHash（感知哈希）算法检测相似图片，避免重复配图
 - **微信尺寸适配**：自动裁剪为微信推荐尺寸（封面 900×383，正文 900×500）
-- **视觉 AI 二次评估**：候选图片经 Gemini Vision（云端）或 Ollama（本地）AI 模型二次评估，选出最佳
+- **视觉 AI 二次评估**：候选图片经千问 Qwen-VL 视觉模型二次评估（国内直连），选出最佳
 - **本地 Stable Diffusion 集成**：支持调用本地 SD WebUI API 生成极客艺术感插图。
 - **LLM 图像关键词优化**：当常规搜索无果时，由 LLM 将抽象术语转化为视觉化搜索词（如“监管政策”→“科技感天平”），大幅提升匹配率。
 - **固定专题封面**：GitHub 专题统一采用 2.35:1 黄金比例的固定品牌封面，增强辨识度。
@@ -172,15 +172,17 @@ python main.py --task aikepu
 
 ### Web 管理界面
 
-Flask 暗色玻璃拟态主题仪表盘：
+Flask 浅色玻璃拟态主题仪表盘（Three.js 3D 粒子网络背景），共 7 个页面；云端模式另配同款浅色主题的 Token 登录页：
 
 | 页面 | 功能说明 |
 |------|---------|
-| **控制台** | 一键启停任务、实时日志流、任务类型选择（热点/GitHub/AI科普）。支持暂停/恢复/停止。 |
-| **图片工作台** | **拖拽配图与生图工作室** (🆕 v4.3)：自动提取 Markdown 中的配图占位符，生成可配置模型（如 Imagen 3 / Midjourney v6 / FLUX.1）Prompt，支持 HTML5 拖拽上传配图与微信公众号手机端高保真预览。 |
+| **控制台** | 一键启停任务、实时日志流、任务类型选择（热点/GitHub/体系连载）。支持暂停/恢复/停止。 |
+| **图片工作台** | **拖拽配图与生图工作室** (🆕 v4.3)：自动提取 Markdown 中的配图占位符，生成可配置模型（如 Qwen-Image-3.0 / Imagen 3 / Midjourney / FLUX.1）Prompt，支持 HTML5 拖拽上传配图、微信公众号手机端高保真预览，以及**文章参考图重绘**（粘贴公众号文章链接 → 自动抓图 → Qwen-Image Pro 重绘为全新原创配图）。 |
 | **图表引擎** | **混合五模渲染** (🆕 v4.3)：支持 Mermaid 脑图、LaTeX 学术卡片、Graphviz 依赖图、Tailwind HTML 对比卡片及 **Archify / D2 系统架构图**，系统未安装 Archify 时自动平滑降级。 |
 | **历史记录** | 按日期分组展示。**支持离线/在线文章预览** (🆕 v4.2)：每条记录均提供“预览”按钮，点击后可在弹窗中完美渲染文章内容和精美排版。即使发布失败，也可本地浏览失败前的稿件。 |
 | **数据源** | 12 个数据源的健康状态卡片（绿=正常/黄=告警/红=故障）。**支持实时同步** (🆕 v4.2)：在信源 Tab 激活时，每 3 秒自动轮询健康状态，实现与后台采集进度的实时一致。 |
+| **体系连载** | 多主题知识库 DAG 拓扑图谱：4 层级分栏、先修依赖连线、节点状态与微信草稿箱同步（已发布/可解锁/锁定），支持主题包切换、上传自定义知识库 JSON、手动标记节点状态与「撰写下一个可解锁节点」。 |
+| **定时任务** | APScheduler cron 表达式定时发布（热点 / GitHub / AI 科普），任务列表在线管理。 |
 | **设置** | API Key 在线配置，密钥脱敏显示，防注入校验，支持在线配置**提示词目标生图模型**（`IMAGE_GEN_MODEL`）与**图表并行生成线程数**（`DIAGRAM_PARALLEL_WORKERS`）。 |
 
 ### 企业微信集成
@@ -195,7 +197,7 @@ Flask 暗色玻璃拟态主题仪表盘：
 |------|------|------|
 | **语言** | Python 3.8+ | 主开发语言 |
 | **LLM** | DeepSeek Chat / Reasoner | 文章生成、选题筛选、摘要生成 |
-| **视觉 AI** | Gemini Flash 2.0 + Gemma 3 4B | 图片质量 AI 评估（云端/本地双通道） |
+| **视觉 AI** | 千问 Qwen-VL-Max | 图片质量 AI 评估（云端，国内直连） |
 | **架构与图表** | Archify / D2 / Mermaid / Graphviz | 系统架构图、流程图、数据流图原生与平滑转译渲染 |
 | **GitHub 工具链** | PyGithub | GitHub API 封装，获取 Trending 项目、仓库元数据 |
 | | rich | Python 富文本库，渲染项目目录树为高质量 PNG 图片 |
@@ -207,8 +209,7 @@ Flask 暗色玻璃拟态主题仪表盘：
 | | icrawler | 图片爬虫框架（Bing/百度图片搜索） |
 | **图片处理** | Pillow | Python 图片处理库，裁剪/缩放/格式转换 |
 | | numpy | 数值计算，用于图片评分算法 |
-| | Pollinations.ai | 免费 AI 生图 API，无需 API Key |
-| | Pexels | 免费高质量图库 API |
+| | 通义万相 Qwen-Image | 国内直连 AI 生图 API（DashScope） |
 | **缓存/匹配** | requests-cache | HTTP 请求缓存，减少重复请求 |
 | | RapidFuzz | 高性能模糊字符串匹配库 |
 | **日志** | Loguru | Python 日志库 |
@@ -222,7 +223,7 @@ Flask 暗色玻璃拟态主题仪表盘：
 ```
 wechat_auto_publish/
 ├── main.py                    # CLI 入口，支持 --task hotspots/github 参数
-├── webui.py                   # Flask Web 管理界面，提供暗色主题仪表盘
+├── webui.py                   # Flask Web 管理界面，提供浅色主题仪表盘
 ├── config.py                  # 全局配置中心，集中管理所有可调参数
 ├── .env.example               # 环境变量模板
 ├── requirements.txt           # Python 依赖清单
@@ -231,8 +232,9 @@ wechat_auto_publish/
 │
 ├── data/                      # 数据库与运行时数据配置目录
 │   ├── auto_publish.sqlite    # 标题去重与发布历史 SQLite 数据库
-│   ├── aikepu_skill_tree.json # AI 科普知识点技能树结构文件
-│   ├── aikepu_history.json    # AI 科普已发布节点历史（自动生成）
+│   ├── knowledge_trees/      # 知识体系主题包（AI科普/职场成长/健康科普/自定义导入）
+│   ├── aikepu_skill_tree.json # 旧版 AI 科普技能树结构文件（向后兼容）
+│   ├── aikepu_history.json    # 已发布节点历史（自动生成）
 │   └── hotspot_cache.sqlite   # 热点采集网络请求缓存数据库（自动生成）
 │
 ├── core/                      # 核心业务逻辑
@@ -309,24 +311,11 @@ LLM_API_KEY="你的DeepSeek API Key"
 # 💡 降本提示：DeepSeek 采用峰谷定价，空闲时段 (0:00-9:00, 12:00-14:00, 18:00-24:00) 享受 50% 折扣！
 LLM_MODEL="deepseek-v4-pro"
 
-# GitHub API Token（可选，提高 API 速率限制，匿名60次/小时 → 认证5000次/小时）
-# 获取方式：GitHub Settings → Developer settings → Personal access tokens → Generate new token
-# 权限：只需勾选 public_repo
-GITHUB_TOKEN="ghp_xxxxxxxxxxxx"
-
-# Gemini Vision API Key（可选，用于 AI 图片质量评估）
-GEMINI_API_KEY="AIzaSyxxxxxxxxxxx"
+# DashScope 千问 API Key（必填，一个 Key 覆盖生图 + 识图）
+DASHSCOPE_API_KEY="sk-xxx"
 
 # 企业微信群机器人 Webhook（可选，发布后自动推送通知）
 QYWECHAT_WEBHOOK=""
-
-# Ollama 本地视觉模型（可选，本地 AI 图片评估，需先安装 Ollama）
-OLLAMA_DEFAULT_MODEL="gemma4:e2b-it-q4_K_M"
-OLLAMA_VISION_MODEL="gemma3:4b"
-
-# Pexels 免费图库 API Key（可选，高质量版权免费图片）
-# 获取方式：https://www.pexels.com/api/ 免费注册
-PEXELS_API_KEY=""
 ```
 
 ### 4. 运行
@@ -347,30 +336,52 @@ python webui.py
 
 ## Web 管理界面
 
+> 界面为浅色玻璃拟态主题（Inter 字体 + 靛蓝/紫渐变主色），背景是 Three.js 3D 粒子网络（`static/js/three-bg.js`）；云端模式的 Token 登录页与主界面同款主题。
+
 ### 控制台页面
 
-- **任务类型选择**：热点发布 / GitHub Trending 发布
+- **任务类型选择**：热点发布 / GitHub Trending / 体系连载 / 每日小知识
 - **一键启停**：Start / Pause / Resume / Stop 完整控制流
 - **实时日志**：轮询推送的实时运行日志，滚动显示
 - **状态指示**：Running / Paused / Idle 状态标识
+- **Prompt Cache 监控**：命中率、节省 Tokens、节省费用与延迟的实时看板
+
+### 体系连载页面
+
+- 多主题知识库 DAG 拓扑图谱，4 个层级分栏展示
+- 主题包一键切换（AI 科普 / 职场成长 / 健康科普），支持导入自定义知识库 JSON
+- 先修依赖连线与节点状态（已发布/可解锁/锁定），与微信草稿箱自动同步
+- 支持手动标记节点状态与「撰写下一个可解锁节点」
+
+### 图片工作台页面
+
+- 从 Markdown 自动提取 `【此处插入配图：xxx】` 占位符，生成 Imagen 3 / Midjourney / FLUX.1 英文提示词
+- HTML5 拖拽上传配图、实时进度与缩略图、微信公众号移动端高保真预览
 
 ### 历史记录页面
 
 - 按日期分组展示发布结果
 - 每条记录显示：✓/✗ 状态、话题名、发布时间、草稿 ID
 - 失败记录显示错误原因
+- 在线/离线文章预览，支持批量删除
 
 ### 数据源页面
 
 - 12 个数据源的健康状态卡片
 - 绿色 = 正常 / 黄色 = 降级 / 红色 = 故障
 - 连续失败 3 次自动降级，下次运行自动恢复
+- Tab 激活时每 3 秒自动轮询，实时同步采集进度
+
+### 定时任务页面
+
+- APScheduler cron 表达式定时发布（热点 / GitHub / 体系连载）
 
 ### 设置页面
 
 - API Key 在线编辑，密钥脱敏显示
 - 输入校验（防换行注入、长度限制）
 - 保存后立即生效
+- 生图引擎在线状态检测
 
 ---
 
@@ -382,11 +393,9 @@ python webui.py
 
 | 优先级 | 来源 | 说明 |
 |--------|------|------|
-| 1 | **Pollinations.ai AI 生图** | 根据关键词生成概念图，免费无需 API Key |
-| 2 | **Pexels 免费图库** | 高质量版权免费图片，适合通用场景 |
-| 3 | **Bing 图片搜索** | 大尺寸横版图过滤，覆盖面广 |
-| 4 | **百度图片搜索** | 国内图片源，作为兜底 |
-| 5 | **本地默认图** | 最终兜底方案 |
+| 1 | **通义万相 Qwen-Image-3.0 生图** | 国内直连 AI 生图，需 `DASHSCOPE_API_KEY`，默认首选 |
+| 2 | **Bing 图片搜索** | 大尺寸横版图过滤，无需 Key |
+| 3 | **本地默认图** | 最终兜底方案 |
 
 ### GitHub 文章配图与深度剖析 (v4.1)
 
@@ -423,8 +432,7 @@ graph TD
 
     subgraph Phase3 ["阶段三: 深度视觉大模型仲裁 (Top 3)"]
         C{"🤖 AI 择优引擎"}:::ai
-        D["☁️ Gemini Flash 2.0 (首选)"]:::ai
-        E["🖥️ Gemma 3 4B (本地替代)"]:::ai
+        D["☁️ Qwen-VL-Max (云端)"]:::ai
         F["📉 纯 CV 分数 (无AI兜底)"]:::scoring
     end
 
@@ -438,11 +446,9 @@ graph TD
     A --> B
     B -->|选出前三名| C
     C -->|云端链路通畅| D
-    C -->|拥有本地 GPU| E
-    C -->|均不可用| F
+    C -->|云端不可用| F
     
     D --> G
-    E --> G
     F --> G
     
     G --> H
@@ -465,12 +471,16 @@ graph TD
 | `LLM_TEMPERATURE` | 生成文本的随机性（0-1，越高越随机） | 0.75 |
 | `LLM_BASE_URL` | LLM API 地址 | https://api.deepseek.com |
 | `IMAGE_DEFAULT_CANDIDATES` | 每次图片搜索的候选数量 | 5 |
-| `OLLAMA_VISION_MODEL` | Ollama 本地视觉模型名称 | gemma3:4b |
-| `GITHUB_TOKEN` | GitHub API Token（可选） | 个人/机构 Token |
-| `PEXELS_API_KEY` | Pexels 图库 API Key（可选） | 未配置 |
+| `DASHSCOPE_API_KEY` | 通义千问 Key（生图+识图共用，必填） | sk-xxx |
+| `DASHSCOPE_API_KEYS` | 多 Key 轮询（逗号分隔，可跨账号叠加并发） | 可选 |
+| `LLM_API_KEYS` | DeepSeek 多 Key 轮询（逗号分隔） | 可选 |
+| `QWEN_IMAGE_SIZE` | 生图分辨率锁定（控成本） | 1280*720 |
+| `QWEN_IMAGE_MODEL` | 国内生图模型（日常配图） | qwen-image-3.0 |
+| `QWEN_IMAGE_REDRAW_MODEL` | 参考图重绘模型（质量优先） | qwen-image-3.0-pro |
+| `QWEN_VL_MODEL` | 国内识图模型 | qwen-vl-max |
 | `SD_ENABLED` | 是否启用本地 Stable Diffusion 生图 | `True` |
 | `SD_API_URL` | Stable Diffusion WebUI API 地址 | `http://127.0.0.1:7860` |
-| `IMAGE_GEN_MODEL` | 图片工作室 Prompt 目标生成模型 | `Google Gemini Imagen 3` |
+| `IMAGE_GEN_MODEL` | 图片工作室 Prompt 目标生成模型 | `Qwen-Image-3.0` |
 | `WECHAT_TITLE_MAX_LEN` | 微信标题最大字数限制 | 64 |
 | `WECHAT_DIGEST_MAX_LEN` | 微信摘要最大字数限制 | 120 |
 | `DIAGRAM_PARALLEL_WORKERS` | 图表并行生成线程数（Chrome + Graphviz） | 5 |
@@ -507,8 +517,8 @@ GitHub Actions (cron 定时 / 手动触发)
 Render (Flask, free tier)
        │
        ├── DeepSeek API ──── 选题 + 文章生成
-       ├── Gemini API ────── 图片评分（免费层）
-       ├── 免费图源 ──────── 封面 + 配图（SD 不可用时自动降级）
+       ├── 千问 DashScope ─── 生图 + 识图评分（一个 Key）
+       ├── Bing 搜图 ──────── 封面 + 配图备用（SD 不可用时自动降级）
        └── 微信 API ──────── 发布草稿箱
 ```
 
@@ -525,7 +535,7 @@ Render (Flask, free tier)
      WECHAT_APP_ID=你的公众号AppID
      WECHAT_APP_SECRET=你的公众号AppSecret
      LLM_API_KEY=你的DeepSeek API Key
-     GEMINI_API_KEY=你的Gemini API Key（免费层即可）
+     DASHSCOPE_API_KEY=你的千问 API Key（生图+识图）
      WEBUI_TOKEN=你自定义的访问密码
      ```
    - 部署完成后获得 URL：`https://autowechat-xxxx.onrender.com`
@@ -543,11 +553,10 @@ Render (Flask, free tier)
 
 ### 图片降级策略
 
-云端无 SD 时，系统按以下优先级自动降级：
-1. Unsplash API（需 `UNSPLASH_ACCESS_KEY`，免费 50次/小时）
-2. Pexels API（需 `PEXELS_API_KEY`，免费 200次/小时）
-3. Unsplash Source 直接 URL（无需 Key）
-4. Bing 图片搜索（icrawler，无需 Key）
+云端无 SD 时，系统按以下优先级自动降级（全部国内可用）：
+1. 通义万相 Qwen-Image-3.0 生图（需 `DASHSCOPE_API_KEY`，默认首选）
+2. Bing 图片搜索（icrawler，无需 Key）
+3. 本地 Pillow 文字卡片（终极兜底，无需任何网络）
 
 ### 本地 Docker 测试
 
@@ -565,7 +574,6 @@ docker compose up -d
 | Python 3.8+ | 运行环境 | 必须 |
 | [Graphviz](https://graphviz.org/download/) | 架构图渲染引擎，安装后需添加到系统 PATH | 必须（GitHub 模块） |
 | Chrome 浏览器 | Selenium 备用爬取需要 | 可选 |
-| [Ollama](https://ollama.com) | 本地运行视觉 AI 模型 | 可选 |
 | [Stable Diffusion](https://github.com/AUTOMATIC1111/stable-diffusion-webui) | 本地生图引擎（需开启 `--api`） | 可选 |
 | EasyOCR | 图片文字检测（需 PyTorch ~2GB） | 可选 |
 

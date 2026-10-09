@@ -522,12 +522,35 @@ def review_approve():
             pub = _get_publisher()
             if pub and pub.access_token and html_content:
                 thumb_media_id = getattr(record, 'thumb_media_id', None) or ""
+                if not thumb_media_id:
+                    cover_candidates = [
+                        os.path.abspath(os.path.join("assets", "default_cover.jpg")),
+                        os.path.abspath(os.path.join("assets", "default_aikepu_cover.png")),
+                        os.path.abspath(os.path.join("assets", "github_cover.jpg")),
+                    ]
+                    for c_path in cover_candidates:
+                        if os.path.exists(c_path):
+                            uploaded_id = pub.upload_image(c_path)
+                            if uploaded_id:
+                                thumb_media_id = uploaded_id
+                                record.thumb_media_id = uploaded_id
+                                break
+
                 ok, res = pub.publish_and_notify(record.title, html_content, thumb_media_id)
                 if ok and isinstance(res, dict) and "media_id" in res:
                     media_id = res["media_id"]
                     draft_pushed = True
         except Exception as pe:
             logger.warning("人工核准推送至微信草稿箱异常: {}", pe)
+
+        if record.source_type == "aikepu" and record.source_url and "node/" in record.source_url:
+            try:
+                from core.aikepu.skill_tree import mark_published
+                node_id = record.source_url.split("node/")[-1]
+                if node_id:
+                    mark_published(node_id, record.title, draft_id=media_id, status="published" if draft_pushed else "draft")
+            except Exception as se:
+                logger.debug("同步技能树状态异常: {}", se)
 
         # 更新状态为核准通过
         record.status = "APPROVED"

@@ -18,6 +18,7 @@ class ArticleHistory(Base):
     source_url = Column(Text, nullable=True)
     quality_score = Column(Float, default=0.0)
     status = Column(String(50), default="PENDING_REVIEW")
+    thumb_media_id = Column(String(255), nullable=True)
     fact_check_result = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
 

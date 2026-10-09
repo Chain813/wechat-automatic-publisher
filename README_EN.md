@@ -5,7 +5,7 @@ English | [中文](README.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python: 3.8+](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![DeepSeek: Powered](https://img.shields.io/badge/LLM-DeepSeek-green.svg)](https://api.deepseek.com)
-[![Gemini Vision](https://img.shields.io/badge/Vision-Gemini%20Flash-orange.svg)](https://ai.google.dev/)
+[![Qwen-VL](https://img.shields.io/badge/Vision-Qwen%20VL-blue.svg)](https://www.alibabacloud.com/help/en/model-studio/vision)
 
 Fully automated WeChat public account content production and publishing system. Integrates real-time hotspot monitoring, AI topic selection, deep article creation, intelligent image selection, and one-click publishing.
 
@@ -54,12 +54,12 @@ graph TD
     subgraph Workflows ["Content Workflows"]
         D["🌐 12 Hotspot Sources"]:::plugin
         E["🐙 GitHub PyGithub+Rich"]:::plugin
-        F["🎓 AI Kepu Skill Tree DAG"]:::plugin
+        F["🎓 Knowledge Series Engine (DAG)"]:::plugin
     end
 
     subgraph AIEngines ["AI Engines"]
         G{"🧠 DeepSeek LLM\n(Text Generation)"}:::llm
-        H{"👁️ Gemini/Ollama\n(Vision AI)"}:::vision
+        H{"👁️ Qwen-VL\n(Vision AI)"}:::vision
     end
 
     subgraph Publishing ["Publishing & Storage"]
@@ -108,10 +108,10 @@ graph TD
 - **Three-Tier Topic Selection**: AI+Politics (High) → Hardcore AI (Medium) → Finance+Politics (Low).
 - **SQLite Database**: Migrated from JSON to a robust SQLite database for safe parallel writing and efficient querying.
 
-**Intelligent Image Selection** — Multi-source image retrieval (Pollinations AI generation -> Pexels free stock -> Bing/Baidu crawling). 
+**Intelligent Image Selection** — Qwen-Image AI generation (DashScope) -> Bing image search -> local text-card fallback, all China-accessible. 
 - **LLM Keyword Optimization**: Uses LLM to transform abstract terms into visual search queries (e.g., "Regulation" -> "Tech Balance Scale") when standard searches fail.
 - **Fixed Branding Cover**: GitHub articles use a standardized 2.35:1 branding cover for consistent visual identity.
-- **Evaluation Engine**: 6-dimension scoring, perceptual hash dedup, and **Gemini Vision + Ollama local vision model** for AI-powered evaluation.
+- **Evaluation Engine**: 6-dimension scoring, perceptual hash dedup, and **Qwen-VL** (DashScope) for AI-powered evaluation.
 
 **Efficient Parallel Architecture**
 - **GitHub images fully parallel**: 6 image sources run concurrently, stops when 3 collected (3-5x speedup)
@@ -120,7 +120,7 @@ graph TD
 
 **Safety & Compliance** — 4-strategy title dedup (exact/fuzzy/keyword/AI semantic). Cross-topic internal dedup. Draft box audit to prevent duplicates.
 
-**Web Management UI** — Flask glassmorphism dark-theme dashboard:
+**Web Management UI** — Flask glassmorphism light-theme dashboard with a Three.js particle background:
 - **Console**: One-click control (Start/Pause/Resume/Stop) and real-time streaming logs.
 - **Image Studio** (🆕 v4.3): Extracts image placeholders from Markdown, generates configurable model Prompts (e.g. Imagen 3 / Midjourney v6 / FLUX.1), supports HTML5 drag-and-drop uploads, and provides high-fidelity mobile previews.
 - **Diagram Engine** (🆕 v4.3): Supports 5 hybrid rendering engines including Mermaid, LaTeX cards, Graphviz, Tailwind HTML, and **Archify / D2 system architecture diagrams** with smooth fallback.
@@ -136,11 +136,11 @@ graph TD
 
 - **Language**: Python 3.8+
 - **LLM**: DeepSeek Chat / Reasoner
-- **Vision AI**: Gemini Flash 2.0 (cloud) + Gemma 3 4B via Ollama (local)
+- **Vision AI**: Qwen-VL-Max (cloud, DashScope)
 - **Diagrams & Architecture**: Archify / D2 / Mermaid / Graphviz / LaTeX
 - **GitHub**: PyGithub (API), rich (directory tree rendering), diagrams (architecture diagrams), carbon (code screenshots)
 - **Crawling**: Requests, BeautifulSoup4, Selenium (Stealth Mode), icrawler
-- **Image**: Pillow, numpy, Pollinations.ai API, Pexels API
+- **Image**: Pillow, numpy, Qwen-Image (DashScope), Bing (icrawler)
 - **Cache/Match**: requests-cache, RapidFuzz
 - **Logging**: Loguru
 - **Web**: Flask
@@ -160,7 +160,8 @@ wechat_auto_publish/
 ├── run_gui.bat                # Web UI launch script
 ├── data/                      # Database & runtime configuration directory
 │   ├── auto_publish.sqlite    # SQLite database for title deduplication and history
-│   ├── aikepu_skill_tree.json # AI science popularization skill tree configuration
+│   ├── knowledge_trees/      # Theme packs (AI / Career / Health / custom imports)
+│   ├── aikepu_skill_tree.json # Legacy AI skill tree (backward compatible)
 │   ├── aikepu_history.json    # AI science popularization publish history (auto-generated)
 │   └── hotspot_cache.sqlite   # Network hotspot request cache database (auto-generated)
 ├── core/
@@ -223,25 +224,15 @@ LLM_API_KEY="your-deepseek-api-key"
 # 💡 Cost Tip: DeepSeek applies peak-offpeak pricing. Off-peak hours (0:00-9:00, 12:00-14:00, 18:00-24:00 UTC+8) feature a 50% discount!
 LLM_MODEL="deepseek-v4-pro"
 
-# Optional: GitHub API (for GitHub Trending articles, higher rate limit)
-GITHUB_TOKEN="your-github-personal-access-token"
-
-# Optional: Gemini Vision (cloud image evaluation)
-GEMINI_API_KEY="your-gemini-api-key"
+# Required: DashScope Qwen (one key for image generation + vision evaluation)
+DASHSCOPE_API_KEY="your-dashscope-api-key"
 
 # Optional: WeChat group bot notification
 QYWECHAT_WEBHOOK=""
 
-# Optional: Ollama local vision model
-OLLAMA_DEFAULT_MODEL="gemma4:e2b-it-q4_K_M"
-OLLAMA_VISION_MODEL="gemma3:4b"
-
 # Optional: Stable Diffusion (local image generation)
 SD_ENABLED="True"
 SD_API_URL="http://127.0.0.1:7860"
-
-# Optional: Pexels free stock images
-PEXELS_API_KEY=""
 ```
 
 ### 4. Run
@@ -262,7 +253,7 @@ Visit http://127.0.0.1:5000
 
 ## 💻 Web UI (v3.0)
 
-The dark-themed dashboard provides:
+The light-themed dashboard (7 pages, plus a matching cloud Token login page) provides:
 
 | Page | Features |
 |------|----------|
@@ -270,6 +261,8 @@ The dark-themed dashboard provides:
 | **Image Studio** | **Drag-and-Drop Image Placement & Prompt Generator** (🆕 v4.3): Automatically parses image placeholders in Markdown, calls LLM to generate Imagen 3 English Prompts, supports HTML5 drag-and-drop image uploads and high-fidelity mobile WeChat draft previews. |
 | **History** | Published articles grouped by date with offline/online draft preview |
 | **Sources** | 12-source health status (green/yellow/red cards) with real-time polling |
+| **Knowledge Series** | Multi-theme knowledge DAG visualizer (AI / Career / Health / custom import): 4-tier columns, prerequisite links, WeChat-synced statuses, one-click theme switching and custom knowledge-base upload |
+| **Schedule** | APScheduler cron jobs for automated publishing (Hotspots / GitHub / Knowledge Series) |
 | **Settings** | API key configuration with secret masking |
 
 ---
@@ -278,11 +271,9 @@ The dark-themed dashboard provides:
 
 ### Hotspot Articles (AI-first)
 
-1. **Pollinations.ai AI Generation** — Conceptual illustrations for current affairs (no stock photo matches specific events)
-2. **Pexels Free Stock** — High-quality copyright-free images
-3. **Bing Image Search** — Large landscape images filtered
-4. **Baidu Image Search** — Domestic fallback
-5. **Local Default** — Final fallback
+1. **Qwen-Image-3.0 (DashScope)** — Domestic AI generation, one API key for generation + vision
+2. **Bing Image Search** — Large landscape images filtered, no key required
+3. **Local Text Card** — Final fallback rendered locally
 
 ### GitHub Articles & Deep Analysis (v4.0)
 
@@ -317,8 +308,7 @@ graph TD
 
     subgraph Phase3 ["Phase 3: Vision AI (Top 3)"]
         C{"🤖 AI Selection Engine"}:::ai
-        D["☁️ Gemini Flash 2.0 (Cloud)"]:::ai
-        E["🖥️ Gemma 3 4B (Local)"]:::ai
+        D["☁️ Qwen-VL-Max (Cloud)"]:::ai
         F["📉 Pure CV Fallback"]:::scoring
     end
 
@@ -332,11 +322,9 @@ graph TD
     A --> B
     B -->|Top 3 Pass| C
     C -->|Preferred| D
-    C -->|Secondary| E
     C -->|Unavailable| F
     
     D --> G
-    E --> G
     F --> G
     
     G --> H
@@ -358,8 +346,6 @@ Adjustable in `config.py` or `.env`:
 | `LLM_TIMEOUT` | LLM API timeout (seconds) | 180 |
 | `LLM_TEMPERATURE` | Generation randomness | 0.75 |
 | `IMAGE_DEFAULT_CANDIDATES` | Image candidates per search | 5 |
-| `OLLAMA_VISION_MODEL` | Local vision model | gemma3:4b |
-| `GITHUB_TOKEN` | GitHub API token (optional) | token-based |
 | `SD_ENABLED` | Enable local Stable Diffusion | `True` |
 | `SD_API_URL` | SD WebUI API address | `http://127.0.0.1:7860` |
 | `DIAGRAM_PARALLEL_WORKERS` | Parallel diagram generation threads (Chrome + Graphviz) | 5 |
@@ -388,7 +374,6 @@ Covers: Technical Terms | Image Terms | GitHub Terms | WeChat Terms
 - Python 3.8+
 - [Graphviz](https://graphviz.org/download/) (for architecture diagram generation. On Windows, if installed at the default `C:\Program Files\Graphviz` path, the system will automatically inject it into the PATH environment variable without manual setup; otherwise, add it to system PATH manually)
 - Chrome browser (for Selenium fallback scraping)
-- Optional: [Ollama](https://ollama.com) for local vision AI
 - Optional: [Stable Diffusion](https://github.com/AUTOMATIC1111/stable-diffusion-webui) (WebUI with `--api` enabled)
 - Optional: EasyOCR for text detection (requires PyTorch ~2GB)
 

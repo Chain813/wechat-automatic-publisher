@@ -2,7 +2,7 @@
 ============================================================
   智能图片筛选引擎 v5.0 (微信适配版)
   支持：分辨率校验、宽高比审计、文字密度检测、多图评分
-  新增：Gemini Vision 智能评分、感知哈希去重、微信封面/正文双模式评分
+  新增：千问 Qwen-VL 智能评分、感知哈希去重、微信封面/正文双模式评分
 ============================================================
 """
 import os
@@ -51,165 +51,48 @@ def get_ocr_reader():
 
 
 # ==========================================
-#  Ollama 本地视觉模型评分 (优先)
+#  Qwen-VL 智能评分 (国内直连，默认唯一)
 # ==========================================
-_OLLAMA_STATUS = "PENDING"
-_OLLAMA_MODEL = None
-_OLLAMA_DEFAULT_MODEL = None  # 从 config 读取
-_OLLAMA_VISION_MODEL = None
-
-
-def ollama_startup():
-    """项目启动：切换到视觉模型"""
-    global _OLLAMA_MODEL, _OLLAMA_STATUS, _OLLAMA_DEFAULT_MODEL, _OLLAMA_VISION_MODEL
-    from config import OLLAMA_DEFAULT_MODEL, OLLAMA_VISION_MODEL
-    _OLLAMA_DEFAULT_MODEL = OLLAMA_DEFAULT_MODEL
-    _OLLAMA_VISION_MODEL = OLLAMA_VISION_MODEL
+def _parse_vision_json_result(text, label):
+    """解析视觉模型返回的 JSON 评分，返回 (score, reason) 或 None"""
+    json_match = re.search(r'\{[^}]+\}', text)
+    if not json_match:
+        logger.debug("  {} 未返回有效 JSON: {}", label, (text or "")[:120])
+        return None
     try:
-        import requests
-        resp = requests.get("http://localhost:11434/api/tags", timeout=3)
-        models = [m["name"].lower() for m in resp.json().get("models", [])]
-        if any(_OLLAMA_VISION_MODEL in m for m in models):
-            _OLLAMA_MODEL = _OLLAMA_VISION_MODEL
-            _OLLAMA_STATUS = "READY"
-            logger.info("  Ollama 视觉模型已切换: {}", _OLLAMA_VISION_MODEL)
-        else:
-            logger.warning("  未找到 {}，请先运行: ollama pull {}", _OLLAMA_VISION_MODEL, _OLLAMA_VISION_MODEL)
-            _OLLAMA_STATUS = "NO_MODEL"
+        data = json.loads(json_match.group())
     except Exception:
-        _OLLAMA_STATUS = "DISABLED"
+        logger.debug("  {} JSON 解析失败: {}", label, (text or "")[:120])
+        return None
+    if data.get("watermark", 0) == 1:
+        logger.info("  {}: 检测到水印 → 0分", label)
+        return 0, "水印图片"
+    text_penalty = max(0, (data.get("text_amount", 0) - 30) * 0.5)
+    score = max(0, min(100, data.get("overall", 50) - text_penalty))
+    reason = data.get("reason", "")
+    logger.info("  {}: {}分 - {}", label, score, reason)
+    return score, reason
 
 
-def ollama_shutdown():
-    """项目结束：恢复默认模型并关闭视觉评估"""
-    global _OLLAMA_MODEL, _OLLAMA_STATUS
-    _OLLAMA_MODEL = None
-    _OLLAMA_STATUS = "PENDING"
-    logger.info("  Ollama 已恢复默认: {}", _OLLAMA_DEFAULT_MODEL)
-
-
-def _detect_ollama_vision_model():
-    """返回当前视觉模型状态（由 ollama_startup 设置）"""
-    if _OLLAMA_MODEL is not None:
-        return "READY"
-    return _OLLAMA_STATUS
-
-
-def evaluate_image_with_ollama(image_path, purpose="body"):
+def evaluate_image_with_qwen_vl(image_path, purpose="body"):
     """
-    用本地 Ollama 视觉模型评估图片。
+    用通义千问 Qwen-VL 视觉模型评估图片（国内直连，OpenAI 兼容接口）。
     返回 (score: 0-100, reason: str) 或 None。
     """
-    if _detect_ollama_vision_model() != "READY":
-        return None
-
+    from config import QWEN_VL_API_BASE, QWEN_VL_MODEL
     try:
         import base64
-        import requests
-
-        if purpose == "cover":
-            context = "微信公众号文章封面图（推荐宽屏2.35:1）"
-        else:
-            context = "微信公众号正文配图（推荐横版16:9或4:3）"
-
-        prompt = f"""你是一个图片编辑，为时政科技公众号挑选配图。
-这张图用作：{context}
-
-评估这张图，只返回JSON：
-{{"watermark":0,"relevance":80,"quality":85,"text_amount":10,"overall":80,"reason":"理由"}}
-
-字段说明：
-- watermark: 0或1，是否有水印/版权标记
-- relevance: 0-100，与科技时政的相关度
-- quality: 0-100，画面清晰度和构图
-- text_amount: 0-100，图中文字占比
-- overall: 0-100，综合适配度
-- reason: 15字内理由
-只返回JSON，不要其他文字。"""
-
-        with open(image_path, "rb") as f:
-            image_b64 = base64.b64encode(f.read()).decode()
-
-        resp = requests.post("http://localhost:11434/api/chat", json={
-            "model": _OLLAMA_MODEL,
-            "messages": [{"role": "user", "content": prompt, "images": [image_b64]}],
-            "stream": False,
-            "options": {"temperature": 0.1, "num_predict": 200}
-        }, timeout=30)
-
-        text = resp.json().get("message", {}).get("content", "")
-        json_match = re.search(r'\{[^}]+\}', text)
-        if json_match:
-            data = json.loads(json_match.group())
-
-            if data.get("watermark", 0) == 1:
-                logger.info("  Ollama Vision: 检测到水印 → 0分")
-                return 0, "水印图片"
-
-            text_penalty = max(0, (data.get("text_amount", 0) - 30) * 0.5)
-            score = max(0, min(100, data.get("overall", 50) - text_penalty))
-            reason = data.get("reason", "")
-            logger.info("  Ollama Vision({}): {}分 - {}", _OLLAMA_MODEL, score, reason)
-            return score, reason
-
-    except Exception as e:
-        logger.debug("  Ollama Vision 评估失败: {}", e)
-
-    return None
-
-
-# ==========================================
-#  Gemini Vision 智能评分 (备用)
-# ==========================================
-_GEMINI_MODEL = None
-_GEMINI_STATUS = "PENDING"
-
-
-def _get_gemini_client():
-    """延迟加载 Gemini 客户端"""
-    global _GEMINI_MODEL, _GEMINI_STATUS
-    if _GEMINI_STATUS == "DISABLED":
-        return None
-    if _GEMINI_MODEL is not None:
-        return _GEMINI_MODEL
-    try:
-        from config import GEMINI_API_KEY
-        if not GEMINI_API_KEY:
-            _GEMINI_STATUS = "NO_KEY"
-            return None
-        from google import genai
-        _GEMINI_MODEL = genai.Client(api_key=GEMINI_API_KEY)
-        _GEMINI_STATUS = "READY"
-        return _GEMINI_MODEL
-    except Exception as e:
-        logger.debug("  Gemini Vision 初始化失败: {}", e)
-        _GEMINI_STATUS = "DISABLED"
-        return None
-
-
-def evaluate_image_with_gemini(image_path, purpose="body"):
-    """
-    用 Gemini Vision 评估图片是否适合做微信公众号配图。
-    返回 (score: 0-100, reason: str) 或 None（不可用时）。
-    """
-    client = _get_gemini_client()
-    if not client:
-        return None
-
-    try:
-        from google.genai import types
 
         if purpose == "cover":
             context = "微信公众号文章封面图（推荐宽屏 2.35:1 比例）"
         else:
             context = "微信公众号正文配图（推荐横版 16:9 或 4:3）"
 
-        prompt = f"""你是一个专业的图片编辑，正在为一个时政科技类公众号「智界洞察社」挑选配图。
+        prompt = f"""你是一个专业的图片编辑，正在为一个时政科技类公众号挑选配图。
 
 这张图片将用作：{context}
 
 请从以下维度评估这张图片，返回 JSON 格式：
-
 1. watermark（0或1）：是否有水印、版权标记、图库logo？
 2. relevance（0-100）：与科技/时政/商业主题的相关度
 3. quality（0-100）：画面清晰度、构图质量、色彩表现
@@ -220,43 +103,32 @@ def evaluate_image_with_gemini(image_path, purpose="body"):
 只返回 JSON，不要其他文字。示例：
 {{"watermark":0,"relevance":85,"quality":90,"text_amount":10,"overall":85,"reason":"高清科技场景图，构图优秀"}}"""
 
-        with open(image_path, "rb") as f:
-            image_bytes = f.read()
-
-        # 根据扩展名判断 mime_type
         ext = os.path.splitext(image_path)[1].lower()
-        mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
-        mime_type = mime_map.get(ext, "image/jpeg")
+        mime = "image/png" if ext == ".png" else "image/jpeg"
+        with open(image_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
 
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=[
-                types.Content(parts=[
-                    types.Part.from_text(text=prompt),
-                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                ])
-            ],
-        )
-
-        # 解析 JSON 响应
-        text = response.text.strip()
-        json_match = re.search(r'\{[^}]+\}', text)
-        if json_match:
-            data = json.loads(json_match.group())
-
-            if data.get("watermark", 0) == 1:
-                logger.info("  Gemini Vision: 检测到水印 → 0分")
-                return 0, "水印图片"
-
-            text_penalty = max(0, (data.get("text_amount", 0) - 30) * 0.5)
-            score = max(0, min(100, data.get("overall", 50) - text_penalty))
-            reason = data.get("reason", "")
-            logger.info("  Gemini Vision: {}分 - {}", score, reason)
-            return score, reason
-
+        body = {
+            "model": QWEN_VL_MODEL,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+                    {"type": "text", "text": prompt},
+                ],
+            }],
+            "temperature": 0.1,
+            "max_tokens": 300,
+        }
+        from utils.image_handler import _qwen_post_with_rotation
+        status, data = _qwen_post_with_rotation(f"{QWEN_VL_API_BASE}/chat/completions", body, 45)
+        if status != 200 or not data:
+            logger.debug("  Qwen-VL 评估失败 HTTP {}", status)
+            return None
+        text = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+        return _parse_vision_json_result(text, "Qwen-VL")
     except Exception as e:
-        logger.debug("  Gemini Vision 评估失败: {}", e)
-
+        logger.debug("  Qwen-VL 评估异常: {}", e)
     return None
 
 
@@ -562,11 +434,9 @@ def evaluate_image(image_path, purpose="body"):
 #  批量选择
 # ==========================================
 def _vision_score_candidates(candidates, purpose, top_n=3):
-    """用视觉模型对 top N 候选做二次评分（Gemini 优先 → Ollama 降级）"""
+    """用千问 Qwen-VL 视觉模型对 top N 候选做二次评分"""
     for c in candidates[:top_n]:
-        result = evaluate_image_with_gemini(c.path, purpose)
-        if result is None:
-            result = evaluate_image_with_ollama(c.path, purpose)
+        result = evaluate_image_with_qwen_vl(c.path, purpose)
         if result is not None:
             vision_score, reason = result
             if vision_score == 0:

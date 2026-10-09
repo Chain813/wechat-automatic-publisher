@@ -21,51 +21,80 @@ def _save_history(topics):
     session = db_manager.get_session()
     today = datetime.now().strftime("%Y-%m-%d")
     for topic in topics:
-        existing = session.query(ArticleHistory).filter_by(title=topic, source_type="hotspots").first()
+        topic_title = topic.title if hasattr(topic, "title") else str(topic)
+        existing = session.query(ArticleHistory).filter_by(title=topic_title, source_type="hotspots").first()
         if not existing:
-            ah = ArticleHistory(title=topic, source_type="hotspots", publish_date=today, success_status=False)
-            session.add(ah)
-    session.commit()
-
-def _save_publish_result(topic, success, draft_id=None, error=None, quality_score=0.0, source_url="", status=None):
-    session = db_manager.get_session()
-    existing = session.query(ArticleHistory).filter_by(title=topic, source_type="hotspots").order_by(ArticleHistory.id.desc()).first()
-    if existing:
-        if success:
-            existing.success_status = success
-            existing.media_id = draft_id
-            existing.error_log = None
-            if quality_score:
-                existing.quality_score = quality_score
-            if source_url:
-                existing.source_url = source_url
-            if status:
-                existing.status = status
-        else:
-            # 发布失败：删除本地缓存，以便下次重试
-            session.delete(existing)
-    else:
-        if success:
+            source_url = getattr(topic, "url", "") if hasattr(topic, "url") else ""
             ah = ArticleHistory(
-                title=topic,
+                title=topic_title,
                 source_type="hotspots",
-                publish_date=datetime.now().strftime("%Y-%m-%d"),
-                success_status=success,
-                media_id=draft_id,
-                error_log=None,
-                quality_score=quality_score,
+                publish_date=today,
+                success_status=False,
                 source_url=source_url,
-                status=status or "DRAFT"
+                status="PENDING_REVIEW"
             )
             session.add(ah)
     session.commit()
 
+def _save_publish_result(topic, success, draft_id=None, error=None, quality_score=0.0, source_url="", status=None, preview_html=None, thumb_id=None, fact_check_result=""):
+    session = db_manager.get_session()
+    topic_str = topic.title if hasattr(topic, "title") else str(topic)
+    
+    # 1. 保存本地 HTML 预览供 WebUI 人机工作台查看或审批
+    if preview_html:
+        try:
+            import hashlib
+            title_hash = hashlib.md5(topic_str.encode('utf-8')).hexdigest()
+            os.makedirs(os.path.join("data", "previews"), exist_ok=True)
+            preview_filename = f"{draft_id}.html" if draft_id else f"fail_{title_hash}.html"
+            preview_path = os.path.join("data", "previews", preview_filename)
+            with open(preview_path, "w", encoding="utf-8") as f:
+                f.write(preview_html)
+        except Exception as pe:
+            logger.debug("保存预览 HTML 异常: {}", pe)
+
+    existing = session.query(ArticleHistory).filter_by(title=topic_str, source_type="hotspots").order_by(ArticleHistory.id.desc()).first()
+    if existing:
+        existing.success_status = success
+        existing.media_id = draft_id
+        existing.error_log = error if not success else None
+        if quality_score:
+            existing.quality_score = quality_score
+        if source_url:
+            existing.source_url = source_url
+        if status:
+            existing.status = status
+        elif not success:
+            existing.status = "REJECTED"
+        if thumb_id and hasattr(existing, 'thumb_media_id'):
+            existing.thumb_media_id = thumb_id
+        if fact_check_result and hasattr(existing, 'fact_check_result'):
+            existing.fact_check_result = fact_check_result
+    else:
+        ah = ArticleHistory(
+            title=topic_str,
+            source_type="hotspots",
+            publish_date=datetime.now().strftime("%Y-%m-%d"),
+            success_status=success,
+            media_id=draft_id,
+            error_log=error if not success else None,
+            quality_score=quality_score,
+            source_url=source_url,
+            status=status or ("DRAFT" if success else "REJECTED"),
+            fact_check_result=fact_check_result or None
+        )
+        if thumb_id and hasattr(ah, 'thumb_media_id'):
+            ah.thumb_media_id = thumb_id
+        session.add(ah)
+    session.commit()
+
 def _get_past_topics(days=7):
     from datetime import timedelta
+    from core.plugins.base import HotspotItem
     session = db_manager.get_session()
     cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
     records = session.query(ArticleHistory).filter(ArticleHistory.source_type == "hotspots", ArticleHistory.publish_date >= cutoff_date).all()
-    return [r.title for r in records]
+    return [HotspotItem(title=r.title, url=r.source_url or "") for r in records]
 
 def _dedup_topics_against_each_other(topics, threshold=70):
     from core.shared.publisher import _normalize_title
@@ -103,7 +132,9 @@ class FetchAndSelectNode(BaseNode):
     def execute(self, context: dict) -> bool:
         publisher = context['publisher']
         check_cancelled()
-        raw_data = fetch_all_hotspots()
+        from core.hotspots.collector import fetch_all_hotspot_items, fetch_all_hotspots
+        hotspot_items = fetch_all_hotspot_items()
+        raw_data = hotspot_items if hotspot_items else fetch_all_hotspots()
         if not raw_data:
             print("❌ 数据源扫描失败，请检查网络连接")
             return False
@@ -123,7 +154,7 @@ class FetchAndSelectNode(BaseNode):
 
             if unsent_topics:
                 selected_topics = unsent_topics[:MAX_TOPICS_PER_RUN]
-                print(f"✅ 成功找到前几天未发送的优质热点：{selected_topics}")
+                print(f"✅ 成功找到前几天未发送的优质热点：{[t.title if hasattr(t, 'title') else t for t in selected_topics]}")
             else:
                 print("📭 前几天也无符合条件的未发送热点，任务结束。")
                 return False
@@ -140,8 +171,9 @@ class FetchAndSelectNode(BaseNode):
             if len(valid_topics) >= MAX_TOPICS_PER_RUN:
                 break
             is_dup, old_title = publisher.is_title_duplicate(topic, extra_existing=valid_topics)
+            topic_disp = topic.title if hasattr(topic, "title") else str(topic)
             if is_dup:
-                print(f"  ⚠️ 跳过重复：「{topic}」≈「{old_title}」")
+                print(f"  ⚠️ 跳过重复：「{topic_disp}」≈「{old_title}」")
             else:
                 valid_topics.append(topic)
 
@@ -158,8 +190,9 @@ class ParallelPublishNode(BaseNode):
         check_cancelled()
         reset_image_cache()
 
+        topic_str = topic.title if hasattr(topic, "title") else str(topic)
         with ThreadPoolExecutor(max_workers=1) as cover_pool:
-            cover_future = cover_pool.submit(download_cover_image, topic)
+            cover_future = cover_pool.submit(download_cover_image, topic_str)
             article_text = generate_article(topic)
             if not article_text:
                 cover_future.cancel()
@@ -193,20 +226,21 @@ class ParallelPublishNode(BaseNode):
         try:
             check_cancelled()
             if not pub.access_token:
-                return topic, False, "Token 获取失败"
+                return str(topic), False, "Token 获取失败"
 
-            print(f"\n{'━' * 50}\n🎯 [并行] 正在处理：{topic}\n{'━' * 50}")
+            topic_str = topic.title if hasattr(topic, "title") else str(topic)
+            print(f"\n{'━' * 50}\n🎯 [并行] 正在处理：{topic_str}\n{'━' * 50}")
 
             with ThreadPoolExecutor(max_workers=2) as pool:
                 future_assets = pool.submit(self._generate_article_assets, topic, pub)
-                future_digest = pool.submit(generate_digest, topic)
+                future_digest = pool.submit(generate_digest, topic_str)
 
                 generated = future_assets.result()
                 if not generated:
-                    return topic, False, "文章生成失败"
+                    return topic_str, False, "文章生成失败"
 
                 final_html, review_data, thumb_id = generated
-                clean_title, title_warnings = validate_title(topic)
+                clean_title, title_warnings = validate_title(topic_str)
                 for warning in title_warnings:
                     print(f"  ⚠️ 标题警告: {warning}")
 
@@ -227,28 +261,60 @@ class ParallelPublishNode(BaseNode):
             review_res = evaluate_article_quality(clean_title, final_html)
             print(format_critic_report(review_res))
 
+            source_url = getattr(topic, "url", "") if hasattr(topic, "url") else ""
+            fact_check_res = getattr(topic, "fact_check_result", "")
+
             if not review_res["passed"] or not all_ok:
                 err = f"未通过主编质量门禁 ({review_res['score']}分): {'; '.join(review_res['critic_issues'])}"
                 print(f"❌ 门禁拦截发布：「{clean_title}」— {err}")
-                _save_publish_result(clean_title, success=False, error=err, quality_score=review_res["score"], status="REJECTED")
-                return topic, False, err
+                _save_publish_result(
+                    clean_title,
+                    success=False,
+                    error=err,
+                    quality_score=review_res["score"],
+                    source_url=source_url,
+                    status="REJECTED",
+                    preview_html=final_html,
+                    thumb_id=thumb_id,
+                    fact_check_result=fact_check_res
+                )
+                return topic_str, False, err
 
-            source_url = getattr(topic, "url", "") if hasattr(topic, "url") else ""
             success, result = pub.publish_and_notify(clean_title, final_html, thumb_id, digest_text)
             if success:
                 draft_id = result["media_id"]
                 print(f"\n✅ 「{clean_title}」发布成功 → {draft_id}")
-                _save_publish_result(clean_title, success=True, draft_id=draft_id, quality_score=review_res["score"], source_url=source_url, status="DRAFT")
-                return topic, True, None
+                _save_publish_result(
+                    clean_title,
+                    success=True,
+                    draft_id=draft_id,
+                    quality_score=review_res["score"],
+                    source_url=source_url,
+                    status="DRAFT",
+                    preview_html=final_html,
+                    thumb_id=thumb_id,
+                    fact_check_result=fact_check_res
+                )
+                return topic_str, True, None
             else:
                 err = result.get("errmsg", "未知错误")
                 print(f"❌ 「{clean_title}」发布失败：{err}")
-                _save_publish_result(clean_title, success=False, error=err, quality_score=review_res["score"], source_url=source_url, status="FAILED")
-                return topic, False, err
+                _save_publish_result(
+                    clean_title,
+                    success=False,
+                    error=err,
+                    quality_score=review_res["score"],
+                    source_url=source_url,
+                    status="FAILED",
+                    preview_html=final_html,
+                    thumb_id=thumb_id,
+                    fact_check_result=fact_check_res
+                )
+                return topic_str, False, err
 
         except Exception as exc:
             logger.warning("并行发布异常: {}", exc)
-            return topic, False, str(exc)
+            return str(topic), False, str(exc)
 
     def execute(self, context: dict) -> bool:
         valid_topics = context['valid_topics']

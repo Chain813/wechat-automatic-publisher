@@ -8,7 +8,7 @@ AutoWeChat 是微信公众号全自动内容生产与发布系统。集成 12 �
 
 - Python 3.8+ / Flask / Loguru
 - DeepSeek LLM（文章生成、选题、摘要）
-- Gemini Vision + Ollama（图片 AI 评估）
+- 通义千问 Qwen-VL（识图评估）+ Qwen-Image（生图），DashScope 一个 Key 国内直连
 - Selenium（浏览器截图）
 - Stable Diffusion（AI 生图）
 - PyGithub（GitHub API）
@@ -22,8 +22,9 @@ AutoWeChat 是微信公众号全自动内容生产与发布系统。集成 12 �
 ├── config.py                  # 全局配置中心
 ├── data/                      # 数据库与运行时配置目录
 │   ├── auto_publish.sqlite    # 标题去重与发布历史 SQLite 数据库
-│   ├── aikepu_skill_tree.json # AI 科普知识点技能树结构文件
-│   ├── aikepu_history.json    # AI 科普已发布节点历史（自动生成）
+│   ├── knowledge_trees/       # 知识体系主题包（AI科普/职场/健康/自定义）
+│   ├── aikepu_skill_tree.json # 旧版 AI 科普技能树结构（向后兼容）
+│   ├── aikepu_history.json    # 已发布节点历史（自动生成）
 │   └── hotspot_cache.sqlite   # 网络请求缓存数据库（自动生成）
 ├── core/
 │   ├── engine.py              # 工作流调度器
@@ -111,8 +112,22 @@ AutoWeChat 是微信公众号全自动内容生产与发布系统。集成 12 �
 - GitHub 配图管线：`core/github/workflow.py` 的 `_ensure_deep_images()`
 - 文章内配图：`core/shared/article_utils.py` 的 `process_article_content()`
 
+### 新增知识体系主题包（含零访谈定制）
+
+1. 零访谈定制：`python tools/build_knowledge_tree.py "主题名" --slug law --nodes 12 --samples "客户文章链接1,链接2" --activate`（自动扒取客户历史文章 → `tools/analyze_account.py` 提炼画像 → 按画像生成知识库与风格文件）
+2. 半自动生成：`python tools/build_knowledge_tree.py "主题名" --slug law --nodes 12 --audience "目标读者" --tone "风格关键词" --activate`
+3. 手动创建：`data/knowledge_trees/{name}.json`（结构：meta.name/column_name + nodes[{id,title,tags,prerequisites,difficulty,summary,custom_prompt}]）
+4. 写作风格：`prompts/{name}_skill.md`（引擎自动按激活主题加载，缺省回退 `aikepu_writing_skill.md`）
+5. 激活：WebUI 技能树页下拉切换，或设环境变量 `KNOWLEDGE_TREE={name}`
+
+### 调整 WebUI 主题与样式
+
+- 设计 token：`static/css/style.css` 的 `:root`（`--accent`、`--bg`、`--radius` 等；旧变量名在 `:root` 末尾保留别名）
+- 3D 粒子背景：`static/js/three-bg.js`（粒子数量、连线距离、颜色数组、鼠标跟随参数）
+- 主页面模板：`templates/index.html`（`id` / `data-i18n` / `data-target` / `data-task` 属性不可删，JS 逻辑依赖）
+- 登录页模板：`templates/login.html`（云端 Token 模式；`/static/` 已在 `webui.py` 豁免认证）
+
 ## 本地服务依赖
 
 - **Stable Diffusion**：`http://127.0.0.1:7860`（需启动 `--api` 模式）
-- **Ollama**：`http://localhost:11434`（需拉取 `gemma3:4b` 视觉模型）
 - **Graphviz**：系统 PATH 中（diagrams 架构图需要）

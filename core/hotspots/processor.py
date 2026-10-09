@@ -120,8 +120,28 @@ def generate_digest(topic: str):
 def filter_tech_hotspots(topics):
     logger.info("DeepSeek 正在跨平台筛选科技时政热点...")
     today_str = datetime.now().strftime("%Y年%m月%d日")
+
+    item_map = {}
+    if isinstance(topics, list):
+        for t in topics:
+            if hasattr(t, "title") and t.title:
+                item_map[t.title.strip()] = t
+
+    if item_map:
+        formatted_topics = []
+        for idx, t in enumerate(topics, 1):
+            if hasattr(t, "title"):
+                summary_part = f" (摘要: {t.summary[:90]})" if getattr(t, "summary", "") else ""
+                source_part = f"[{t.source_id}] " if getattr(t, "source_id", "") else ""
+                formatted_topics.append(f"{idx}. {source_part}{t.title}{summary_part}")
+            else:
+                formatted_topics.append(f"{idx}. {t}")
+        topics_payload = "\n".join(formatted_topics)
+    else:
+        topics_payload = str(topics)
+
     prompt = (
-        f"以下是来自多个平台的实时热点资讯（采集时间：{today_str}）：\n" + str(topics) + "\n\n"
+        f"以下是来自多个平台的实时热点资讯（采集时间：{today_str}）：\n" + topics_payload + "\n\n"
         f"你是「{BRAND_NAME}」的选题编辑。\n\n"
         "## 选题铁律\n"
         "**时效性是第一筛选标准**。只选择那些'此刻正在发生'或'今天有重大进展'的话题。\n"
@@ -156,6 +176,9 @@ def filter_tech_hotspots(topics):
 
     result = []
     lines = res.split('\n')
+    from core.plugins.base import HotspotItem
+    from difflib import SequenceMatcher
+
     for line in lines:
         line = line.strip()
         if not line:
@@ -164,16 +187,43 @@ def filter_tech_hotspots(topics):
             topic_name = line.replace("【话题】", "").strip()
             topic_name = topic_name.strip("。，；.,;")
             if topic_name:
-                result.append(topic_name)
+                matched_item = None
+                for orig_title, item in item_map.items():
+                    if topic_name == orig_title or topic_name in orig_title or orig_title in topic_name:
+                        matched_item = item
+                        break
+                if not matched_item and item_map:
+                    for orig_title, item in item_map.items():
+                        if SequenceMatcher(None, topic_name, orig_title).ratio() > 0.45:
+                            matched_item = item
+                            break
+
+                if matched_item:
+                    final_item = HotspotItem(
+                        title=topic_name,
+                        url=matched_item.url,
+                        source_id=matched_item.source_id,
+                        summary=matched_item.summary,
+                        publish_time=matched_item.publish_time,
+                        raw_content=matched_item.raw_content,
+                        tier=matched_item.tier
+                    )
+                    result.append(final_item)
+                else:
+                    result.append(HotspotItem(title=topic_name) if item_map else topic_name)
                 print(f"\n📡 [AI 雷达捕获热点] {topic_name}")
         elif line.startswith("【雷达分析】"):
             analysis = line.replace("【雷达分析】", "").strip()
             print(f"   💡 分析理由: {analysis}")
 
     if not result:
-        result = parse_topic_list(res)
+        fallback_titles = parse_topic_list(res)
+        if item_map:
+            result = [HotspotItem(title=t) for t in fallback_titles]
+        else:
+            result = fallback_titles
 
-    logger.info("  最终筛选进入队列: {}", result)
+    logger.info("  最终筛选进入队列: {}", [t.title if hasattr(t, "title") else t for t in result])
     return result
 
 def validate_article_structure(text: str):
@@ -274,12 +324,28 @@ def generate_article(topic, raw_content: str = "", search_results: Optional[List
     if hasattr(topic, "title"):
         topic_title = topic.title
         raw_content = getattr(topic, "raw_content", "") or raw_content
+        topic_url = getattr(topic, "url", "")
     else:
         topic_title = str(topic)
+        topic_url = ""
 
     logger.info("DeepSeek 正在以「{}」视角创作深度长文: {}", BRAND_NAME, topic_title)
     brand = BRAND_NAME
     today_str = datetime.now().strftime("%Y年%m月%d日")
+
+    # 0. 若存在一手信源 URL 且尚未提取正文，立即调用 Scraper 抓取原文
+    if topic_url and not raw_content:
+        try:
+            from core.hotspots.scraper import extract_article_content
+            logger.info("  📄 正在从一手信源抓取正文: {}", topic_url)
+            scraped = extract_article_content(topic_url)
+            if scraped:
+                raw_content = scraped
+                logger.info("  ✅ 成功抓取一手报道正文 ({} 字)", len(raw_content))
+                if hasattr(topic, "raw_content"):
+                    topic.raw_content = raw_content
+        except Exception as e:
+            logger.warning("  抓取一手信源正文失败: {}", e)
 
     # 1. 动态加载叙事母题与黄金切入点 (Hook)
     archetype = select_narrative_archetype(topic_title)
@@ -293,6 +359,11 @@ def generate_article(topic, raw_content: str = "", search_results: Optional[List
         if search_results is None:
             search_results = search_topic_facts(topic_title)
         fact_context = build_fact_context(topic_title, raw_content=raw_content, search_results=search_results)
+        if hasattr(topic, "fact_check_result") or hasattr(topic, "__dict__"):
+            try:
+                setattr(topic, "fact_check_result", fact_context[:800])
+            except Exception:
+                pass
     except Exception as e:
         logger.debug("构建事实基座降级: {}", e)
 

@@ -19,11 +19,11 @@
     width: 100%;
     min-height: 120px;
     padding: 14px 16px;
-    background: #f1f5f9;
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    color: #0f172a;
-    font-family: 'Consolas', 'Monaco', monospace;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: var(--mono);
     font-size: 13px;
     line-height: 1.6;
     resize: vertical;
@@ -37,16 +37,16 @@
 }
 
 .studio-input-area textarea::placeholder {
-    color: #94a3b8;
+    color: var(--text-3);
 }
 
 .studio-title-input {
     width: 100%;
     padding: 10px 14px;
-    background: #f1f5f9;
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    color: #0f172a;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
     font-size: 14px;
     font-weight: 600;
 }
@@ -57,7 +57,7 @@
 }
 
 .studio-title-input::placeholder {
-    color: #94a3b8;
+    color: var(--text-3);
     font-weight: 400;
 }
 
@@ -75,16 +75,16 @@
 }
 
 .prompt-card {
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 14px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
     padding: 18px;
     transition: all 0.3s ease;
 }
 
 .prompt-card:hover {
     border-color: rgba(99, 102, 241, 0.4);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    box-shadow: var(--shadow);
 }
 
 .prompt-card-header {
@@ -100,7 +100,7 @@
     justify-content: center;
     width: 28px;
     height: 28px;
-    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
     color: white;
     border-radius: 8px;
     font-size: 13px;
@@ -110,7 +110,7 @@
 .prompt-card-keyword {
     font-size: 15px;
     font-weight: 600;
-    color: #0f172a;
+    color: var(--text);
     flex: 1;
     margin-left: 10px;
 }
@@ -118,7 +118,7 @@
 .prompt-card-copy-btn {
     background: rgba(99, 102, 241, 0.15);
     border: 1px solid rgba(99, 102, 241, 0.3);
-    color: #a5b4fc;
+    color: var(--accent);
     padding: 4px 10px;
     border-radius: 6px;
     font-size: 11px;
@@ -132,22 +132,22 @@
 }
 
 .prompt-text {
-    background: #f8fafc;
+    background: var(--bg);
     border-radius: 8px;
     padding: 10px 12px;
     margin-bottom: 14px;
-    font-family: 'Consolas', monospace;
+    font-family: var(--mono);
     font-size: 12.5px;
     line-height: 1.5;
-    color: #475569;
+    color: var(--text-2);
     word-break: break-word;
     user-select: all;
 }
 
 /* 拖拽区域 */
 .drop-zone {
-    border: 2px dashed #cbd5e1;
-    border-radius: 12px;
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
     padding: 28px 16px;
     text-align: center;
     cursor: pointer;
@@ -167,7 +167,7 @@
 }
 
 .drop-zone.drag-over {
-    border-color: #6366f1;
+    border-color: var(--accent);
     background: rgba(99, 102, 241, 0.1);
     box-shadow: 0 0 20px rgba(99, 102, 241, 0.15);
     transform: scale(1.01);
@@ -180,12 +180,12 @@
 
 .drop-zone-text {
     font-size: 13px;
-    color: #64748b;
+    color: var(--text-2);
 }
 
 .drop-zone-hint {
     font-size: 11px;
-    color: #94a3b8;
+    color: var(--text-3);
 }
 
 /* 图片已上传状态 */
@@ -226,7 +226,7 @@
 
 .btn-replace {
     background: rgba(99, 102, 241, 0.2);
-    color: #a5b4fc;
+    color: var(--accent);
 }
 
 .btn-replace:hover {
@@ -235,7 +235,7 @@
 
 .btn-remove {
     background: rgba(239, 68, 68, 0.2);
-    color: #fca5a5;
+    color: var(--red);
 }
 
 .btn-remove:hover {
@@ -255,12 +255,12 @@
 
 .status-pending {
     background: rgba(251, 191, 36, 0.15);
-    color: #fbbf24;
+    color: var(--amber);
 }
 
 .status-done {
     background: rgba(16, 185, 129, 0.15);
-    color: #10b981;
+    color: var(--green);
 }
 
 /* 进度条 */
@@ -269,8 +269,8 @@
     align-items: center;
     gap: 12px;
     padding: 12px 16px;
-    background: #f1f5f9;
-    border-radius: 10px;
+    background: var(--bg);
+    border-radius: var(--radius);
 }
 
 .studio-progress-bar {
@@ -283,14 +283,14 @@
 
 .studio-progress-fill {
     height: 100%;
-    background: linear-gradient(90deg, #6366f1, #10b981);
+    background: linear-gradient(90deg, var(--accent), var(--green));
     border-radius: 3px;
     transition: width 0.4s ease;
 }
 
 .studio-progress-text {
     font-size: 13px;
-    color: #475569;
+    color: var(--text-2);
     white-space: nowrap;
 }
 
@@ -298,7 +298,7 @@
 .studio-empty {
     text-align: center;
     padding: 60px 20px;
-    color: #94a3b8;
+    color: var(--text-3);
 }
 
 .studio-empty-icon {
@@ -314,7 +314,7 @@
 
 .studio-empty-hint {
     font-size: 13px;
-    color: #94a3b8;
+    color: var(--text-3);
 }
 
 /* Loading spinner */
@@ -324,7 +324,7 @@
     justify-content: center;
     gap: 10px;
     padding: 30px;
-    color: #475569;
+    color: var(--text-2);
     font-size: 14px;
 }
 
@@ -332,7 +332,7 @@
     width: 20px;
     height: 20px;
     border: 2px solid rgba(148, 163, 184, 0.2);
-    border-top-color: #6366f1;
+    border-top-color: var(--accent);
     border-radius: 50%;
     animation: studio-spin 0.8s linear infinite;
 }
