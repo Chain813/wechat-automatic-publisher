@@ -442,8 +442,9 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
                 for idx, kw in pending
             }
             for future in as_completed(futures):
+                slot_idx = futures[future]
                 try:
-                    slot_idx, image_url = future.result()
+                    _, image_url = future.result()
                     if image_url:
                         image_results[slot_idx] = image_url
                 except Exception as exc:

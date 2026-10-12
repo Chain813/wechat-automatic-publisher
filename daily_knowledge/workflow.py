@@ -1,5 +1,6 @@
 import os
 import re
+import hashlib
 from datetime import datetime
 from loguru import logger
 from concurrent.futures import ThreadPoolExecutor
@@ -116,8 +117,44 @@ def run_daily_knowledge_workflow(publisher):
 
     from core.shared.llm import validate_title
     clean_title, _ = validate_title(topic_title)
+    title_hash = hashlib.md5(clean_title.encode('utf-8')).hexdigest()
 
-    # 4. 发布到微信草稿箱
+    # 4. 主编审校门禁 (Critic & Quality Gate)
+    from core.pipeline.critic import evaluate_article_quality, format_critic_report
+    review_res = evaluate_article_quality(clean_title, final_html, article_type="daily_knowledge")
+    print(format_critic_report(review_res))
+
+    if not review_res["passed"]:
+        err = f"未通过每日小知识质量门禁 ({review_res['score']}分): {'; '.join(review_res['critic_issues'])}"
+        print(f"❌ 门禁拦截发布：「{clean_title}」— {err}")
+        try:
+            os.makedirs(os.path.join("data", "previews"), exist_ok=True)
+            with open(os.path.join("data", "previews", f"fail_{title_hash}.html"), "w", encoding="utf-8") as f:
+                f.write(final_html)
+            from core.db.manager import db_manager
+            from core.db.models import ArticleHistory
+            session = db_manager.get_session()
+            try:
+                ah = ArticleHistory(
+                    title=clean_title,
+                    source_type="daily_knowledge",
+                    publish_date=datetime.now().strftime("%Y-%m-%d"),
+                    success_status=False,
+                    media_id=None,
+                    error_log=err,
+                    quality_score=review_res["score"],
+                    thumb_media_id=thumb_id,
+                    status="REJECTED"
+                )
+                session.add(ah)
+                session.commit()
+            finally:
+                db_manager.remove_session()
+        except Exception as e:
+            logger.warning("保存每日小知识门禁拦截记录异常: {}", e)
+        return False
+
+    # 5. 发布到微信草稿箱
     success, result = publisher.publish_and_notify(
         clean_title, final_html, thumb_id, digest_text
     )
@@ -149,10 +186,11 @@ def run_daily_knowledge_workflow(publisher):
             md_filepath = os.path.join("data", "markdown", f"daily_{safe_title}.md")
             with open(md_filepath, "w", encoding="utf-8") as f:
                 f.write(article_text)
+            logger.info("  📄 原始 Markdown 文件已自动保存至: {}", md_filepath)
         except Exception as md_err:
             logger.warning("  保存 Markdown 文件失败: {}", md_err)
             
-        # 5. 写入主数据库的 ArticleHistory 表（为了 WebUI 的 History 页面显示）
+        # 写入主数据库的 ArticleHistory 表（为了 WebUI 的 History 页面显示与查重）
         try:
             from core.db.manager import db_manager
             from core.db.models import ArticleHistory
@@ -166,6 +204,7 @@ def run_daily_knowledge_workflow(publisher):
                     is_published=False,
                     media_id=draft_id,
                     thumb_media_id=thumb_id,
+                    quality_score=review_res["score"],
                     status="DRAFT"
                 )
                 session.add(ah)
@@ -179,4 +218,29 @@ def run_daily_knowledge_workflow(publisher):
     else:
         err = result.get("errmsg", "未知错误")
         print(f"❌ 「{topic_title}」发布失败：{err}")
+        try:
+            os.makedirs(os.path.join("data", "previews"), exist_ok=True)
+            with open(os.path.join("data", "previews", f"fail_{title_hash}.html"), "w", encoding="utf-8") as f:
+                f.write(final_html)
+            from core.db.manager import db_manager
+            from core.db.models import ArticleHistory
+            session = db_manager.get_session()
+            try:
+                ah = ArticleHistory(
+                    title=clean_title,
+                    source_type="daily_knowledge",
+                    publish_date=datetime.now().strftime("%Y-%m-%d"),
+                    success_status=False,
+                    media_id=None,
+                    error_log=err,
+                    quality_score=review_res["score"],
+                    thumb_media_id=thumb_id,
+                    status="FAILED"
+                )
+                session.add(ah)
+                session.commit()
+            finally:
+                db_manager.remove_session()
+        except Exception as db_err:
+            logger.warning("写入 SQLite 失败记录异常: {}", db_err)
         return False

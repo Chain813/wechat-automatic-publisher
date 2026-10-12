@@ -280,11 +280,16 @@ def run_aikepu_workflow(publisher):
             for topic in topics
         }
         for future in as_completed(futures):
-            title, success, error, node_id = future.result()
-            if success:
-                published_count += 1
-            elif error:
-                logger.warning("  「{}」发布失败: {}", title, error)
+            topic_item = futures[future]
+            try:
+                title, success, error, node_id = future.result()
+                if success:
+                    published_count += 1
+                elif error:
+                    logger.warning("  「{}」发布失败: {}", title, error)
+            except Exception as exc:
+                t_name = topic_item.get("title", "未知话题") if isinstance(topic_item, dict) else str(topic_item)
+                logger.error("  AI科普话题处理出现未捕获异常 「{}」: {}", t_name, exc)
 
     # 最终统计
     final_stats = get_skill_tree_stats()

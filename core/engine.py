@@ -20,13 +20,17 @@ def sync_local_history_with_wechat(publisher):
     
     print("\n🔄 正在同步云端状态，检测是否有推文被删除...")
     try:
-        active_titles = publisher.get_all_active_titles()
+        active_cloud_titles = publisher.get_cloud_active_titles()
     except Exception as e:
-        logger.warning(f"获取微信状态失败，跳过历史同步: {e}")
+        logger.warning(f"获取微信云端状态失败，跳过历史同步: {e}")
+        return
+
+    if active_cloud_titles is None:
+        logger.warning("获取微信云端草稿/已发布列表未成功，跳过本地历史同步以防误删")
         return
 
     def is_title_active(title):
-        for act in active_titles:
+        for act in active_cloud_titles:
             if title in act or act in title:
                 return True
         return False

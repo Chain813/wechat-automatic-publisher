@@ -358,11 +358,16 @@ class ParallelPublishNode(BaseNode):
                 for topic in valid_topics
             }
             for future in as_completed(futures):
-                topic, success, error = future.result()
-                if success:
-                    published_count += 1
-                elif error:
-                    logger.warning("  「{}」发布失败: {}", topic, error)
+                topic_item = futures[future]
+                try:
+                    topic, success, error = future.result()
+                    if success:
+                        published_count += 1
+                    elif error:
+                        logger.warning("  「{}」发布失败: {}", topic, error)
+                except Exception as exc:
+                    t_str = topic_item.title if hasattr(topic_item, "title") else str(topic_item)
+                    logger.error("  热点话题处理出现未捕获异常 「{}」: {}", t_str, exc)
 
         print(f"\n{'⭐' * 30}\n  本次运行完成：成功发布 {published_count}/{len(valid_topics)} 篇\n{'⭐' * 30}")
         return True

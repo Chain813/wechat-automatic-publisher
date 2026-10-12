@@ -353,7 +353,8 @@ def handle_config():
         for key in ["WECHAT_APP_ID", "WECHAT_APP_SECRET", "LLM_API_KEY",
                      "QYWECHAT_WEBHOOK", "LLM_MODEL", "DASHSCOPE_API_KEY",
                      "QWEN_IMAGE_MODEL", "QWEN_IMAGE_REDRAW_MODEL", "QWEN_VL_MODEL",
-                     "IMAGE_GEN_MODEL", "DIAGRAM_PARALLEL_WORKERS"]:
+                     "IMAGE_GEN_MODEL", "DIAGRAM_PARALLEL_WORKERS",
+                     "GITHUB_TOKEN", "LLM_BASE_URL", "ENABLE_FACT_SEARCH"]:
             if key in data and "*" not in str(data[key]):
                 value = str(data[key]).strip()
                 if len(value) > 500 or '\n' in value or '\r' in value:
@@ -377,6 +378,10 @@ def handle_config():
             config.QYWECHAT_WEBHOOK = os.getenv("QYWECHAT_WEBHOOK", "")
             config.LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-v4-flash")
             config.IMAGE_GEN_MODEL = os.getenv("IMAGE_GEN_MODEL", "qwen-image-3.0")
+            config.LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.deepseek.com")
+            config.ENABLE_FACT_SEARCH = os.getenv("ENABLE_FACT_SEARCH", "True").lower() == "true"
+            if hasattr(config, "GITHUB_TOKEN"):
+                config.GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
             
             from core.aikepu.skill_tree import invalidate_published_ids_cache, reset_tree_cache
             invalidate_published_ids_cache()
@@ -402,14 +407,14 @@ def get_history():
         try:
             pub = _get_publisher()
             if pub and pub.access_token:
-                published_titles = pub.get_published_titles(count=100)
+                published_titles = pub.get_published_titles(count=100) or []
         except Exception as e:
             logger.warning("获取已发表标题失败: {}", e)
 
         def clean_t(t):
             return re.sub(r'[^\w\u4e00-\u9fff]', '', t).lower() if t else ""
 
-        published_titles_clean = {clean_t(pt) for pt in published_titles if pt}
+        published_titles_clean = {clean_t(pt) for pt in (published_titles or []) if pt}
         
         sent_list = []
         unsent_list = []

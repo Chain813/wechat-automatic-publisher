@@ -84,6 +84,13 @@ def evaluate_article_quality(
         if chinese_chars < 450:
             score -= 25
             issues.append(f"GitHub 推荐文内容严重过短 ({chinese_chars} < 450)")
+    elif article_type.lower() in ("daily_knowledge", "daily"):
+        if chinese_chars < 450:
+            score -= 20
+            issues.append(f"每日小知识汉字字数不足 ({chinese_chars} < 450)")
+        if chinese_chars < 250:
+            score -= 25
+            issues.append(f"每日小知识内容过短 ({chinese_chars} < 250)")
     else:
         if chinese_chars < 1500:
             score -= 20

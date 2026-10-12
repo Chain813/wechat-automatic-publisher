@@ -113,3 +113,41 @@ class TestRuntimeWorkflowsSafety:
             resp = client.get("/api/preview/..%2F..%2Fetc%2Fpasswd")
             assert resp.status_code in (400, 404, 200)
             assert "etc/passwd" not in resp.get_data(as_text=True)
+
+    def test_is_title_fresh_accuracy(self):
+        from core.plugins.utils import _is_title_fresh
+        # 1. 验证时效性强/打破记录/科技事件不被误杀
+        assert _is_title_fresh("英伟达市值创历史新高突破3万亿") is True
+        assert _is_title_fresh("特斯拉老板马斯克宣布最新FSD入华") is True
+        assert _is_title_fresh("多地出台养老金新政保障民生") is True
+        assert _is_title_fresh("颠覆传统！国产开源自研芯片成功点亮") is True
+        assert _is_title_fresh("突破传统架构限制，AI新范式诞生") is True
+
+        # 2. 验证真正的历史/回顾/往期内容被精准识别为非新鲜
+        assert _is_title_fresh("历史上的今天：1998年谷歌公司正式成立") is False
+        assert _is_title_fresh("2023年全球科技大事件深度盘点") is False
+        assert _is_title_fresh("往期精彩内容回顾与技术选型总结") is False
+
+    def test_save_image_from_url_rejects_corrupted_html_stream(self, tmp_path):
+        from utils.image_handler import _save_image_from_url
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        # 模拟防盗链或 403 页面伪装返回的 HTML 文本（非真实图片二进制）
+        mock_resp.content = b"<html><head><title>403 Forbidden</title></head><body>Anti-scraping block</body></html>" * 10
+        with patch("requests.get", return_value=mock_resp):
+            saved = _save_image_from_url("https://example.com/fake_img.jpg", str(tmp_path))
+            assert saved is None, "HTML 伪装内容不应被作为有效图片保存"
+
+    def test_pipeline_engine_reraises_workflow_cancelled(self):
+        from core.pipeline.engine import PipelineEngine
+        from core.pipeline.nodes import BaseNode
+        from core.shared.runtime import WorkflowCancelled
+
+        class CancelledNode(BaseNode):
+            def execute(self, context):
+                raise WorkflowCancelled("用户主动取消")
+
+        engine = PipelineEngine("TestCancelPipeline")
+        engine.add_node(CancelledNode())
+        with pytest.raises(WorkflowCancelled):
+            engine.run({})

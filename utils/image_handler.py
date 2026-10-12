@@ -137,13 +137,13 @@ def resize_for_wechat(img_path, purpose="body"):
         return out_path
     except Exception as e:
         logger.warning("  resize_for_wechat failed: {}", e)
-        return img_path
+        return img_path if (img_path and os.path.exists(img_path)) else None
 
 
 # ==========================================
 #  英文生图提示词构建
 # ==========================================
-def _build_image_prompt(keyword):
+def _build_sd_image_prompt(keyword):
     """将中文关键词转为适合 AI 生图的英文 prompt，优先使用 LLM 增强"""
     from core.shared.llm import call_deepseek_with_retry
     
@@ -197,6 +197,10 @@ def _build_image_prompt(keyword):
 
     # 默认：直接用关键词 + 质量修饰词
     return f"{keyword}, technology, professional, cinematic lighting, detailed"
+
+
+# 保持向后兼容别名
+_build_image_prompt = _build_sd_image_prompt
 
 
 # ==========================================
@@ -445,39 +449,43 @@ def _sanitize_path(text):
 # ==========================================
 #  免费图源降级层 (SD 不可用时自动启用)
 # ==========================================
-def _save_image_from_url(img_url, target_dir, prefix="free", timeout=15):
-    """从 URL 下载图片并保存，返回路径或 None"""
+def _save_image_from_url(url, target_dir, prefix="img", timeout=30):
+    """从网络 URL 下载图片并保存到 target_dir，包含防盗链头、大小检验及 PIL 完整性校验"""
+    if not url:
+        return None
     import requests
+    import io
+    from PIL import Image
+    os.makedirs(target_dir, exist_ok=True)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+    }
+    if "qpic.cn" in url:
+        headers["Referer"] = "https://mp.weixin.qq.com/"
+
     try:
-        resp = requests.get(img_url, timeout=timeout, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        })
-        if resp.status_code == 200 and len(resp.content) > 1024:
-            ext = ".jpg"
-            ct = resp.headers.get("Content-Type", "")
-            if "png" in ct:
-                ext = ".png"
-            elif "webp" in ct:
-                ext = ".webp"
-            save_path = os.path.join(target_dir, f"{prefix}_{int(time.time())}{ext}")
+        resp = requests.get(url, timeout=timeout, headers=headers)
+        if resp.status_code == 200 and len(resp.content) >= 512:
+            # 严格使用 PIL 校验图片字节流完整性，杜绝 HTML 403 页面伪装为图片
+            try:
+                with Image.open(io.BytesIO(resp.content)) as test_img:
+                    test_img.verify()
+                    format_name = (test_img.format or "").lower()
+            except Exception as ve:
+                logger.debug("  下载内容非有效图片 ({}) : {}", url[:60], ve)
+                return None
+
+            ext = ".png" if format_name == "png" else (".webp" if format_name == "webp" else ".jpg")
+            filename = f"{prefix}_{int(time.time() * 1000)}{ext}"
+            save_path = os.path.join(target_dir, filename)
             with open(save_path, "wb") as f:
                 f.write(resp.content)
-            # Validate image
-            from PIL import Image
-            try:
-                img = Image.open(save_path)
-                img.verify()
-                img = Image.open(save_path)
-                if img.width >= 200 and img.height >= 150:
-                    logger.info("  免费图源下载成功: {} ({}x{})", os.path.basename(save_path), img.width, img.height)
-                    return save_path
-                else:
-                    os.remove(save_path)
-            except Exception:
-                if os.path.exists(save_path):
-                    os.remove(save_path)
+            return save_path
+        else:
+            logger.warning("  下载图片 URL 失败 HTTP {} (bytes={}): {}", resp.status_code, len(resp.content) if resp else 0, url[:60])
     except Exception as e:
-        logger.debug("  免费图源下载失败 ({}): {}", img_url[:60], e)
+        logger.warning("  从 URL 保存图片异常 ({}): {}", url[:60], e)
     return None
 
 
@@ -644,7 +652,7 @@ def generate_article_images_batch(title, article_text, keywords, save_dir="asset
     return result
 
 
-def _build_image_prompt(keyword):
+def _build_qwen_image_prompt(keyword):
     """为关键词构建具体、个性化且不重复的通义万相 AI 插画生图提示词"""
     if not keyword or not keyword.strip():
         return "高清科技感公众号插画，现代概念，无文字水印"
@@ -653,29 +661,6 @@ def _build_image_prompt(keyword):
         f"一幅高清 16:9 现代科技概念插画，主题内容：【{clean_kw}】。"
         "画面效果：视角独特，构图大气，色彩调和细腻，具有强烈的视觉冲击力与空间层次感，画面中绝对不包含任何文字、字母或水印。"
     )
-
-
-def _save_image_from_url(url, target_dir, prefix="img", timeout=60):
-    """从网络 URL 下载图片并保存到 target_dir"""
-    if not url:
-        return None
-    import requests
-    os.makedirs(target_dir, exist_ok=True)
-    try:
-        resp = requests.get(url, timeout=timeout)
-        if resp.status_code == 200:
-            content_type = resp.headers.get("Content-Type", "").lower()
-            ext = ".png" if "png" in content_type else ".jpg"
-            filename = f"{prefix}_{int(time.time() * 1000)}{ext}"
-            save_path = os.path.join(target_dir, filename)
-            with open(save_path, "wb") as f:
-                f.write(resp.content)
-            return save_path
-        else:
-            logger.warning("  下载图片 URL 失败 HTTP {}", resp.status_code)
-    except Exception as e:
-        logger.warning("  从 URL 保存图片异常: {}", e)
-    return None
 
 
 def _parse_qwen_image_response(data, target_dir, prefix):
@@ -706,7 +691,7 @@ def _parse_qwen_image_response(data, target_dir, prefix):
 def _try_qwen_image_gen(keyword, target_dir, width=900, height=500):
     """通义万相 Qwen-Image-3.0 文本生图（DashScope/百炼，国内直连）"""
     from config import QWEN_IMAGE_API_BASE, QWEN_IMAGE_MODEL, QWEN_IMAGE_TIMEOUT, QWEN_IMAGE_PROMPT_EXTEND, QWEN_IMAGE_SIZE
-    prompt = _build_image_prompt(keyword)
+    prompt = _build_qwen_image_prompt(keyword)
     body = {
         "model": QWEN_IMAGE_MODEL,
         "input": {
@@ -1246,13 +1231,16 @@ def download_cover_image(keyword, save_dir="assets"):
 
 def _finalize_image(img_path, purpose):
     """后处理：尺寸适配 + 去重检查 + 哈希登记"""
+    if not img_path or not os.path.exists(img_path):
+        return None
     from .image_filter import compute_perceptual_hash
     phash = compute_perceptual_hash(img_path)
-    if _is_too_similar_to_existing(phash):
+    if phash and _is_too_similar_to_existing(phash):
         logger.debug("  跳过相似图片: {}", os.path.basename(img_path))
         return None
 
     result = resize_for_wechat(img_path, purpose)
-    _register_hash(phash)
+    if result:
+        _register_hash(phash)
     return result
 

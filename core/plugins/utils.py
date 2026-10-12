@@ -109,27 +109,35 @@ def _is_title_fresh(title):
     else:
         title = str(title)
 
+    # 1. 严格限定陈旧/复盘类复合词，严禁使用单字（如“老”会误杀“老板/养老/老牌/老师”）或宽泛词（如“历史”）
+    stale_phrases = [
+        "历史上的今天", "去年", "前年", "往年", "往期", "历年盘点", "历年回顾",
+        "年终盘点", "年终总结", "季度回顾", "老旧版本", "陈旧过时", "经典回顾"
+    ]
+    for kw in stale_phrases:
+        if kw in title:
+            return False
+
+    # 2. 检查明显早于当年的年份（如 2023年、2022年）
     current_year = datetime.now().year
     old_year_match = re.findall(r'(20\d{2})年', title)
     for y in old_year_match:
         if int(y) < current_year:
             return False
 
-    stale_keywords = ["去年", "前年", "回顾", "总结", "盘点", "历年", "曾经", "往期",
-                      "经典", "老", "旧版", "传统", "历史", "纪念", "周年"]
-    for kw in stale_keywords:
-        if kw in title:
-            return False
+    # 3. 强时效性豁免白名单：放行包含最新突破、创纪录或突发信号的内容
+    fresh_keywords = [
+        "历史新高", "历史新低", "创历史", "创造历史", "见证历史", "历史性",
+        "突破传统", "颠覆传统", "今日", "今天", "昨夜", "昨晚",
+        "刚刚", "最新", "最新消息", "快讯", "突发", "紧急", "速报", "实时", "即时"
+    ]
+    for fw in fresh_keywords:
+        if fw in title:
+            return True
 
     current_date = _get_current_date_str()
     if current_date in title:
         return True
-
-    fresh_keywords = ["今日", "今天", "昨夜", "昨晚", "刚刚", "最新", "最新消息",
-                      "快讯", "突发", "紧急", "速报", "实时", "即时"]
-    for kw in fresh_keywords:
-        if kw in title:
-            return True
 
     return True
 

@@ -356,50 +356,66 @@ class WeChatPublisher:
         return None
 
     def get_draft_titles(self, count=WECHAT_DRAFT_SCAN_COUNT):
-        """获取最近草稿标题列表"""
+        """获取最近草稿标题列表，若接口失败返回 None"""
         self._ensure_valid_token()
         if not self.access_token:
-            return []
+            return None
         url = f"https://api.weixin.qq.com/cgi-bin/draft/batchget?access_token={self.access_token}"
         data = {"offset": 0, "count": count, "no_content": 1}
         titles = []
         try:
             res = self.session.post(url, json=data, timeout=WECHAT_API_TIMEOUT)
             res_data = json.loads(res.content.decode('utf-8'))
+            if res_data.get("errcode", 0) != 0:
+                logger.warning("获取草稿标题微信接口返回错误: {}", res_data)
+                return None
             for item in res_data.get("item", []):
                 for news in item.get("content", {}).get("news_item", []):
                     if news.get("title"):
                         titles.append(news.get("title"))
+            return titles
         except Exception as exc:
             logger.warning("获取草稿标题失败: {}", exc)
-        return titles
+            return None
 
     def get_published_titles(self, count=WECHAT_DRAFT_SCAN_COUNT):
-        """获取最近已发布文章标题列表"""
+        """获取最近已发布文章标题列表，若接口失败返回 None"""
         self._ensure_valid_token()
         if not self.access_token:
-            return []
+            return None
         url = f"https://api.weixin.qq.com/cgi-bin/freepublish/batchget?access_token={self.access_token}"
         data = {"offset": 0, "count": count, "no_content": 1}
         titles = []
         try:
             res = self.session.post(url, json=data, timeout=WECHAT_API_TIMEOUT)
             res_data = json.loads(res.content.decode('utf-8'))
+            if res_data.get("errcode", 0) != 0:
+                logger.warning("获取发布标题微信接口返回错误: {}", res_data)
+                return None
             for item in res_data.get("item", []):
                 for news in item.get("content", {}).get("news_item", []):
                     if news.get("title"):
                         titles.append(news.get("title"))
+            return titles
         except Exception as exc:
             logger.warning("获取发布标题失败: {}", exc)
-        return titles
+            return None
+
+    def get_cloud_active_titles(self, count=WECHAT_DRAFT_SCAN_COUNT):
+        """仅拉取微信云端真实存在的草稿和已发布文章标题。如果请求接口失败返回 None。"""
+        drafts = self.get_draft_titles(count=count)
+        published = self.get_published_titles(count=count)
+        if drafts is None or published is None:
+            return None
+        return list(set(drafts + published))
 
     def get_all_active_titles(self):
         """合并拉取微信草稿箱、最近发布记录以及本地 SQLite 历史发布记录，做全量标题查重"""
         if self._draft_titles_cache is not None:
             return self._draft_titles_cache
         
-        drafts = self.get_draft_titles()
-        published = self.get_published_titles()
+        drafts = self.get_draft_titles() or []
+        published = self.get_published_titles() or []
         
         db_titles = []
         try:
