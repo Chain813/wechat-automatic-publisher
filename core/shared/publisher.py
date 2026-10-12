@@ -31,9 +31,18 @@ except ImportError:
 #  标题查重辅助函数
 # ==========================================
 
+def _to_clean_title_str(title) -> str:
+    """安全将入参转换为纯字符串标题，防止调用 str.title 内置方法导致类型错误"""
+    if isinstance(title, str):
+        return title
+    if hasattr(title, "title") and isinstance(getattr(title, "title"), str):
+        return title.title
+    return str(title)
+
+
 def _normalize_title(title):
     """去除标点/空格，统一小写，用于字符级模糊匹配"""
-    title_str = title.title if hasattr(title, "title") else str(title)
+    title_str = _to_clean_title_str(title)
     return ''.join(c.lower() for c in title_str if c.isalnum())
 
 
@@ -44,7 +53,7 @@ def _extract_keywords(title):
     - 中文：使用 2~4 字滑动窗口生成 n-gram，弥补无分词器的缺陷
       例如 "脑机接口人体试验" → {"脑机", "机接", "接口", "口人", "脑机接口", ...}
     """
-    title_str = title.title if hasattr(title, "title") else str(title)
+    title_str = _to_clean_title_str(title)
     keywords = set()
     # 英文单词和数字
     for m in re.finditer(r'[a-zA-Z][a-zA-Z0-9]*|[0-9]+', title_str):
@@ -80,25 +89,27 @@ def _select_semantic_candidates(new_title, existing_titles, max_candidates=15):
     基于本地关键词重叠和低阈值字符模糊匹配，筛选出最可能相似的候选标题，
     避免将成百上千个不相关标题全部传给大模型，节省 token 费用并提高速度。
     """
-    new_keywords = _extract_keywords(new_title)
+    new_title_str = _to_clean_title_str(new_title)
+    new_keywords = _extract_keywords(new_title_str)
     candidates_with_score = []
 
     for old in existing_titles:
-        old_keywords = _extract_keywords(old)
+        old_str = _to_clean_title_str(old)
+        old_keywords = _extract_keywords(old_str)
         intersection = new_keywords & old_keywords
         score = len(intersection)
 
         # 辅助计算粗略字符相似度 (0-100)
-        norm_new = _normalize_title(new_title)
-        norm_old = _normalize_title(old)
+        norm_new = _normalize_title(new_title_str)
+        norm_old = _normalize_title(old_str)
         if fuzz is not None:
             ratio = fuzz.ratio(norm_new, norm_old)
         else:
             ratio = int(SequenceMatcher(None, norm_new, norm_old).ratio() * 100)
 
         # 如果有关键词交集，或者字符相似度达到 20%+，或者是极短的标题
-        if score > 0 or ratio >= 20 or len(new_title) < 8 or len(old) < 8:
-            candidates_with_score.append((old, score, ratio))
+        if score > 0 or ratio >= 20 or len(new_title_str) < 8 or len(old_str) < 8:
+            candidates_with_score.append((old_str, score, ratio))
 
     # 排序：优先按关键词交集数量，其次按相似度比例，均降序
     candidates_with_score.sort(key=lambda x: (x[1], x[2]), reverse=True)
@@ -113,8 +124,9 @@ def _ai_semantic_check(new_title, existing_titles):
     使用本地粗筛机制降低输入给大模型的标题规模，提升响应速度并节省 token 资源。
     返回 (is_duplicate: bool, matched_title: str or None)
     """
+    new_title_str = _to_clean_title_str(new_title)
     # 1. 本地粗筛最相关的候选标题
-    candidates = _select_semantic_candidates(new_title, existing_titles, max_candidates=15)
+    candidates = _select_semantic_candidates(new_title_str, existing_titles, max_candidates=15)
     if not candidates:
         logger.info("  [AI查重粗筛] 未发现任何存在潜在交集的候选标题，直接判定为【不重复】")
         return False, None
@@ -128,7 +140,7 @@ def _ai_semantic_check(new_title, existing_titles):
     titles_text = "\n".join(f"{i+1}. {t}" for i, t in enumerate(candidates))
     prompt = (
         f"已发布文章标题列表：\n{titles_text}\n\n"
-        f"待发布话题：「{new_title}」\n\n"
+        f"待发布话题：「{new_title_str}」\n\n"
         "请判断待发布话题是否与列表中某篇文章覆盖了同一个核心事件或议题"
         "（即使措辞、角度不同，只要是同一件事就算重复）。\n"
         "如果重复，请回答：重复|<编号>\n"
@@ -459,12 +471,12 @@ class WeChatPublisher:
         3. 关键词 n-gram 重叠匹配
         4. AI 语义查重 (DeepSeek，~300 tokens，兜底)
         """
-        new_title_str = new_title.title if hasattr(new_title, "title") else str(new_title)
+        new_title_str = _to_clean_title_str(new_title)
         raw_existing = self.get_all_active_titles()
         if extra_existing:
             raw_existing = raw_existing + extra_existing
             
-        existing = [t.title if hasattr(t, "title") else str(t) for t in raw_existing]
+        existing = [_to_clean_title_str(t) for t in raw_existing]
         if not existing:
             return False, None
 
@@ -490,7 +502,7 @@ class WeChatPublisher:
 
         # 策略 4: AI 语义查重（前三层均未命中时，调用一次 AI 兜底）
         logger.info("本地查重未命中，启动 AI 语义查重...")
-        is_dup, matched = _ai_semantic_check(new_title, existing)
+        is_dup, matched = _ai_semantic_check(new_title_str, existing)
         if is_dup:
             logger.info("命中相似标题(AI语义): {}", matched)
             return True, matched

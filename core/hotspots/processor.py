@@ -124,13 +124,13 @@ def filter_tech_hotspots(topics):
     item_map = {}
     if isinstance(topics, list):
         for t in topics:
-            if hasattr(t, "title") and t.title:
+            if hasattr(t, "title") and isinstance(getattr(t, "title"), str) and t.title:
                 item_map[t.title.strip()] = t
 
     if item_map:
         formatted_topics = []
         for idx, t in enumerate(topics, 1):
-            if hasattr(t, "title"):
+            if hasattr(t, "title") and isinstance(getattr(t, "title"), str):
                 summary_part = f" (摘要: {t.summary[:90]})" if getattr(t, "summary", "") else ""
                 source_part = f"[{t.source_id}] " if getattr(t, "source_id", "") else ""
                 formatted_topics.append(f"{idx}. {source_part}{t.title}{summary_part}")
@@ -223,7 +223,7 @@ def filter_tech_hotspots(topics):
         else:
             result = fallback_titles
 
-    logger.info("  最终筛选进入队列: {}", [t.title if hasattr(t, "title") else t for t in result])
+    logger.info("  最终筛选进入队列: {}", [t.title if hasattr(t, "title") and isinstance(getattr(t, "title"), str) else str(t) for t in result])
     return result
 
 def validate_article_structure(text: str):
@@ -321,7 +321,7 @@ def _auto_add_quotes(article, min_count=3):
 
 def generate_article(topic, raw_content: str = "", search_results: Optional[List[Dict[str, str]]] = None):
     # 支持 HotspotItem 或常规字符串
-    if hasattr(topic, "title"):
+    if hasattr(topic, "title") and isinstance(getattr(topic, "title"), str):
         topic_title = topic.title
         raw_content = getattr(topic, "raw_content", "") or raw_content
         topic_url = getattr(topic, "url", "")

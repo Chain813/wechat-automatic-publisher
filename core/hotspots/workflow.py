@@ -11,6 +11,7 @@ from core.shared.llm import validate_title
 from utils.image_handler import download_cover_image, reset_image_cache
 from core.shared.runtime import check_cancelled
 
+from core.shared.publisher import _to_clean_title_str
 from core.pipeline.nodes import BaseNode
 from core.pipeline.engine import PipelineEngine
 from core.db.manager import db_manager
@@ -24,7 +25,7 @@ def _save_history(topics):
         session = db_manager.get_session()
         today = datetime.now().strftime("%Y-%m-%d")
         for topic in topics:
-            raw_title = topic.title if hasattr(topic, "title") else str(topic)
+            raw_title = _to_clean_title_str(topic)
             clean_title, _ = validate_title(raw_title)
             existing = session.query(ArticleHistory).filter(
                 ArticleHistory.source_type == "hotspots",
@@ -50,7 +51,7 @@ def _save_history(topics):
 def _save_publish_result(topic, success, draft_id=None, error=None, quality_score=0.0, source_url="", status=None, preview_html=None, thumb_id=None, fact_check_result=""):
     try:
         session = db_manager.get_session()
-        topic_str = topic.title if hasattr(topic, "title") else str(topic)
+        topic_str = _to_clean_title_str(topic)
         clean_title, _ = validate_title(topic_str)
         
         # 1. 保存本地 HTML 预览供 WebUI 人机工作台查看或审批
@@ -116,7 +117,11 @@ def _get_past_topics(days=7):
     try:
         session = db_manager.get_session()
         cutoff_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-        records = session.query(ArticleHistory).filter(ArticleHistory.source_type == "hotspots", ArticleHistory.publish_date >= cutoff_date).all()
+        records = session.query(ArticleHistory).filter(
+            ArticleHistory.source_type == "hotspots",
+            ArticleHistory.publish_date >= cutoff_date,
+            ArticleHistory.success_status == False
+        ).all()
         return [HotspotItem(title=r.title, url=r.source_url or "") for r in records]
     finally:
         db_manager.remove_session()
@@ -179,7 +184,7 @@ class FetchAndSelectNode(BaseNode):
 
             if unsent_topics:
                 selected_topics = unsent_topics[:MAX_TOPICS_PER_RUN]
-                print(f"✅ 成功找到前几天未发送的优质热点：{[t.title if hasattr(t, 'title') else t for t in selected_topics]}")
+                print(f"✅ 成功找到前几天未发送的优质热点：{[_to_clean_title_str(t) for t in selected_topics]}")
             else:
                 print("📭 前几天也无符合条件的未发送热点，任务结束。")
                 return False
@@ -196,7 +201,7 @@ class FetchAndSelectNode(BaseNode):
             if len(valid_topics) >= MAX_TOPICS_PER_RUN:
                 break
             is_dup, old_title = publisher.is_title_duplicate(topic, extra_existing=valid_topics)
-            topic_disp = topic.title if hasattr(topic, "title") else str(topic)
+            topic_disp = _to_clean_title_str(topic)
             if is_dup:
                 print(f"  ⚠️ 跳过重复：「{topic_disp}」≈「{old_title}」")
             else:
@@ -215,7 +220,7 @@ class ParallelPublishNode(BaseNode):
         check_cancelled()
         reset_image_cache()
 
-        topic_str = topic.title if hasattr(topic, "title") else str(topic)
+        topic_str = _to_clean_title_str(topic)
         with ThreadPoolExecutor(max_workers=1) as cover_pool:
             cover_future = cover_pool.submit(download_cover_image, topic_str)
             article_text = generate_article(topic)
@@ -251,9 +256,9 @@ class ParallelPublishNode(BaseNode):
         try:
             check_cancelled()
             if not pub.access_token:
-                return str(topic), False, "Token 获取失败"
+                return _to_clean_title_str(topic), False, "Token 获取失败"
 
-            topic_str = topic.title if hasattr(topic, "title") else str(topic)
+            topic_str = _to_clean_title_str(topic)
             print(f"\n{'━' * 50}\n🎯 [并行] 正在处理：{topic_str}\n{'━' * 50}")
 
             with ThreadPoolExecutor(max_workers=2) as pool:
@@ -366,7 +371,7 @@ class ParallelPublishNode(BaseNode):
                     elif error:
                         logger.warning("  「{}」发布失败: {}", topic, error)
                 except Exception as exc:
-                    t_str = topic_item.title if hasattr(topic_item, "title") else str(topic_item)
+                    t_str = _to_clean_title_str(topic_item)
                     logger.error("  热点话题处理出现未捕获异常 「{}」: {}", t_str, exc)
 
         print(f"\n{'⭐' * 30}\n  本次运行完成：成功发布 {published_count}/{len(valid_topics)} 篇\n{'⭐' * 30}")

@@ -205,3 +205,99 @@ def test_api_review_approve():
     session.commit()
     db_manager.remove_session()
 
+
+def test_sqlite_wal_and_busy_timeout():
+    """测试 SQLite 连接已正确应用 WAL 模式与 30s busy_timeout"""
+    from core.db.manager import db_manager
+    from sqlalchemy import text
+
+    with db_manager.engine.connect() as conn:
+        journal_mode = conn.execute(text("PRAGMA journal_mode;")).scalar()
+        busy_timeout = conn.execute(text("PRAGMA busy_timeout;")).scalar()
+
+        assert str(journal_mode).lower() == "wal"
+        assert int(busy_timeout) >= 30000
+
+
+def test_semantic_check_hotspot_item_safety():
+    """测试当查重入参为 HotspotItem 对象时，不发生崩溃且 Prompt 中为纯字符串"""
+    from core.plugins.base import HotspotItem
+    from core.shared.publisher import _select_semantic_candidates, _ai_semantic_check
+    from unittest.mock import patch
+
+    item = HotspotItem(
+        title="测试量子计算突破最新进展",
+        url="https://example.com/quantum",
+        summary="量子计算突破"
+    )
+    existing = ["量子计算最新进展回顾", "大模型技术全解", "无人驾驶新规"]
+
+    # 1. 验证粗筛候选返回，无 TypeError
+    candidates = _select_semantic_candidates(item, existing)
+    assert isinstance(candidates, list)
+    assert "量子计算最新进展回顾" in candidates
+
+    # 2. 验证 AI 查重 Prompt 不包含 HotspotItem 的 repr
+    captured_prompts = []
+    def fake_llm(prompt, **kwargs):
+        captured_prompts.append(prompt)
+        return "重复|1"
+
+    with patch("core.shared.llm.call_deepseek_with_retry", side_effect=fake_llm):
+        is_dup, matched = _ai_semantic_check(item, existing)
+        assert is_dup is True
+        assert matched == "量子计算最新进展回顾"
+        assert len(captured_prompts) == 1
+        prompt_text = captured_prompts[0]
+        # 严格防御：Prompt 待发布话题中不能出现 HotspotItem 类名
+        assert "待发布话题：「测试量子计算突破最新进展」" in prompt_text
+        assert "HotspotItem(" not in prompt_text
+
+
+def test_multithread_sqlite_concurrency():
+    """测试多线程高并发写入 SQLite 时不会抛出 database locked 错误"""
+    import threading
+    from core.db.manager import db_manager
+    from core.db.models import ArticleHistory
+
+    errors = []
+    created_ids = []
+    lock = threading.Lock()
+
+    def worker(worker_id):
+        try:
+            session = db_manager.get_session()
+            ah = ArticleHistory(
+                title=f"Concurrent Test Article {worker_id}",
+                source_type="hotspots",
+                publish_date="2026-10-12",
+                success_status=True,
+                status="DRAFT"
+            )
+            session.add(ah)
+            session.commit()
+            with lock:
+                created_ids.append(ah.id)
+        except Exception as e:
+            with lock:
+                errors.append(e)
+        finally:
+            db_manager.remove_session()
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # 校验所有线程写入成功，0 报错
+    assert len(errors) == 0, f"并发写入报错: {errors}"
+    assert len(created_ids) == 10
+
+    # 清理测试数据
+    clean_session = db_manager.get_session()
+    clean_session.query(ArticleHistory).filter(ArticleHistory.id.in_(created_ids)).delete(synchronize_session=False)
+    clean_session.commit()
+    db_manager.remove_session()
+
+

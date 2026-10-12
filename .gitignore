@@ -13,8 +13,8 @@ venv/
 .venv/
 
 # Runtime generated
-*.sqlite
-data/*.sqlite
+*.sqlite*
+data/*.sqlite*
 data/previews/
 data/gemini_chrome_profile/
 data/gemini_session/

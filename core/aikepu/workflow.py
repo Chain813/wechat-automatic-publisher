@@ -212,9 +212,37 @@ def _publish_single_topic(topic_info, publisher):
             mark_published(node_id, clean_title, draft_id=draft_id, status="draft")
             return topic_title, True, None, node_id
         else:
-            err = result.get("errmsg", "未知错误")
+            err = result.get("errmsg", "未知错误") if isinstance(result, dict) else str(result)
             print(f"❌ 「{clean_title}」发布失败：{err}")
-            # 本地缓存(锁)处理: 释放保留状态以便下次重试，不写入失败的 ArticleHistory
+            try:
+                title_hash = hashlib.md5(clean_title.encode('utf-8')).hexdigest()
+                os.makedirs(os.path.join("data", "previews"), exist_ok=True)
+                with open(os.path.join("data", "previews", f"fail_{title_hash}.html"), "w", encoding="utf-8") as f:
+                    f.write(final_html)
+
+                from core.db.manager import db_manager
+                from core.db.models import ArticleHistory
+                session = db_manager.get_session()
+                try:
+                    ah = ArticleHistory(
+                        title=clean_title,
+                        source_type="aikepu",
+                        publish_date=datetime.now().strftime("%Y-%m-%d"),
+                        success_status=False,
+                        media_id=None,
+                        error_log=err,
+                        quality_score=review_res["score"],
+                        source_url=f"aikepu://node/{node_id}",
+                        thumb_media_id=thumb_id,
+                        status="FAILED"
+                    )
+                    session.add(ah)
+                    session.commit()
+                finally:
+                    db_manager.remove_session()
+            except Exception as e:
+                logger.warning("保存 AI科普 失败记录异常: {}", e)
+
             release_reserved(node_id)
             return topic_title, False, err, node_id
 

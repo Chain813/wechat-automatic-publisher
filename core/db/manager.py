@@ -24,10 +24,22 @@ class DBManager:
             
         self.engine = create_engine(
             f"sqlite:///{DB_PATH}",
-            connect_args={"check_same_thread": False},
+            connect_args={"check_same_thread": False, "timeout": 30},
             echo=False
         )
-        from sqlalchemy import text
+        from sqlalchemy import event, text
+
+        @event.listens_for(self.engine, "connect")
+        def set_sqlite_pragma(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA busy_timeout=30000")
+            except Exception:
+                pass
+            finally:
+                cursor.close()
+
         Base.metadata.create_all(self.engine)
         try:
             with self.engine.connect() as conn:

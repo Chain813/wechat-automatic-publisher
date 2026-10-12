@@ -321,7 +321,35 @@ class PublishGithubNode(BaseNode):
         print("\n🚀 正在同步至微信公众号云端草稿箱...")
         success, result = publisher.publish_and_notify(clean_title, final_html, thumb_id, digest)
         if not success:
-            print(f"❌ 同步草稿箱失败：{result}")
+            err = result.get("errmsg", str(result)) if isinstance(result, dict) else str(result)
+            print(f"❌ 同步草稿箱失败：{err}")
+            try:
+                title_hash = hashlib.md5(clean_title.encode('utf-8')).hexdigest()
+                os.makedirs(os.path.join("data", "previews"), exist_ok=True)
+                with open(os.path.join("data", "previews", f"fail_{title_hash}.html"), "w", encoding="utf-8") as f:
+                    f.write(final_html)
+
+                primary_repo_url = f"https://github.com/{projects[0]['repo']}" if projects else ""
+                session = db_manager.get_session()
+                try:
+                    ah = ArticleHistory(
+                        title=clean_title,
+                        source_type="github",
+                        publish_date=datetime.now().strftime("%Y-%m-%d"),
+                        success_status=False,
+                        media_id=None,
+                        error_log=err,
+                        quality_score=review_res["score"],
+                        source_url=primary_repo_url,
+                        thumb_media_id=thumb_id,
+                        status="FAILED"
+                    )
+                    session.add(ah)
+                    session.commit()
+                finally:
+                    db_manager.remove_session()
+            except Exception as e:
+                logger.warning("保存 GitHub 发布失败记录异常: {}", e)
             return False
 
         draft_id = result['media_id']

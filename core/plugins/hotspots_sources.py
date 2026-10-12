@@ -639,7 +639,10 @@ class HuxiuPlugin(BaseSourcePlugin):
             _mark_source_failure(self.source_id)
         finally:
             if browser:
-                browser.quit()
+                try:
+                    browser.quit()
+                except Exception:
+                    pass
         return topics[:NEWS_MAX_PER_SOURCE]
 
 
@@ -773,5 +776,8 @@ class WeiboPlugin(BaseSourcePlugin):
             _mark_source_failure(self.source_id)
         finally:
             if browser:
-                browser.quit()
+                try:
+                    browser.quit()
+                except Exception:
+                    pass
         return topics[:NEWS_MAX_PER_SOURCE]

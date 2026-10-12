@@ -961,7 +961,10 @@ def take_github_readme_screenshot(repo_name, readme_file_path=None, save_dir="as
         return None
     finally:
         if browser:
-            browser.quit()
+            try:
+                browser.quit()
+            except Exception:
+                pass
 
     if not os.path.exists(save_path):
         return None
