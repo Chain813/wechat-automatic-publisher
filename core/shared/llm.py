@@ -243,7 +243,9 @@ def validate_title(title: str):
 
     if len(clean_title) > WECHAT_TITLE_MAX_LEN:
         warnings.append(f"标题超长 ({len(clean_title)} > {WECHAT_TITLE_MAX_LEN})，已截断")
-        clean_title = clean_title[:WECHAT_TITLE_MAX_LEN]
+        clean_title = clean_title[:WECHAT_TITLE_MAX_LEN].strip()
+        while clean_title and clean_title.endswith(forbidden_endings):
+            clean_title = clean_title[:-1].strip()
 
     return clean_title, warnings
 

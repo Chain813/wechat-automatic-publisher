@@ -366,22 +366,24 @@ def get_published_ids(force_refresh=False):
         from core.db.manager import db_manager
         from core.db.models import ArticleHistory
         session = db_manager.get_session()
-        records = session.query(ArticleHistory).filter(
-            ArticleHistory.source_type == 'aikepu',
-            ArticleHistory.success_status.is_(True),
-            ArticleHistory.is_published.is_(True)
-        ).all()
-        if records:
-            tree = load_skill_tree()
-            nodes = tree.get("nodes", [])
-            for r in records:
-                if r.title:
-                    for node in nodes:
-                        nid = node.get("id")
-                        if nid and nid not in published_set and _match_node_title(node, r.title):
-                            published_set.add(nid)
-                            break
-        db_manager.remove_session()
+        try:
+            records = session.query(ArticleHistory).filter(
+                ArticleHistory.source_type == 'aikepu',
+                ArticleHistory.success_status.is_(True),
+                ArticleHistory.is_published.is_(True)
+            ).all()
+            if records:
+                tree = load_skill_tree()
+                nodes = tree.get("nodes", [])
+                for r in records:
+                    if r.title:
+                        for node in nodes:
+                            nid = node.get("id")
+                            if nid and nid not in published_set and _match_node_title(node, r.title):
+                                published_set.add(nid)
+                                break
+        finally:
+            db_manager.remove_session()
     except Exception as e:
         logger.debug("读取 SQLite 已发表状态失败: {}", e)
 
@@ -425,13 +427,15 @@ def get_draft_ids(wechat_draft_titles=None):
             from core.db.manager import db_manager
             from core.db.models import ArticleHistory
             session = db_manager.get_session()
-            db_records = session.query(ArticleHistory).filter(
-                ArticleHistory.source_type == 'aikepu',
-                ArticleHistory.success_status.is_(True),
-                ArticleHistory.is_published.is_(False)
-            ).all()
-            db_draft_titles = [r.title.strip() for r in db_records if r.title]
-            db_manager.remove_session()
+            try:
+                db_records = session.query(ArticleHistory).filter(
+                    ArticleHistory.source_type == 'aikepu',
+                    ArticleHistory.success_status.is_(True),
+                    ArticleHistory.is_published.is_(False)
+                ).all()
+                db_draft_titles = [r.title.strip() for r in db_records if r.title]
+            finally:
+                db_manager.remove_session()
         except Exception as e:
             logger.debug("读取 SQLite 草稿记录失败: {}", e)
 
@@ -671,15 +675,17 @@ def set_node_status(node_id, status="published"):
             from core.db.manager import db_manager
             from core.db.models import ArticleHistory
             session = db_manager.get_session()
-            if node:
-                clean_n = _c(node["title"])
-                records = session.query(ArticleHistory).filter(ArticleHistory.source_type == 'aikepu').all()
-                for r in records:
-                    if r.title and (clean_n in _c(r.title) or _c(r.title) in clean_n):
-                        r.success_status = False
-                        r.is_published = False
-                session.commit()
-            db_manager.remove_session()
+            try:
+                if node:
+                    clean_n = _c(node["title"])
+                    records = session.query(ArticleHistory).filter(ArticleHistory.source_type == 'aikepu').all()
+                    for r in records:
+                        if r.title and (clean_n in _c(r.title) or _c(r.title) in clean_n):
+                            r.success_status = False
+                            r.is_published = False
+                    session.commit()
+            finally:
+                db_manager.remove_session()
         except Exception as e:
             logger.warning("清理 SQLite 节点记录失败: {}", e)
         invalidate_published_ids_cache()
@@ -693,25 +699,27 @@ def set_node_status(node_id, status="published"):
         from core.db.manager import db_manager
         from core.db.models import ArticleHistory
         session = db_manager.get_session()
-        clean_n = _c(title)
-        records = session.query(ArticleHistory).filter(ArticleHistory.source_type == 'aikepu').all()
-        matched = False
-        is_pub = (status == "published")
-        for r in records:
-            if r.title and (clean_n in _c(r.title) or _c(r.title) in clean_n):
-                r.is_published = is_pub
-                r.success_status = True
-                matched = True
-        if not matched:
-            new_record = ArticleHistory(
-                source_type='aikepu',
-                title=title,
-                success_status=True,
-                is_published=is_pub
-            )
-            session.add(new_record)
-        session.commit()
-        db_manager.remove_session()
+        try:
+            clean_n = _c(title)
+            records = session.query(ArticleHistory).filter(ArticleHistory.source_type == 'aikepu').all()
+            matched = False
+            is_pub = (status == "published")
+            for r in records:
+                if r.title and (clean_n in _c(r.title) or _c(r.title) in clean_n):
+                    r.is_published = is_pub
+                    r.success_status = True
+                    matched = True
+            if not matched:
+                new_record = ArticleHistory(
+                    source_type='aikepu',
+                    title=title,
+                    success_status=True,
+                    is_published=is_pub
+                )
+                session.add(new_record)
+            session.commit()
+        finally:
+            db_manager.remove_session()
     except Exception as e:
         logger.warning("同步 SQLite is_published 状态失败: {}", e)
 

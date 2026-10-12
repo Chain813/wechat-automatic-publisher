@@ -1,5 +1,6 @@
 import os
 import time
+import hashlib
 from datetime import datetime
 from loguru import logger
 import threading
@@ -289,7 +290,6 @@ class PublishGithubNode(BaseNode):
             err = f"未通过主编质量门禁 ({review_res['score']}分): {'; '.join(review_res['critic_issues'])}"
             print(f"❌ 门禁拦截发布：「{clean_title}」— {err}")
             try:
-                import hashlib
                 title_hash = hashlib.md5(clean_title.encode('utf-8')).hexdigest()
                 os.makedirs(os.path.join("data", "previews"), exist_ok=True)
                 with open(os.path.join("data", "previews", f"fail_{title_hash}.html"), "w", encoding="utf-8") as f:
@@ -297,20 +297,23 @@ class PublishGithubNode(BaseNode):
 
                 primary_repo_url = f"https://github.com/{projects[0]['repo']}" if projects else ""
                 session = db_manager.get_session()
-                ah = ArticleHistory(
-                    title=clean_title,
-                    source_type="github",
-                    publish_date=datetime.now().strftime("%Y-%m-%d"),
-                    success_status=False,
-                    media_id=None,
-                    error_log=err,
-                    quality_score=review_res["score"],
-                    source_url=primary_repo_url,
-                    thumb_media_id=thumb_id,
-                    status="REJECTED"
-                )
-                session.add(ah)
-                session.commit()
+                try:
+                    ah = ArticleHistory(
+                        title=clean_title,
+                        source_type="github",
+                        publish_date=datetime.now().strftime("%Y-%m-%d"),
+                        success_status=False,
+                        media_id=None,
+                        error_log=err,
+                        quality_score=review_res["score"],
+                        source_url=primary_repo_url,
+                        thumb_media_id=thumb_id,
+                        status="REJECTED"
+                    )
+                    session.add(ah)
+                    session.commit()
+                finally:
+                    db_manager.remove_session()
             except Exception as e:
                 logger.warning("保存 GitHub 门禁拦截记录异常: {}", e)
             return False
@@ -324,26 +327,37 @@ class PublishGithubNode(BaseNode):
         draft_id = result['media_id']
         print(f"\n{'⭐' * 30}\n  🎉 恭喜！发布成功\n  📄 标题：{clean_title}\n  🆔 草稿：{draft_id}\n{'⭐' * 30}")
         
+        # 保存本地 HTML 预览供 WebUI 人机工作台查看
+        try:
+            os.makedirs(os.path.join("data", "previews"), exist_ok=True)
+            with open(os.path.join("data", "previews", f"{draft_id}.html"), "w", encoding="utf-8") as f:
+                f.write(final_html)
+        except Exception as pe:
+            logger.debug("保存 GitHub 预览 HTML 异常: {}", pe)
+
         repo_names = [p['repo'] for p in projects]
         save_github_history(repo_names)
         
         try:
             primary_repo_url = f"https://github.com/{projects[0]['repo']}" if projects else ""
             session = db_manager.get_session()
-            ah = ArticleHistory(
-                title=clean_title,
-                source_type="github",
-                publish_date=datetime.now().strftime("%Y-%m-%d"),
-                success_status=True,
-                media_id=draft_id,
-                error_log=None,
-                quality_score=review_res["score"],
-                source_url=primary_repo_url,
-                thumb_media_id=thumb_id,
-                status="DRAFT"
-            )
-            session.add(ah)
-            session.commit()
+            try:
+                ah = ArticleHistory(
+                    title=clean_title,
+                    source_type="github",
+                    publish_date=datetime.now().strftime("%Y-%m-%d"),
+                    success_status=True,
+                    media_id=draft_id,
+                    error_log=None,
+                    quality_score=review_res["score"],
+                    source_url=primary_repo_url,
+                    thumb_media_id=thumb_id,
+                    status="DRAFT"
+                )
+                session.add(ah)
+                session.commit()
+            finally:
+                db_manager.remove_session()
         except Exception as e:
             logger.warning("保存 GitHub 发布记录失败: {}", e)
             

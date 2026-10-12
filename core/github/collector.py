@@ -18,19 +18,25 @@ from config import GITHUB_SEARCH_STARS_THRESHOLDS, GITHUB_SEARCH_LANGUAGES
 HTTP_SESSION = build_api_session()
 
 def _load_github_history():
-    session = db_manager.get_session()
-    records = session.query(ArticleHistory.title).filter_by(source_type="github_repo").all()
-    return set(r.title for r in records)
+    try:
+        session = db_manager.get_session()
+        records = session.query(ArticleHistory.title).filter_by(source_type="github_repo").all()
+        return set(r.title for r in records)
+    finally:
+        db_manager.remove_session()
 
 def save_github_history(new_repos):
-    session = db_manager.get_session()
-    today = datetime.now().strftime("%Y-%m-%d")
-    for repo in new_repos:
-        existing = session.query(ArticleHistory).filter_by(title=repo, source_type="github_repo").first()
-        if not existing:
-            ah = ArticleHistory(title=repo, source_type="github_repo", publish_date=today, success_status=True)
-            session.add(ah)
-    session.commit()
+    try:
+        session = db_manager.get_session()
+        today = datetime.now().strftime("%Y-%m-%d")
+        for repo in new_repos:
+            existing = session.query(ArticleHistory).filter_by(title=repo, source_type="github_repo").first()
+            if not existing:
+                ah = ArticleHistory(title=repo, source_type="github_repo", publish_date=today, success_status=True)
+                session.add(ah)
+        session.commit()
+    finally:
+        db_manager.remove_session()
 
 # ---- 优先匹配：架构图、流程图、演示截图等 ----
 ARCHITECTURE_KEYWORDS = [

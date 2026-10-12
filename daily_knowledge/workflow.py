@@ -114,14 +114,25 @@ def run_daily_knowledge_workflow(publisher):
         ignore_word_count=True,
     )
 
+    from core.shared.llm import validate_title
+    clean_title, _ = validate_title(topic_title)
+
     # 4. 发布到微信草稿箱
     success, result = publisher.publish_and_notify(
-        topic_title, final_html, thumb_id, digest_text
+        clean_title, final_html, thumb_id, digest_text
     )
 
     if success:
         draft_id = result["media_id"]
-        print(f"\n✅ 「{topic_title}」发布成功 → {draft_id}")
+        print(f"\n✅ 「{clean_title}」发布成功 → {draft_id}")
+
+        # 保存本地 HTML 预览供 WebUI 查看
+        try:
+            os.makedirs(os.path.join("data", "previews"), exist_ok=True)
+            with open(os.path.join("data", "previews", f"{draft_id}.html"), "w", encoding="utf-8") as f:
+                f.write(final_html)
+        except Exception as pe:
+            logger.debug("保存每日小知识预览 HTML 异常: {}", pe)
 
         # 发布成功后，记录该概念到本地数据库防止后续重复
         try:
@@ -134,7 +145,7 @@ def run_daily_knowledge_workflow(publisher):
         # 将生成的原始 MD 备份到共享的 markdown 文件夹中
         try:
             os.makedirs(os.path.join("data", "markdown"), exist_ok=True)
-            safe_title = re.sub(r'[^\w\u4e00-\u9fff\-]', '_', topic_title)
+            safe_title = re.sub(r'[^\w\u4e00-\u9fff\-]', '_', clean_title)
             md_filepath = os.path.join("data", "markdown", f"daily_{safe_title}.md")
             with open(md_filepath, "w", encoding="utf-8") as f:
                 f.write(article_text)
@@ -146,17 +157,21 @@ def run_daily_knowledge_workflow(publisher):
             from core.db.manager import db_manager
             from core.db.models import ArticleHistory
             session = db_manager.get_session()
-            ah = ArticleHistory(
-                title=topic_title,
-                source_type="daily_knowledge",
-                publish_date=datetime.now().strftime("%Y-%m-%d"),
-                success_status=True,
-                is_published=False,
-                media_id=draft_id
-            )
-            session.add(ah)
-            session.commit()
-            db_manager.remove_session()
+            try:
+                ah = ArticleHistory(
+                    title=clean_title,
+                    source_type="daily_knowledge",
+                    publish_date=datetime.now().strftime("%Y-%m-%d"),
+                    success_status=True,
+                    is_published=False,
+                    media_id=draft_id,
+                    thumb_media_id=thumb_id,
+                    status="DRAFT"
+                )
+                session.add(ah)
+                session.commit()
+            finally:
+                db_manager.remove_session()
         except Exception as db_err:
             logger.warning("写入 SQLite 历史记录失败: {}", db_err)
             

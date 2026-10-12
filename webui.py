@@ -524,9 +524,9 @@ def review_approve():
                 thumb_media_id = getattr(record, 'thumb_media_id', None) or ""
                 if not thumb_media_id:
                     cover_candidates = [
-                        os.path.abspath(os.path.join("assets", "default_cover.jpg")),
                         os.path.abspath(os.path.join("assets", "default_aikepu_cover.png")),
-                        os.path.abspath(os.path.join("assets", "github_cover.jpg")),
+                        os.path.abspath(os.path.join("assets", "default_daily_cover.png")),
+                        os.path.abspath(os.path.join("static", "images", "github_fixed_cover.png")),
                     ]
                     for c_path in cover_candidates:
                         if os.path.exists(c_path):

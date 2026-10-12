@@ -6,6 +6,7 @@
   阶段3: 串行生成 + 上文衔接
 ============================================================
 """
+import os
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed

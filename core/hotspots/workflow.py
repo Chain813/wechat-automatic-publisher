@@ -1,3 +1,5 @@
+import os
+import hashlib
 from datetime import datetime
 from loguru import logger
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -54,7 +56,6 @@ def _save_publish_result(topic, success, draft_id=None, error=None, quality_scor
         # 1. 保存本地 HTML 预览供 WebUI 人机工作台查看或审批
         if preview_html:
             try:
-                import hashlib
                 title_hash = hashlib.md5(clean_title.encode('utf-8')).hexdigest()
                 os.makedirs(os.path.join("data", "previews"), exist_ok=True)
                 preview_filename = f"{draft_id}.html" if draft_id else f"fail_{title_hash}.html"
@@ -293,7 +294,7 @@ class ParallelPublishNode(BaseNode):
                 err = f"未通过主编质量门禁 ({review_res['score']}分): {'; '.join(review_res['critic_issues'])}"
                 print(f"❌ 门禁拦截发布：「{clean_title}」— {err}")
                 _save_publish_result(
-                    clean_title,
+                    topic,
                     success=False,
                     error=err,
                     quality_score=review_res["score"],
@@ -310,7 +311,7 @@ class ParallelPublishNode(BaseNode):
                 draft_id = result["media_id"]
                 print(f"\n✅ 「{clean_title}」发布成功 → {draft_id}")
                 _save_publish_result(
-                    clean_title,
+                    topic,
                     success=True,
                     draft_id=draft_id,
                     quality_score=review_res["score"],
@@ -325,7 +326,7 @@ class ParallelPublishNode(BaseNode):
                 err = result.get("errmsg", "未知错误")
                 print(f"❌ 「{clean_title}」发布失败：{err}")
                 _save_publish_result(
-                    clean_title,
+                    topic,
                     success=False,
                     error=err,
                     quality_score=review_res["score"],

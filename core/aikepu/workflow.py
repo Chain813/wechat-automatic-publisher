@@ -4,6 +4,9 @@
   技能树选题 → 教育风文章生成 → 图表渲染 → 微信草稿箱
 ============================================================
 """
+import os
+import hashlib
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from loguru import logger
 
@@ -120,8 +123,6 @@ def _publish_single_topic(topic_info, publisher):
             err = f"未通过主编质量门禁 ({review_res['score']}分): {'; '.join(review_res['critic_issues'])}"
             print(f"❌ 门禁拦截发布：「{clean_title}」— {err}")
             try:
-                import hashlib
-                import os
                 title_hash = hashlib.md5(clean_title.encode('utf-8')).hexdigest()
                 os.makedirs(os.path.join("data", "previews"), exist_ok=True)
                 with open(os.path.join("data", "previews", f"fail_{title_hash}.html"), "w", encoding="utf-8") as f:
@@ -130,21 +131,23 @@ def _publish_single_topic(topic_info, publisher):
                 from core.db.manager import db_manager
                 from core.db.models import ArticleHistory
                 session = db_manager.get_session()
-                ah = ArticleHistory(
-                    title=clean_title,
-                    source_type="aikepu",
-                    publish_date=datetime.now().strftime("%Y-%m-%d"),
-                    success_status=False,
-                    media_id=None,
-                    error_log=err,
-                    quality_score=review_res["score"],
-                    source_url=f"aikepu://node/{node_id}",
-                    thumb_media_id=thumb_id,
-                    status="REJECTED"
-                )
-                session.add(ah)
-                session.commit()
-                db_manager.remove_session()
+                try:
+                    ah = ArticleHistory(
+                        title=clean_title,
+                        source_type="aikepu",
+                        publish_date=datetime.now().strftime("%Y-%m-%d"),
+                        success_status=False,
+                        media_id=None,
+                        error_log=err,
+                        quality_score=review_res["score"],
+                        source_url=f"aikepu://node/{node_id}",
+                        thumb_media_id=thumb_id,
+                        status="REJECTED"
+                    )
+                    session.add(ah)
+                    session.commit()
+                finally:
+                    db_manager.remove_session()
             except Exception as e:
                 logger.warning("保存 AI科普 门禁拦截记录异常: {}", e)
 
@@ -156,10 +159,17 @@ def _publish_single_topic(topic_info, publisher):
             clean_title, final_html, thumb_id, digest_text
         )
 
-        from datetime import datetime
         if success:
             draft_id = result["media_id"]
             print(f"\n✅ 「{clean_title}」发布成功 → {draft_id}")
+
+            # 保存本地 HTML 预览供 WebUI 人机工作台查看
+            try:
+                os.makedirs(os.path.join("data", "previews"), exist_ok=True)
+                with open(os.path.join("data", "previews", f"{draft_id}.html"), "w", encoding="utf-8") as f:
+                    f.write(final_html)
+            except Exception as pe:
+                logger.debug("保存 AI科普 预览 HTML 异常: {}", pe)
 
             # 仅在发布成功后保存原始 Markdown 文档到本地
             try:
@@ -179,21 +189,23 @@ def _publish_single_topic(topic_info, publisher):
                 from core.db.manager import db_manager
                 from core.db.models import ArticleHistory
                 session = db_manager.get_session()
-                ah = ArticleHistory(
-                    title=clean_title,
-                    source_type="aikepu",
-                    publish_date=datetime.now().strftime("%Y-%m-%d"),
-                    success_status=True,
-                    is_published=False,
-                    media_id=draft_id,
-                    quality_score=review_res["score"],
-                    source_url=f"aikepu://node/{node_id}",
-                    thumb_media_id=thumb_id,
-                    status="DRAFT"
-                )
-                session.add(ah)
-                session.commit()
-                db_manager.remove_session()
+                try:
+                    ah = ArticleHistory(
+                        title=clean_title,
+                        source_type="aikepu",
+                        publish_date=datetime.now().strftime("%Y-%m-%d"),
+                        success_status=True,
+                        is_published=False,
+                        media_id=draft_id,
+                        quality_score=review_res["score"],
+                        source_url=f"aikepu://node/{node_id}",
+                        thumb_media_id=thumb_id,
+                        status="DRAFT"
+                    )
+                    session.add(ah)
+                    session.commit()
+                finally:
+                    db_manager.remove_session()
             except Exception as db_err:
                 logger.warning("写入 SQLite 历史失败: {}", db_err)
 
