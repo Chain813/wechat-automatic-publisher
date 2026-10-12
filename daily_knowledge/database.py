@@ -58,7 +58,7 @@ def get_recent_concepts(limit: int = 50) -> list[str]:
             .limit(limit).all()
         return [c[0] for c in concepts]
     finally:
-        session.close()
+        db.remove_session()
 
 def record_concept(concept_name: str, domain: str = "") -> None:
     """记录新成功生成的概念"""
@@ -74,4 +74,4 @@ def record_concept(concept_name: str, domain: str = "") -> None:
         session.rollback()
         raise e
     finally:
-        session.close()
+        db.remove_session()

@@ -78,7 +78,14 @@ LANG_DIAGRAM_MAP = {
 
 
 def _get_github_client():
-    """获取 PyGithub 客户端（匿名模式，无需 Token；GitHub API 国内可直连）"""
+    """获取 PyGithub 客户端（优先读取环境变量 GITHUB_TOKEN，未配置则匿名模式）"""
+    token = os.getenv("GITHUB_TOKEN", "").strip() or os.getenv("GITHUB_API_KEY", "").strip()
+    if token:
+        try:
+            from github import Auth
+            return Github(auth=Auth.Token(token))
+        except Exception:
+            return Github(token)
     return Github()
 
 
@@ -389,6 +396,11 @@ def fetch_one_worthy_project():
         # 多策略提取 Demo/主页 URL
         homepage_url = _detect_demo_url(best_repo, chinese_readme_excerpt, readme_excerpt)
 
+        try:
+            repo_topics = best_repo.get_topics() if hasattr(best_repo, "get_topics") else getattr(best_repo, "topics", [])
+        except Exception:
+            repo_topics = getattr(best_repo, "topics", []) or []
+
         return [{
             "repo": best_repo.full_name,
             "desc": best_repo.description or "暂无描述",
@@ -398,7 +410,7 @@ def fetch_one_worthy_project():
             "chinese_readme_excerpt": chinese_readme_excerpt,
             "tree_image_path": tree_image_path,
             "stars": best_repo.stargazers_count,
-            "topics": best_repo.get_topics(),
+            "topics": repo_topics,
             "homepage": homepage_url,
             "other_images": other_images,
             "readme_file_path": readme_file_path,

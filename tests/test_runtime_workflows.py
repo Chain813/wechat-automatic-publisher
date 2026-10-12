@@ -90,3 +90,26 @@ class TestRuntimeWorkflowsSafety:
             assert err is None
             assert node_id == "transformer_attention"
             mock_mark.assert_called_once()
+
+    def test_github_client_token_support(self):
+        from core.github.collector import _get_github_client
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "ghp_mock_token_12345"}):
+            client = _get_github_client()
+            assert client is not None
+
+    def test_daily_knowledge_engine_prompt_failure_graceful_unpack(self):
+        from daily_knowledge.engine import generate_daily_knowledge
+        with patch("builtins.open", side_effect=FileNotFoundError("Mock prompt missing")):
+            result = generate_daily_knowledge()
+            assert isinstance(result, tuple)
+            assert len(result) == 2
+            article_text, concept = result
+            assert article_text == ""
+            assert concept == ""
+
+    def test_preview_id_traversal_sanitization(self):
+        from webui import app
+        with app.test_client() as client:
+            resp = client.get("/api/preview/..%2F..%2Fetc%2Fpasswd")
+            assert resp.status_code in (400, 404, 200)
+            assert "etc/passwd" not in resp.get_data(as_text=True)

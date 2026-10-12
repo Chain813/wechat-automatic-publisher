@@ -26,7 +26,7 @@ def generate_daily_knowledge(domain: str = "人工智能与深度学习", max_re
             system_prompt = f.read()
     except Exception as e:
         logger.error(f"无法读取系统 Prompt: {e}")
-        return ""
+        return "", ""
         
     for attempt in range(max_retries):
         logger.info(f"正在生成每日小知识 (尝试 {attempt+1}/{max_retries})，领域: {domain}")
