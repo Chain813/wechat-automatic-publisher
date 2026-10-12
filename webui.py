@@ -856,8 +856,13 @@ def delete_history():
 
 @app.route('/api/preview/<preview_id>', methods=['GET'])
 def preview_draft(preview_id):
+    # 安全校验：仅允许合法字符，杜绝目录穿越漏洞
+    safe_preview_id = re.sub(r'[^a-zA-Z0-9_\-]', '', preview_id)
+    if not safe_preview_id:
+        return "Invalid preview_id", 400
+
     # 1. 尝试从本地 previews 文件夹读取
-    local_path = os.path.join("data", "previews", f"{preview_id}.html")
+    local_path = os.path.join("data", "previews", f"{safe_preview_id}.html")
     if os.path.exists(local_path):
         try:
             with open(local_path, "r", encoding="utf-8") as f:

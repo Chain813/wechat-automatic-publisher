@@ -406,9 +406,11 @@ class WeChatPublisher:
             from core.db.manager import db_manager
             from core.db.models import ArticleHistory
             session = db_manager.get_session()
-            records = session.query(ArticleHistory).filter(ArticleHistory.success_status.is_(True)).all()
-            db_titles = [r.title for r in records if r.title]
-            db_manager.remove_session()
+            try:
+                records = session.query(ArticleHistory).filter(ArticleHistory.success_status.is_(True)).all()
+                db_titles = [r.title for r in records if r.title]
+            finally:
+                db_manager.remove_session()
         except Exception as e:
             logger.warning("从本地数据库获取历史发布标题失败: {}", e)
             
