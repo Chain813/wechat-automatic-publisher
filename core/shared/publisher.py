@@ -508,6 +508,22 @@ class WeChatPublisher:
         if not digest:
             digest = title[:60]
 
+        # 封面素材缺失自愈保护：防止直接向微信接口提交空 thumb_media_id 触发 40007 错误
+        if not thumb_media_id:
+            logger.warning("  ⚠️ 草稿发布缺少 thumb_media_id，尝试自动上传系统预设封面作为自愈兜底...")
+            fallback_covers = [
+                os.path.abspath(os.path.join("assets", "default_aikepu_cover.png")),
+                os.path.abspath(os.path.join("assets", "default_daily_cover.png")),
+                os.path.abspath(os.path.join("static", "images", "github_fixed_cover.png")),
+            ]
+            for fc in fallback_covers:
+                if os.path.exists(fc):
+                    uploaded = self.upload_image(fc)
+                    if uploaded:
+                        thumb_media_id = uploaded
+                        logger.info("  ✅ 成功自动补全兜底封面 media_id: {}", thumb_media_id)
+                        break
+
         data = {
             "articles": [{
                 "title": title,

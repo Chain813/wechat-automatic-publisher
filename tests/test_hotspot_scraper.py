@@ -87,9 +87,13 @@ class TestArticleScraper:
 class TestPluginHotspotItemOutput:
     @patch("core.plugins.hotspots_sources.HTTP_SESSION.get")
     def test_ithome_rss_returns_hotspot_items(self, mock_get):
+        from email.utils import format_datetime
+        from datetime import datetime, timezone
+        now_gmt = format_datetime(datetime.now(timezone.utc))
         mock_resp = MagicMock()
         mock_resp.status_code = 200
-        mock_resp.content = """<?xml version="1.0" encoding="utf-8"?>
+        mock_resp.text = "<html></html>"
+        mock_resp.content = f"""<?xml version="1.0" encoding="utf-8"?>
         <rss version="2.0">
             <channel>
                 <title>ITHome</title>
@@ -97,7 +101,7 @@ class TestPluginHotspotItemOutput:
                     <title>2026年最新AI芯片架构发布</title>
                     <link>https://www.ithome.com/0/123/456.htm</link>
                     <description>全新芯片性能提升300%</description>
-                    <pubDate>Mon, 08 Oct 2026 10:00:00 GMT</pubDate>
+                    <pubDate>{now_gmt}</pubDate>
                 </item>
             </channel>
         </rss>""".encode("utf-8")
@@ -115,9 +119,13 @@ class TestPluginHotspotItemOutput:
 
     @patch("core.plugins.hotspots_sources.HTTP_SESSION.get")
     def test_36kr_rss_returns_hotspot_items(self, mock_get):
+        from email.utils import format_datetime
+        from datetime import timezone, datetime
+        now_gmt = format_datetime(datetime.now(timezone.utc))
         mock_resp = MagicMock()
         mock_resp.status_code = 200
-        mock_resp.content = """<?xml version="1.0" encoding="utf-8"?>
+        mock_resp.text = "<html></html>"
+        mock_resp.content = f"""<?xml version="1.0" encoding="utf-8"?>
         <rss version="2.0">
             <channel>
                 <title>36Kr</title>
@@ -125,7 +133,7 @@ class TestPluginHotspotItemOutput:
                     <title>大模型落地应用最新进展</title>
                     <link>https://36kr.com/p/123456</link>
                     <description>企业级智能体迎来爆发</description>
-                    <pubDate>Mon, 08 Oct 2026 10:00:00 GMT</pubDate>
+                    <pubDate>{now_gmt}</pubDate>
                 </item>
             </channel>
         </rss>""".encode("utf-8")

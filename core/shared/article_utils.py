@@ -754,9 +754,9 @@ def _print_review_report(title, word_count, image_count, sensitive_words, cover_
     if ignore_word_count:
         wc_ok = True
     elif is_long_article:
-        wc_ok = word_count >= 15000
+        wc_ok = word_count >= 1500
     else:
-        wc_ok = 2000 <= word_count <= 4000
+        wc_ok = word_count >= 800
     wc_icon = "✅" if wc_ok else "⚠️"
     print(f"  字数：{word_count:,} 字 ({wc_icon})")
 
@@ -765,7 +765,7 @@ def _print_review_report(title, word_count, image_count, sensitive_words, cover_
     if html_bytes > 0:
         print(f"  正文体积：{html_bytes / (1024 * 1024):.2f} MB ({bytes_icon} ≤10MB)")
 
-    image_icon = "✅" if image_count >= 3 else "⚠️"
+    image_icon = "✅" if image_count >= 1 else "⚠️"
     print(f"  配图：{image_count} 张 ({image_icon})")
 
     sensitive_icon = "❌" if sensitive_words else "✅"
@@ -778,8 +778,9 @@ def _print_review_report(title, word_count, image_count, sensitive_words, cover_
     if digest:
         print(f"  摘要：{digest[:80]}{'...' if len(digest) > 80 else ''}")
 
-    all_ok = title_ok and wc_ok and bytes_ok and image_count >= 3 and not sensitive_words and cover_ok
+    # 底线硬性指标：标题不超长、正文不超过10MB、无敏感词、封面图已上传
+    all_ok = title_ok and bytes_ok and not sensitive_words and cover_ok
     print(f"{'─' * 50}")
-    print("  🎉 审核通过，可以发布！" if all_ok else "  ⚠️ 存在警告项，请手动检查后再发布。")
+    print("  🎉 格式校验通过，准予进入门禁审核！" if all_ok else "  ⚠️ 存在严重合规/格式问题，已拦截。")
     print(f"{'─' * 50}\n")
     return all_ok

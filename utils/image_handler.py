@@ -27,7 +27,15 @@ from utils.key_pool import ApiKeyPool, RateLimiter
 # ---- 微信图片规格 ----
 WECHAT_COVER_SIZE = (WECHAT_COVER_WIDTH, WECHAT_COVER_HEIGHT)
 WECHAT_BODY_SIZE = (WECHAT_BODY_WIDTH, WECHAT_BODY_HEIGHT)
-LOCAL_FALLBACK_IMAGE = "assets/default_cover.jpg"
+LOCAL_FALLBACK_IMAGE = (
+    os.path.join("assets", "default_aikepu_cover.png")
+    if os.path.exists(os.path.join("assets", "default_aikepu_cover.png"))
+    else (
+        os.path.join("assets", "default_daily_cover.png")
+        if os.path.exists(os.path.join("assets", "default_daily_cover.png"))
+        else os.path.join("static", "images", "github_fixed_cover.png")
+    )
+)
 
 # ---- 线程安全的哈希去重集合 ----
 _downloaded_hashes = set()
@@ -1224,8 +1232,14 @@ def download_cover_image(keyword, save_dir="assets"):
         logger.error("  [兜底封面] 生成兜底封面异常: {}", e)
 
     # 4. 最基础的静态图片兜底 (若上面均失败了)
-    if os.path.exists(LOCAL_FALLBACK_IMAGE):
-        return LOCAL_FALLBACK_IMAGE
+    for fallback in [
+        LOCAL_FALLBACK_IMAGE,
+        os.path.join("assets", "default_aikepu_cover.png"),
+        os.path.join("assets", "default_daily_cover.png"),
+        os.path.join("static", "images", "github_fixed_cover.png"),
+    ]:
+        if fallback and os.path.exists(fallback):
+            return os.path.abspath(fallback)
 
     return None
 
