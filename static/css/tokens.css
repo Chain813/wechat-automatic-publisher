@@ -1,0 +1,155 @@
+/* AutoWeChat Linear Modern Light Design Tokens */
+:root {
+  /* Surfaces & Backgrounds */
+  --bg-base: #F8F9FB;
+  --bg-subtle: #F1F3F7;
+  --bg-elevated: #FFFFFF;
+  --surface-glass: rgba(255, 255, 255, 0.86);
+  --surface-glass-hud: rgba(255, 255, 255, 0.94);
+  --surface-sunken: #F1F3F7;
+
+  /* Typography Scale */
+  --text-primary: #0C0D0E;
+  --text-secondary: #5E6470;
+  --text-muted: #8C919E;
+  --text-inverse: #FFFFFF;
+
+  /* Brand & Accent (Linear Indigo) */
+  --accent: #4F5BD5;
+  --accent-hover: #434EB8;
+  --accent-active: #3842A6;
+  --accent-subtle: rgba(79, 91, 213, 0.08);
+  --accent-border: rgba(79, 91, 213, 0.25);
+
+  /* Border System */
+  --border-color: rgba(0, 0, 0, 0.06);
+  --border-subtle: rgba(0, 0, 0, 0.04);
+  --border-strong: rgba(0, 0, 0, 0.12);
+
+  /* Status Colors */
+  --status-success: #10B981;
+  --status-success-bg: rgba(16, 185, 129, 0.10);
+  --status-warning: #F59E0B;
+  --status-warning-bg: rgba(245, 158, 11, 0.12);
+  --status-danger: #EF4444;
+  --status-danger-bg: rgba(239, 68, 68, 0.10);
+
+  /* Tactile Shadows */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.03), 0 4px 16px rgba(15, 23, 42, 0.04), inset 0 1px 0 0 rgba(255, 255, 255, 1);
+  --shadow-card-hover: 0 2px 4px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(15, 23, 42, 0.08), inset 0 1px 0 0 rgba(255, 255, 255, 1);
+  --shadow-btn-primary: 0 1px 2px rgba(0, 0, 0, 0.05), 0 4px 12px rgba(79, 91, 213, 0.30), inset 0 1px 0 0 rgba(255, 255, 255, 0.25);
+  --shadow-dropdown: 0 10px 30px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05);
+  --shadow-modal: 0 20px 40px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.05);
+  --shadow-hud: -8px 0 32px rgba(15, 23, 42, 0.08);
+
+  /* Radii */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 9px;
+  --radius-lg: 12px;
+  --radius-pill: 9999px;
+
+  /* Typography Families */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: 'Cascadia Code', 'Fira Code', 'Menlo', 'Consolas', monospace;
+
+  /* Motion & Easing */
+  --ease-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 160ms;
+  --duration-normal: 220ms;
+}
+
+/* Global Reset & Base */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  background-color: var(--bg-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* 4-Layer Ambient Canvas */
+.ambient-canvas {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 50% -10%, #FFFFFF 0%, #F8F9FB 55%, #EEF0F5 100%);
+}
+
+.ambient-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  pointer-events: none;
+  will-change: transform;
+}
+
+.ambient-blob-1 {
+  top: -100px;
+  right: 10%;
+  width: 480px;
+  height: 480px;
+  background: rgba(79, 91, 213, 0.06);
+}
+
+.ambient-blob-2 {
+  top: 25%;
+  left: -80px;
+  width: 520px;
+  height: 520px;
+  background: rgba(168, 85, 247, 0.05);
+}
+
+.ambient-blob-3 {
+  bottom: 5%;
+  right: 20%;
+  width: 440px;
+  height: 440px;
+  background: rgba(56, 189, 248, 0.05);
+}
+
+.ambient-grid {
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(rgba(0, 0, 0, 0.025) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(0, 0, 0, 0.025) 1px, transparent 1px);
+  background-size: 64px 64px;
+}
+
+.ambient-noise {
+  position: absolute;
+  inset: 0;
+  opacity: 0.012;
+  background-image: radial-gradient(#000000 1px, transparent 1px);
+  background-size: 4px 4px;
+}
+
+/* Typography Utility Classes */
+.text-ink-gradient {
+  background: linear-gradient(180deg, #0C0D0E 0%, #4B5563 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum";
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

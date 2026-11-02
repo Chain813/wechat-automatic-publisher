@@ -33,3 +33,7 @@ assets/manual_images/
 # Dev artifacts
 scratch/
 .codegraph/
+
+deploy_pack/
+# Superpowers brainstorm & plan scratch directories
+.superpowers/

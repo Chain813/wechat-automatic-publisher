@@ -71,7 +71,7 @@ def _check_auth():
     if token != WEBUI_TOKEN:
         # 如果是浏览器请求 / 且无 token，显示登录页
         if request.path == "/" and request.method == "GET":
-            return render_template("login.html") if os.path.exists("templates/login.html") else ("🔒 AutoWeChat Cloud — 需要 token 认证", 401)
+            return render_template("login.html") if os.path.exists("templates/login.html") else ("[Security] AutoWeChat Cloud — 需要 token 认证", 401)
         return jsonify({"status": "error", "message": "Unauthorized"}), 401
 
     return None
@@ -131,7 +131,7 @@ def run_workflow_thread(task_type="hotspots"):
         run_main(task_type=task_type)
     except WorkflowCancelled:
         try:
-            log_queue.put_nowait("SYSTEM | ⛔ 任务已被用户中断。\n")
+            log_queue.put_nowait("SYSTEM | [ABORT] 任务已被用户中断。\n")
         except queue.Full:
             logger.warning("日志队列已满，丢弃消息")
     except Exception as e:
@@ -276,7 +276,7 @@ def pause_process():
     pause_event.clear()  # 设为暂停状态
     ProcessState.set_paused(True)
     try:
-        log_queue.put_nowait("SYSTEM | ⏸️ User requested pause...\n")
+        log_queue.put_nowait("SYSTEM | [PAUSE] User requested pause...\n")
     except queue.Full:
         logger.warning("日志队列已满，丢弃消息")
     return jsonify({"status": "success", "message": "Paused"})
@@ -290,7 +290,7 @@ def resume_process():
     pause_event.set()  # 恢复运行
     ProcessState.set_paused(False)
     try:
-        log_queue.put_nowait("SYSTEM | ▶️ User requested resume...\n")
+        log_queue.put_nowait("SYSTEM | [RESUME] User requested resume...\n")
     except queue.Full:
         logger.warning("日志队列已满，丢弃消息")
     return jsonify({"status": "success", "message": "Resumed"})
@@ -836,7 +836,7 @@ def delete_history():
                                 md_file_path = os.path.join(markdown_dir, fname)
                                 if os.path.exists(md_file_path):
                                     os.remove(md_file_path)
-                                    logger.info("  📄 成功同步删除 data/markdown 关联文档: {}", fname)
+                                    logger.info("  [File] 成功同步删除 data/markdown 关联文档: {}", fname)
             except Exception as md_del_err:
                 logger.warning("删除关联 Markdown 文件异常: {}", md_del_err)
             
@@ -992,7 +992,7 @@ def preview_draft(preview_id):
     </head>
     <body>
         <div class="card">
-            <div class="icon">📰</div>
+            <div class="icon">[Draft]</div>
             <h3>微信远端草稿提示</h3>
             <p>该文章记录创建时间较早，或对应微信草稿已被发布/删除/转移。</p>
             <p>系统出于安全保护，未在本地留下额外静态缓存。</p>
@@ -1202,7 +1202,7 @@ if __name__ == '__main__':
     if CLOUD_MODE:
         host = "0.0.0.0"
         port = int(os.getenv("PORT", "5000"))
-        print("☁️  AutoWeChat Cloud Mode")
+        print("[Cloud]  AutoWeChat Cloud Mode")
         print(f"   Listening on: http://0.0.0.0:{port}")
         if WEBUI_TOKEN:
             print("   Token auth: enabled")
