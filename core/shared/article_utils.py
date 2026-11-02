@@ -273,8 +273,8 @@ def _build_callout_card(callout_type: str, icon: str, title: str, body: str) -> 
 
     return (
         f'<section style="margin: 22px 0; padding: 16px 20px; background-color: {bg}; '
-        f'border: 1px solid {border_outer}; border-left: 4px solid {b_color}; border-radius: 8px; '
-        f'font-size: 15px; line-height: 1.75; color: #334155; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">'
+        f'border: 1px solid {border_outer}; border-left: 4px solid {b_color}; border-radius: 10px; '
+        f'font-size: 15px; line-height: 1.75; color: #334155; box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px rgba(15,23,42,0.04);">'
         f'<div style="font-size: 14.5px; color: {b_color}; font-weight: bold; margin-bottom: 8px; '
         f'display: flex; align-items: center; gap: 6px;">'
         f'<span>{use_icon}</span> <span>{use_title}</span>'
@@ -321,6 +321,59 @@ def _render_custom_callouts(text: str) -> str:
         return _build_callout_card(callout_type, icon, title, body)
 
     return re.sub(r'<blockquote[^>]*>(.*?)</blockquote>', _replace_callout, text, flags=re.DOTALL)
+
+
+def _format_markdown_tables(html_body: str) -> str:
+    """为 markdown 生成的 <table> 注入微信兼容的 Linear Modern Light 行内样式与横向滚动保护"""
+    if "<table" not in html_body:
+        return html_body
+
+    table_style = (
+        "border-collapse: collapse; width: 100%; margin: 0; font-size: 14px; "
+        "border: 1px solid #E2E8F0; border-radius: 8px; overflow: hidden; "
+        "background-color: #FFFFFF;"
+    )
+    th_base_style = (
+        "background-color: #F8F9FB; color: #0C0D0E; font-weight: 600; "
+        "padding: 10px 14px; border-bottom: 1px solid #E2E8F0;"
+    )
+    td_base_style = (
+        "padding: 10px 14px; border-bottom: 1px solid #F1F3F7; color: #334155; "
+        "line-height: 1.6;"
+    )
+
+    def _merge_style(tag_attrs: str, new_style: str) -> str:
+        m = re.search(r'style="([^"]*)"', tag_attrs)
+        if m:
+            existing = m.group(1).strip()
+            if existing and not existing.endswith(';'):
+                existing += ';'
+            merged = f"{existing} {new_style}".strip()
+            return tag_attrs[:m.start()] + f'style="{merged}"' + tag_attrs[m.end():]
+        else:
+            return f'{tag_attrs} style="{new_style}"'
+
+    def _replace_table(match):
+        table_content = match.group(0)
+        table_content = re.sub(
+            r'<th\b([^>]*)>',
+            lambda m: f"<th{_merge_style(m.group(1), th_base_style)}>",
+            table_content
+        )
+        table_content = re.sub(
+            r'<td\b([^>]*)>',
+            lambda m: f"<td{_merge_style(m.group(1), td_base_style)}>",
+            table_content
+        )
+        table_content = re.sub(
+            r'<table\b([^>]*)>',
+            lambda m: f"<table{_merge_style(m.group(1), table_style)}>",
+            table_content,
+            count=1
+        )
+        return f'<section style="width: 100%; margin: 22px 0; overflow-x: auto; box-sizing: border-box;">{table_content}</section>'
+
+    return re.sub(r'<table\b[^>]*>.*?</table>', _replace_table, html_body, flags=re.DOTALL)
 
 
 def process_article_content(article_text, publisher, use_ai_first=False, skip_photo_images=False, generate_diagrams=False):
@@ -559,13 +612,13 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
 
             return (
                 '<section style="margin: 24px 0; padding: 18px 20px; background-color: #f8fafc; '
-                'border: 1px solid #e2e8f0; border-left: 4px solid #2563eb; border-radius: 8px; '
-                'box-shadow: 0 2px 8px rgba(0,0,0,0.04);">'
+                'border: 1px solid #e2e8f0; border-left: 4px solid #2563eb; border-radius: 10px; '
+                'box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px rgba(15,23,42,0.04);">'
                 f'<div style="font-size: 14.5px; color: #2563eb; font-weight: bold; margin-bottom: 8px; '
                 'display: flex; align-items: center; gap: 6px;">'
                 f'<span>{title}</span>'
                 '</div>'
-                f'<div style="font-size: 14px; color: #475569; line-height: 1.75; text-align: justify;">{desc}</div>'
+                f'<div style="font-size: 14px; color: #334155; line-height: 1.75; text-align: justify;">{desc}</div>'
                 '</section>'
             )
 
@@ -581,6 +634,9 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
     # 渲染微光自定义引用卡片（避坑指南、核心洞察、行动清单）
     html_body = _render_custom_callouts(html_body)
 
+    # 统一渲染 Markdown 表格行内样式与移动端防溢出保护
+    html_body = _format_markdown_tables(html_body)
+
     # 统一增加段落缩进和间距 (统一设计系统：高清深灰文本)
     html_body = html_body.replace(
         '<p>', 
@@ -590,11 +646,11 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
     html_body = re.sub(r'<p style="[^"]*">\s*(?:&nbsp;|<br\s*/?>)?\s*</p>\s*', '', html_body)
     html_body = re.sub(r'<p[^>]*>\s*(?:&nbsp;|<br\s*/?>)?\s*</p>\s*', '', html_body)
     
-    # 统一引用块样式 (科技蓝轻量阴影卡片)，并防止单次引用超过 220 字（微信单次引用不能超过 300 字限制）
+    # 统一引用块样式 (Linear Light 浅灰微光卡片)，并防止单次引用超过 220 字（微信单次引用不能超过 300 字限制）
     bq_style = (
-        'margin: 22px 0; padding: 16px 20px; border-left: 4px solid #2563eb; '
-        'background-color: #f8fafc; color: #475569; border-radius: 8px; font-size: 15px; '
-        'line-height: 1.75; border: 1px solid #e2e8f0; border-left: 4px solid #2563eb;'
+        'margin: 22px 0; padding: 16px 20px; border: 1px solid rgba(0,0,0,0.06); '
+        'border-left: 4px solid #4F5BD5; background-color: #F8F9FB; color: #5E6470; '
+        'border-radius: 8px; font-size: 15px; line-height: 1.75; box-shadow: 0 1px 2px rgba(0,0,0,0.02);'
     )
     def _format_blockquote(match):
         content = match.group(1).strip()
@@ -627,24 +683,28 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
         flags=re.DOTALL
     )
 
-    # 统一 H2 标题样式 (左侧蓝条 + 渐变微光底色)
+    # 统一 H2 标题样式 (Linear Modern Light: Indigo 左侧条 + 渐变微光底色 + 墨黑字体)
     html_body = re.sub(
         r'<h2>(.*?)</h2>',
-        r'<h2 style="margin-top: 38px; margin-bottom: 22px; padding: 8px 14px; border-left: 5px solid #2563eb; background: linear-gradient(90deg, rgba(37,99,235,0.08) 0%, rgba(255,255,255,0) 100%); border-radius: 4px; font-size: 21px; color: #1e293b; font-weight: bold;">\1</h2>',
+        r'<h2 style="margin-top: 38px; margin-bottom: 22px; padding: 10px 16px; border-left: 4px solid #4F5BD5; background: linear-gradient(90deg, rgba(79,91,213,0.08) 0%, rgba(248,249,251,0) 100%); border-radius: 6px; font-size: 20px; color: #0C0D0E; font-weight: 700; letter-spacing: -0.01em;">\1</h2>',
         html_body
     )
 
-    # 统一 H3 标题样式
+    # 统一 H3 标题样式 (Linear Indigo 子标题)
     html_body = re.sub(
         r'<h3>(.*?)</h3>',
-        r'<h3 style="margin-top: 28px; margin-bottom: 16px; font-size: 17.5px; color: #2563eb; font-weight: bold; border-left: 3px solid #3b82f6; padding-left: 10px;">\1</h3>',
+        r'<h3 style="margin-top: 28px; margin-bottom: 16px; font-size: 17px; color: #0C0D0E; font-weight: 600; border-left: 3px solid #4F5BD5; padding-left: 10px;">\1</h3>',
         html_body
     )
 
-    # 统一无序列表样式
+    # 统一列表样式
     html_body = html_body.replace(
         '<ul>',
-        '<ul style="margin-bottom: 20px; padding-left: 25px; line-height: 1.85; color: #334155;">'
+        '<ul style="margin-bottom: 20px; padding-left: 22px; line-height: 1.85; color: #334155;">'
+    )
+    html_body = html_body.replace(
+        '<ol>',
+        '<ol style="margin-bottom: 20px; padding-left: 22px; line-height: 1.85; color: #334155;">'
     )
 
     # 重点分级样式：红色加粗微光卡片（最核心顿悟时刻） → 黑色加粗徽章（重要术语）
@@ -655,23 +715,32 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
     )
     html_body = re.sub(
         r'<strong>(.*?)</strong>',
-        r'<strong style="color: #0f172a; font-weight: bold; background-color: rgba(241,245,249,0.8); padding: 1px 4px; border-radius: 3px;">\1</strong>',
+        r'<strong style="color: #0C0D0E; font-weight: 700; background-color: rgba(79,91,213,0.06); padding: 1px 4px; border-radius: 3px;">\1</strong>',
         html_body
     )
 
-    # 优化多行代码块 (<pre><code>) 样式：渲染为 Mac 终端暗黑高档风格 (微信防剥离双重防护)
-    mac_dots = '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;"><span style="width:10px;height:10px;border-radius:50%;background:#ef4444;display:inline-block;"></span><span style="width:10px;height:10px;border-radius:50%;background:#f59e0b;display:inline-block;"></span><span style="width:10px;height:10px;border-radius:50%;background:#10b981;display:inline-block;"></span></div>'
-    
+    # 优化多行代码块 (<pre><code>) 样式：渲染为 Linear Modern Light Sunken Code Card (微信防剥离多层容器防护)
+    code_header = (
+        '<div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; background-color: #F1F3F7; border-bottom: 1px solid #E2E8F0;">'
+        '<div style="display: flex; align-items: center; gap: 6px;">'
+        '<span style="width: 10px; height: 10px; border-radius: 50%; background: #EF4444; display: inline-block;"></span>'
+        '<span style="width: 10px; height: 10px; border-radius: 50%; background: #F59E0B; display: inline-block;"></span>'
+        '<span style="width: 10px; height: 10px; border-radius: 50%; background: #10B981; display: inline-block;"></span>'
+        '</div>'
+        '<span style="font-size: 11px; font-weight: 600; color: #5E6470; letter-spacing: 0.05em; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">CODE</span>'
+        '</div>'
+    )
+
     def _format_code_block(match):
         code_content = match.group(1)
         return (
-            '<section style="margin: 20px 0; padding: 16px 18px; background-color: #1e293b; color: #f8fafc; '
-            'border-radius: 12px; font-family: Consolas, Monaco, \'Courier New\', monospace; '
-            'font-size: 13.5px; line-height: 1.65; overflow-x: auto; box-shadow: 0 6px 18px rgba(0,0,0,0.25); display: block;">'
-            f'{mac_dots}'
-            f'<pre style="margin: 0; padding: 0; background-color: #1e293b; color: #f8fafc; '
+            '<section style="margin: 22px 0; border: 1px solid #E2E8F0; border-radius: 10px; '
+            'background-color: #F8F9FB; box-shadow: 0 1px 2px rgba(0,0,0,0.03), inset 0 1px 0 rgba(255,255,255,1); '
+            'overflow: hidden; display: block;">'
+            f'{code_header}'
+            f'<pre style="margin: 0; padding: 14px 18px; background-color: #F8F9FB; color: #0C0D0E; '
             f'font-family: Consolas, Monaco, \'Courier New\', monospace; font-size: 13.5px; line-height: 1.65; '
-            f'white-space: pre-wrap; word-break: break-all; border: none; background: #1e293b; display: block;">{code_content}</pre>'
+            f'white-space: pre-wrap; word-break: break-all; border: none; overflow-x: auto; display: block;">{code_content}</pre>'
             '</section>'
         )
 
@@ -682,11 +751,10 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
         flags=re.DOTALL
     )
 
-    # 统一行内代码（英文字体）样式：由于多行代码块已替换为 <pre>，剩下的 <code> 均为行内代码
-    font_stack = "-apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif"
+    # 统一行内代码样式：由于多行代码块已替换为 <pre>，剩下的 <code> 均为行内代码
     html_body = re.sub(
         r'<code>(.*?)</code>',
-        f'<code style="font-family: {font_stack}; background-color: #f1f5f9; padding: 2px 5px; border-radius: 4px; color: #2563eb; font-size: 0.95em;">\\1</code>',
+        r'<code style="font-family: Consolas, Monaco, \'Courier New\', monospace; background-color: #F1F3F7; padding: 2px 6px; border-radius: 4px; color: #4F5BD5; border: 1px solid rgba(79,91,213,0.15); font-size: 0.92em;">\1</code>',
         html_body
     )
 

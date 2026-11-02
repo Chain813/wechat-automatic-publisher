@@ -9,7 +9,15 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
-import verify_live_webui
+try:
+    import verify_live_webui
+except ImportError:
+    verify_live_webui = None
+
+pytestmark = pytest.mark.skipif(
+    verify_live_webui is None,
+    reason="verify_live_webui requires running webui server and playwright",
+)
 
 def test_static_files_and_es_modules_serving():
     assert verify_live_webui.test_static_serving() is True

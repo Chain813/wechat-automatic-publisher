@@ -285,6 +285,203 @@ class TestArticleStyling(unittest.TestCase):
         self.assertNotIn("<p></p>", html_body)
         self.assertEqual(stats["image_count"], 2)
 
+    # -------------------------------------------------------------
+    # 5. Linear Modern Light 排版与卡片主题升级测试
+    # -------------------------------------------------------------
+    def test_linear_light_h2_and_h3_headers(self):
+        """测试 Linear Modern Light 的 H2 与 H3 标题样式（#4F5BD5 Indigo 强调色、墨黑主字阶）"""
+        article = """
+## 第一章：分布式架构设计
+
+### 1.1 节点选举协议
+
+正文段落说明。
+"""
+        html_body, _ = process_article_content(
+            article,
+            self.publisher,
+            skip_photo_images=True,
+            generate_diagrams=False,
+        )
+
+        # H2 验证
+        self.assertIn("<h2 style=", html_body)
+        self.assertIn("#4F5BD5", html_body)
+        self.assertIn("rgba(79,91,213,0.08)", html_body)
+        self.assertIn("#0C0D0E", html_body)
+        self.assertIn("第一章：分布式架构设计", html_body)
+
+        # H3 验证
+        self.assertIn("<h3 style=", html_body)
+        self.assertIn("border-left: 3px solid #4F5BD5", html_body)
+        self.assertIn("1.1 节点选举协议", html_body)
+
+    def test_linear_light_regular_blockquote(self):
+        """测试普通引用升级为 Linear Light 浅色微光卡片"""
+        article = "> 软件工程的本质是在复杂性、可靠性与演化速度之间寻求动态平衡。"
+        html_body, _ = process_article_content(
+            article,
+            self.publisher,
+            skip_photo_images=True,
+            generate_diagrams=False,
+        )
+
+        self.assertIn("<blockquote style=", html_body)
+        self.assertIn("#F8F9FB", html_body)
+        self.assertIn("#4F5BD5", html_body)
+        self.assertIn("#5E6470", html_body)
+        self.assertIn("box-shadow: 0 1px 2px rgba(0,0,0,0.02)", html_body)
+
+    def test_linear_sunken_code_blocks(self):
+        """测试多行与行内代码块渲染为 Linear Modern Light Sunken Code Card"""
+        article = """
+请在终端中执行 `pip install auto-publish` 安装依赖：
+
+```python
+def publish_article(title: str, content: str) -> bool:
+    print(f"Publishing {title}")
+    return True
+```
+"""
+        html_body, _ = process_article_content(
+            article,
+            self.publisher,
+            skip_photo_images=True,
+            generate_diagrams=False,
+        )
+
+        # 行内代码验证
+        self.assertIn("#F1F3F7", html_body)
+        self.assertIn("#4F5BD5", html_body)
+        self.assertIn("pip install auto-publish", html_body)
+
+        # 多行代码沉浸式卡片验证
+        self.assertIn("#F8F9FB", html_body)
+        self.assertIn("#E2E8F0", html_body)
+        self.assertIn("#EF4444", html_body)  # 窗口控制红点
+        self.assertIn("#F59E0B", html_body)  # 窗口控制黄点
+        self.assertIn("#10B981", html_body)  # 窗口控制绿点
+        self.assertIn("CODE", html_body)     # 顶部卡片徽标
+        self.assertIn("#0C0D0E", html_body)  # 墨黑高对比代码正文
+        self.assertIn("publish_article", html_body)
+
+    def test_markdown_table_inline_styling(self):
+        """测试 Markdown 表格内联注入微信兼容的 Linear Light 样式与防溢出容器"""
+        article = """
+| 架构组件 | 职责定位 | 可用性目标 |
+| :--- | :--- | :--- |
+| 控制中心 | 状态流转与调度 | 99.99% |
+| 数据引擎 | 缓存与知识图谱 | 99.9% |
+"""
+        html_body, _ = process_article_content(
+            article,
+            self.publisher,
+            skip_photo_images=True,
+            generate_diagrams=False,
+        )
+
+        self.assertIn("<table", html_body)
+        self.assertIn("border-collapse: collapse", html_body)
+        self.assertIn("overflow-x: auto", html_body)
+        self.assertIn("#F8F9FB", html_body)  # 表头浅灰底
+        self.assertIn("#0C0D0E", html_body)  # 表头墨黑文字
+        self.assertIn("#E2E8F0", html_body)  # 边框
+        self.assertIn("#334155", html_body)  # 单元格文字
+        self.assertIn("控制中心", html_body)
+        self.assertIn("可用性目标", html_body)
+
+    def test_callout_and_analysis_card_linear_shadow_and_radius(self):
+        """测试告警微光卡片与分析卡片均已升级为 10px 圆角与细腻双层 Linear 触觉阴影"""
+        article = """
+> ⚠️ **避坑指南**：严禁在生产环境明文写入密钥。
+
+【此处绘制架构图：多智能体并发调度图】
+"""
+        html_body, _ = process_article_content(
+            article,
+            self.publisher,
+            skip_photo_images=True,
+            generate_diagrams=False,
+        )
+
+        # 验证微光卡片与分析卡片皆应用了 10px 与多层投影
+        self.assertIn("border-radius: 10px;", html_body)
+        self.assertIn("box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px rgba(15,23,42,0.04);", html_body)
+
+    def test_html_render_linear_light_template_contract(self):
+        """测试 utils/html_render.py 中 HTML 渲染模板采用纯白卡片与 Linear Indigo 主题"""
+        from utils.html_render import HTML_TEMPLATE
+
+        # 验证 #render-target 容器
+        self.assertIn("background-color: #FFFFFF;", HTML_TEMPLATE)
+        self.assertIn("color: #0C0D0E;", HTML_TEMPLATE)
+        self.assertIn("border: 1px solid rgba(0, 0, 0, 0.08);", HTML_TEMPLATE)
+        self.assertIn("border-radius: 16px;", HTML_TEMPLATE)
+
+        # 验证 Mermaid themeVariables
+        self.assertIn("theme: 'base'", HTML_TEMPLATE)
+        self.assertIn("primaryBorderColor: '#4F5BD5'", HTML_TEMPLATE)
+        self.assertIn("lineColor: '#4F5BD5'", HTML_TEMPLATE)
+
+    def test_diagram_gen_linear_light_prompts_and_caption(self):
+        """测试 utils/diagram_gen.py 中系统提示词与图解阅读指南遵循 Linear Light"""
+        from utils.diagram_gen import UNIFIED_DIAGRAM_SYSTEM_PROMPT, replace_diagram_placeholder
+
+        self.assertIn("fill:#F8F9FB,stroke:#4F5BD5", UNIFIED_DIAGRAM_SYSTEM_PROMPT)
+        self.assertIn("bg-white", UNIFIED_DIAGRAM_SYSTEM_PROMPT)
+        self.assertIn("#4F5BD5", UNIFIED_DIAGRAM_SYSTEM_PROMPT)
+
+        # 测试图解替换阅读指南
+        replaced = replace_diagram_placeholder(
+            "【此处绘制图表：系统流程图】",
+            "系统流程图",
+            "https://mmbiz.qpic.cn/mock_diagram.png"
+        )
+        self.assertIn("#F8F9FB", replaced)
+        self.assertIn("border-left:4px solid #4F5BD5", replaced)
+        self.assertIn("💡 <strong>图解阅读指南：</strong> 系统流程图", replaced)
+
+    def test_lite_render_linear_light_card_generation(self):
+        """测试 utils/lite_render.py 在本地通过 Matplotlib 成功渲染 Linear Light 卡片图片"""
+        import tempfile
+        from utils.lite_render import render_formula_card, render_comparison_card, render_text_card
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 1. 公式卡片
+            formula_png = os.path.join(tmpdir, "formula.png")
+            f_ok = render_formula_card(
+                title="交叉熵损失函数",
+                formula_lines=[r"\mathcal{L} = -\sum_{i=1}^C y_i \log(\hat{y}_i)"],
+                notes=["y 为真实标签", r"\hat{y} 为预测概率"],
+                output_path=formula_png,
+            )
+            self.assertTrue(f_ok)
+            self.assertTrue(os.path.exists(formula_png) and os.path.getsize(formula_png) > 500)
+
+            # 2. 对比卡片
+            compare_png = os.path.join(tmpdir, "compare.png")
+            c_ok = render_comparison_card(
+                title="架构选型对比",
+                columns=["维度", "单体架构", "微服务架构"],
+                rows=[
+                    ["复杂度", "低", "高"],
+                    ["部署灵活性", "一般", "极高"],
+                ],
+                output_path=compare_png,
+            )
+            self.assertTrue(c_ok)
+            self.assertTrue(os.path.exists(compare_png) and os.path.getsize(compare_png) > 500)
+
+            # 3. 要点卡片
+            text_png = os.path.join(tmpdir, "text.png")
+            t_ok = render_text_card(
+                title="系统核心收益",
+                bullet_points=["端到端延迟降低 45%", "内存占用缩减 30%"],
+                output_path=text_png,
+            )
+            self.assertTrue(t_ok)
+            self.assertTrue(os.path.exists(text_png) and os.path.getsize(text_png) > 500)
+
 
 if __name__ == "__main__":
     unittest.main()

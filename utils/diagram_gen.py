@@ -33,10 +33,10 @@ LITE_DIAGRAM_SYSTEM_PROMPT = """你是一位精通数据可视化的技术图表
 ```dot
 digraph G {
     rankdir=TB;
-    node [shape=box, style="filled,rounded", fontname="Microsoft YaHei"];
-    A [label="输入数据", fillcolor="#1e3a5f", fontcolor="white"];
-    B [label="特征提取", fillcolor="#2563eb", fontcolor="white"];
-    A -> B [color="#3b82f6"];
+    node [shape=box, style="filled,rounded", fontname="Microsoft YaHei", fillcolor="#F8F9FB", color="#4F5BD5", fontcolor="#0C0D0E"];
+    A [label="输入数据", fillcolor="#EEF2FF", color="#4F5BD5", fontcolor="#3842A6"];
+    B [label="特征提取", fillcolor="#F8F9FB", color="#4F5BD5", fontcolor="#0C0D0E"];
+    A -> B [color="#4F5BD5"];
 }
 ```
 
@@ -265,14 +265,14 @@ def _try_api_render(mermaid_code, output_path):
     try:
         mermaid_code = mermaid_code.strip()
         
-        # 自动将全局样式模板注入代码，保证高颜值配色
+        # 自动将全局样式模板注入代码，保证高颜值配色 (Linear Modern Light)
         style_template = (
             "\n"
-            "classDef default fill:#1f2937,stroke:#3b82f6,stroke-width:2px,color:#f3f4f6;\n"
-            "classDef highlight fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff;\n"
-            "classDef success fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#d1fae5;\n"
-            "classDef warning fill:#78350f,stroke:#f59e0b,stroke-width:2px,color:#fef3c7;\n"
-            "classDef danger fill:#7f1d1d,stroke:#ef4444,stroke-width:2px,color:#fee2e2;\n"
+            "classDef default fill:#F8F9FB,stroke:#4F5BD5,stroke-width:2px,color:#0C0D0E;\n"
+            "classDef highlight fill:#EEF2FF,stroke:#4F5BD5,stroke-width:2px,color:#3842A6;\n"
+            "classDef success fill:#F0FDF4,stroke:#10B981,stroke-width:2px,color:#065F46;\n"
+            "classDef warning fill:#FEF3C7,stroke:#F59E0B,stroke-width:2px,color:#92400E;\n"
+            "classDef danger fill:#FEF2F2,stroke:#EF4444,stroke-width:2px,color:#991B1B;\n"
         )
         if "classDef" not in mermaid_code:
             # 兼容带有 class 定义的 mermaid 代码结构，附加样式声明
@@ -316,8 +316,8 @@ UNIFIED_DIAGRAM_SYSTEM_PROMPT = r"""你是一位顶尖的数据可视化与网�
 - 示例：
 ```mermaid
 graph TD
-    classDef default fill:#1f2937,stroke:#3b82f6,stroke-width:2px,color:#f3f4f6;
-    classDef highlight fill:#1e3a8a,stroke:#60a5fa,stroke-width:2px,color:#ffffff;
+    classDef default fill:#F8F9FB,stroke:#4F5BD5,stroke-width:2px,color:#0C0D0E;
+    classDef highlight fill:#EEF2FF,stroke:#4F5BD5,stroke-width:2px,color:#3842A6;
     
     A[输入数据] --> B(特征提取):::highlight
     B --> C{是否合格}
@@ -329,18 +329,18 @@ graph TD
 如果不属于流程图/架构图/脑图，必须选择此格式。
 输出精美的 HTML+Tailwind CSS 代码，用 ```html 包裹。
 - 整个内容必须是一个独立的卡片式容器（如带有 px/py 内边距和现代感圆角阴影的 div），宽度固定为 700px。
-- 使用高档深色科技风配色：背景使用深色渐变（如 `from-slate-900 to-slate-950`），文字使用明亮的灰白双色（如 `text-slate-100`、`text-slate-400`）。
-- 适当添加现代感设计元素：圆角（`rounded-2xl`）、微弱边框（`border border-slate-800`）、渐变强调文字（`bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent`）。
+- 使用 Linear Modern Light 现代浅色科技风配色：背景使用纯白卡片（`bg-white`），边框使用精致淡灰边框（`border border-slate-200`），文字使用明亮的高清墨黑与深灰（如 `text-slate-900`、`text-slate-600`）。
+- 适当添加现代感设计元素：圆角（`rounded-2xl`）、微弱外边框与浅影（`shadow-xl`）、渐变强调文字（`bg-gradient-to-r from-[#4F5BD5] to-[#6366F1] bg-clip-text text-transparent`）。
 - 对于公式：使用 KaTeX 格式，即公式部分用 `$$ ... $$` 或 `$` 包裹，并在卡片中做适当的变量对照与背景说明。
 - 示例 1 (公式卡片)：
 ```html
-<div class="w-[700px] p-8 bg-gradient-to-br from-slate-900 to-slate-950 rounded-2xl border border-slate-800 shadow-2xl">
-    <h3 class="text-xl font-bold text-slate-100 mb-4 bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent font-sans">梯度下降更新公式</h3>
-    <div class="text-center my-6 text-2xl text-slate-100 font-serif">
+<div class="w-[700px] p-8 bg-white rounded-2xl border border-slate-200 shadow-xl text-slate-900">
+    <h3 class="text-xl font-bold mb-4 bg-gradient-to-r from-[#4F5BD5] to-[#6366F1] bg-clip-text text-transparent font-sans">梯度下降更新公式</h3>
+    <div class="text-center my-6 text-2xl text-slate-900 font-serif">
         $$w_{t+1} = w_t - \eta \nabla L(w_t)$$
     </div>
-    <div class="border-t border-slate-800/80 pt-4 mt-4">
-        <p class="text-xs text-slate-400 leading-relaxed font-mono">
+    <div class="border-t border-slate-200 pt-4 mt-4">
+        <p class="text-xs text-slate-500 leading-relaxed font-mono">
             其中：$w$ 表示权重参数，$\eta$ 表示学习率，$\nabla L(w)$ 表示损失函数关于权重的梯度。
         </p>
     </div>
@@ -348,28 +348,28 @@ graph TD
 ```
 - 示例 2 (对比表格)：
 ```html
-<div class="w-[700px] p-6 bg-gradient-to-b from-slate-900 to-slate-950 rounded-2xl border border-slate-800 shadow-2xl">
-    <h3 class="text-lg font-bold text-slate-100 mb-4 flex items-center gap-2 font-sans">
-        <span class="w-1.5 h-5 bg-blue-500 rounded-full"></span> 核心算法对比分析
+<div class="w-[700px] p-6 bg-white rounded-2xl border border-slate-200 shadow-xl text-slate-900">
+    <h3 class="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2 font-sans">
+        <span class="w-1.5 h-5 bg-[#4F5BD5] rounded-full"></span> 核心算法对比分析
     </h3>
-    <table class="w-full text-sm text-left text-slate-300">
-        <thead class="text-xs text-slate-400 uppercase bg-slate-900/50">
+    <table class="w-full text-sm text-left text-slate-700">
+        <thead class="text-xs text-slate-600 uppercase bg-slate-50">
             <tr>
                 <th class="px-4 py-3 rounded-l-lg">特性</th>
                 <th class="px-4 py-3">深度学习</th>
                 <th class="px-4 py-3 rounded-r-lg">传统ML</th>
             </tr>
         </thead>
-        <tbody class="divide-y divide-slate-800/50">
+        <tbody class="divide-y divide-slate-100">
             <tr>
-                <td class="px-4 py-3 font-semibold text-slate-200">数据量需求</td>
-                <td class="px-4 py-3 text-blue-400">海量数据 (Big Data)</td>
-                <td class="px-4 py-3 text-slate-400">中小型数据集</td>
+                <td class="px-4 py-3 font-semibold text-slate-900">数据量需求</td>
+                <td class="px-4 py-3 text-[#4F5BD5] font-medium">海量数据 (Big Data)</td>
+                <td class="px-4 py-3 text-slate-600">中小型数据集</td>
             </tr>
             <tr>
-                <td class="px-4 py-3 font-semibold text-slate-200">特征工程</td>
-                <td class="px-4 py-3 text-blue-400">端到端自动表征学习</td>
-                <td class="px-4 py-3 text-slate-400">手动设计提取特征</td>
+                <td class="px-4 py-3 font-semibold text-slate-900">特征工程</td>
+                <td class="px-4 py-3 text-[#4F5BD5] font-medium">端到端自动表征学习</td>
+                <td class="px-4 py-3 text-slate-600">手动设计提取特征</td>
             </tr>
         </tbody>
     </table>
@@ -508,8 +508,8 @@ def replace_diagram_placeholder(html_body, description, image_url):
             '<section style="text-align:center;margin:28px 0;width:100%;box-sizing:border-box;">'
             f'<img src="{image_url}" style="width:100%;max-width:100%;height:auto;border-radius:12px;'
             'box-shadow:0 6px 20px rgba(0,0,0,0.15);box-sizing:border-box;" alt="架构示意图">'
-            '<section style="width:100%;max-width:100%;margin:10px auto 0 auto;padding:10px 16px;background:#f8fafc;'
-            'border-left:4px solid #2563eb;border-radius:6px;text-align:left;box-sizing:border-box;">'
+            '<section style="width:100%;max-width:100%;margin:10px auto 0 auto;padding:10px 16px;background:#F8F9FB;'
+            'border:1px solid rgba(0,0,0,0.06);border-left:4px solid #4F5BD5;border-radius:6px;text-align:left;box-sizing:border-box;">'
             f'<span style="font-size:13px;color:#334155;line-height:1.6;font-weight:500;display:block;">'
             f'💡 <strong>图解阅读指南：</strong> {description}</span>'
             '</section></section>'

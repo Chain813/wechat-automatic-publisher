@@ -10,7 +10,7 @@ import time
 import tempfile
 from loguru import logger
 from selenium.webdriver.common.by import By
-from utils.spider import build_stealth_browser
+from utils.spider import build_stealth_browser, BrowserUnavailableError, is_browser_available
 
 # 用于包装内容的通用 HTML 模板，集成 Tailwind CSS, KaTeX 和 Mermaid.js
 HTML_TEMPLATE = """<!DOCTYPE html>
@@ -36,12 +36,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }}
         #render-target {{
             display: inline-block;
-            background-color: #0b0e14;
-            color: #e2e8f0;
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            background-color: #FFFFFF;
+            color: #0C0D0E;
+            border: 1px solid rgba(0, 0, 0, 0.08);
             border-radius: 16px;
-            padding: 24px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            padding: 28px;
+            box-shadow: 0 4px 20px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
             max-width: 100%;
             box-sizing: border-box;
             {container_style}
@@ -62,17 +62,20 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </div>
     
     <script>
-        // 初始化 Mermaid (使用 dark 主题适配公众号暗色卡片样式)
+        // 初始化 Mermaid (使用 Linear Modern Light 主题)
         mermaid.initialize({{
             startOnLoad: true,
-            theme: 'dark',
+            theme: 'base',
             securityLevel: 'loose',
             flowchart: {{ useMaxWidth: false, htmlLabels: true }},
             themeVariables: {{
-                background: 'transparent',
-                primaryColor: '#1f2937',
-                primaryTextColor: '#f3f4f6',
-                lineColor: '#3b82f6'
+                background: '#FFFFFF',
+                primaryColor: '#EEF2FF',
+                primaryTextColor: '#0C0D0E',
+                primaryBorderColor: '#4F5BD5',
+                lineColor: '#4F5BD5',
+                secondaryColor: '#F8F9FB',
+                tertiaryColor: '#F1F3F7'
             }}
         }});
         
@@ -109,6 +112,10 @@ def render_html_to_png(html_body: str, output_path: str, width: int = 850) -> bo
     # 组合为完整 HTML
     full_html = HTML_TEMPLATE.format(content=html_body, container_style=container_style)
     
+    if not is_browser_available():
+        logger.info("  [html_render] 当前环境无可用浏览器，安全跳过卡片渲染")
+        return False
+
     temp_file = None
     browser = None
     try:

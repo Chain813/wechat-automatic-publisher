@@ -95,38 +95,38 @@ def render_formula_card(title, formula_lines, notes=None, output_path="formula.p
         rcParams["axes.unicode_minus"] = False
 
         fig, ax = plt.subplots(figsize=(8, max(3, 1.5 + len(formula_lines) * 1.2 + (0.8 if notes else 0))))
-        fig.patch.set_facecolor("#0b0e14")
-        ax.set_facecolor("#0b0e14")
+        fig.patch.set_facecolor("#F8F9FB")
+        ax.set_facecolor("#F8F9FB")
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
         ax.axis("off")
 
-        # 绘制圆角背景框
+        # 绘制圆角背景框 (Linear Modern Light)
         from matplotlib.patches import FancyBboxPatch
         bg = FancyBboxPatch(
             (0.02, 0.02), 0.96, 0.96,
             boxstyle="round,pad=0.03",
-            facecolor="#111827", edgecolor="#1e3a5f",
-            linewidth=1.5
+            facecolor="#FFFFFF", edgecolor="#E2E8F0",
+            linewidth=1.2
         )
         ax.add_patch(bg)
 
-        # 标题
+        # 标题 (Linear Indigo)
         ax.text(
             0.5, 0.9, title,
             ha="center", va="top",
             fontsize=16, fontweight="bold",
-            color="#38bdf8",
+            color="#4F5BD5",
         )
 
-        # 公式（每行一个）
+        # 公式（每行一个，墨黑高对比）
         n = len(formula_lines)
         for i, formula in enumerate(formula_lines):
             y = 0.72 - i * (0.5 / max(n, 1))
             ax.text(
                 0.5, y, f"${formula}$",
                 ha="center", va="center",
-                fontsize=18, color="#e2e8f0",
+                fontsize=18, color="#0C0D0E",
             )
 
         # 注释
@@ -135,7 +135,7 @@ def render_formula_card(title, formula_lines, notes=None, output_path="formula.p
             ax.text(
                 0.5, 0.08, note_text,
                 ha="center", va="bottom",
-                fontsize=10, color="#94a3b8",
+                fontsize=10, color="#5E6470",
                 style="italic",
             )
 
@@ -182,20 +182,20 @@ def render_comparison_card(title, columns, rows, output_path="compare.png"):
         n_rows = len(rows)
         fig_height = max(3, 1.5 + n_rows * 0.5)
         fig, ax = plt.subplots(figsize=(8, fig_height))
-        fig.patch.set_facecolor("#0b0e14")
-        ax.set_facecolor("#0b0e14")
+        fig.patch.set_facecolor("#F8F9FB")
+        ax.set_facecolor("#F8F9FB")
         ax.axis("off")
 
-        # 标题
+        # 标题 (Linear Indigo)
         ax.set_title(
             title, fontsize=16, fontweight="bold",
-            color="#38bdf8", pad=15
+            color="#4F5BD5", pad=15
         )
 
-        # 创建表格
+        # 创建表格 (Linear Modern Light: 白底单元格 + 极浅灰表头)
         cell_colors = []
         for i in range(n_rows):
-            row_colors = ["#1e293b"] * len(columns)
+            row_colors = ["#FFFFFF"] * len(columns)
             cell_colors.append(row_colors)
 
         table = ax.table(
@@ -204,7 +204,7 @@ def render_comparison_card(title, columns, rows, output_path="compare.png"):
             cellLoc="center",
             loc="center",
             cellColours=cell_colors,
-            colColours=["#1e3a5f"] * len(columns),
+            colColours=["#F1F3F7"] * len(columns),
         )
         table.auto_set_font_size(False)
         table.set_fontsize(11)
@@ -212,13 +212,13 @@ def render_comparison_card(title, columns, rows, output_path="compare.png"):
 
         # 设置单元格样式
         for key, cell in table.get_celld().items():
-            cell.set_edgecolor("#334155")
-            cell.set_linewidth(0.5)
+            cell.set_edgecolor("#E2E8F0")
+            cell.set_linewidth(0.8)
             row, col = key
             if row == 0:
-                cell.set_text_props(color="#e2e8f0", fontweight="bold")
+                cell.set_text_props(color="#0C0D0E", fontweight="bold")
             else:
-                cell.set_text_props(color="#cbd5e1")
+                cell.set_text_props(color="#334155")
 
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
         fig.savefig(output_path, dpi=200, bbox_inches="tight", pad_inches=0.2)
@@ -291,8 +291,8 @@ def render_text_card(title, bullet_points, output_path="card.png"):
         total_lines = sum(len(p.splitlines()) for p in wrapped_points)
         fig_height = max(3, 1.2 + total_lines * 0.45)
         fig, ax = plt.subplots(figsize=(8, fig_height))
-        fig.patch.set_facecolor("#0b0e14")
-        ax.set_facecolor("#0b0e14")
+        fig.patch.set_facecolor("#F8F9FB")
+        ax.set_facecolor("#F8F9FB")
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
         ax.axis("off")
@@ -300,15 +300,15 @@ def render_text_card(title, bullet_points, output_path="card.png"):
         bg = FancyBboxPatch(
             (0.02, 0.02), 0.96, 0.96,
             boxstyle="round,pad=0.03",
-            facecolor="#111827", edgecolor="#1e3a5f",
-            linewidth=1.5
+            facecolor="#FFFFFF", edgecolor="#E2E8F0",
+            linewidth=1.2
         )
         ax.add_patch(bg)
 
         ax.text(
             0.5, 0.92, title,
             ha="center", va="top",
-            fontsize=15, fontweight="bold", color="#38bdf8"
+            fontsize=15, fontweight="bold", color="#4F5BD5"
         )
 
         n = len(wrapped_points)
@@ -317,7 +317,7 @@ def render_text_card(title, bullet_points, output_path="card.png"):
             ax.text(
                 0.08, y, f"• {wrapped}",
                 ha="left", va="top",
-                fontsize=11, color="#e2e8f0",
+                fontsize=11, color="#0C0D0E",
                 linespacing=1.4
             )
 
@@ -380,16 +380,16 @@ def render_archify_diagram(archify_code, output_path):
                 nodes.add(src)
                 nodes.add(dst)
                 if label:
-                    edges.append(f'    "{src}" -> "{dst}" [label="{label}", color="#3b82f6", fontcolor="#93c5fd"];')
+                    edges.append(f'    "{src}" -> "{dst}" [label="{label}", color="#4F5BD5", fontcolor="#4F5BD5"];')
                 else:
-                    edges.append(f'    "{src}" -> "{dst}" [color="#3b82f6"];')
+                    edges.append(f'    "{src}" -> "{dst}" [color="#4F5BD5"];')
 
         dot_lines = [
             'digraph Architecture {',
             '    rankdir=LR;',
-            '    bgcolor="#0b0e14";',
-            '    node [shape=box, style="filled,rounded", fillcolor="#1e293b", color="#3b82f6", fontcolor="#f8fafc", fontname="Microsoft YaHei", fontsize=11, height=0.5, margin="0.2,0.1"];',
-            '    edge [penwidth=1.5, fontname="Microsoft YaHei", fontsize=9];'
+            '    bgcolor="#F8F9FB";',
+            '    node [shape=box, style="filled,rounded", fillcolor="#FFFFFF", color="#4F5BD5", fontcolor="#0C0D0E", fontname="Microsoft YaHei", fontsize=11, height=0.5, margin="0.2,0.1"];',
+            '    edge [penwidth=1.5, color="#4F5BD5", fontname="Microsoft YaHei", fontsize=9];'
         ]
         for node in nodes:
             dot_lines.append(f'    "{node}" [label="{node}"];')
