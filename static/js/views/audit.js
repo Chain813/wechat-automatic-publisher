@@ -105,9 +105,12 @@ function normalizeHistoryData(data) {
     if (!Array.isArray(list)) return;
     list.forEach(item => {
       if (item && item.id !== undefined && !map.has(item.id)) {
+        const rawTitle = stripEmojis(item.title || item.topic || '无标题草稿');
+        const firstLine = rawTitle.split(/\r?\n/)[0].replace(/^#+\s*/, '').trim();
+        const cleanTitle = firstLine.length > 72 ? firstLine.slice(0, 72) + '...' : (firstLine || '无标题草稿');
         map.set(item.id, {
           ...item,
-          cleanTitle: stripEmojis(item.title || '无标题草稿'),
+          cleanTitle,
           quality_score: Number(item.quality_score) || 0
         });
       }
@@ -192,8 +195,10 @@ function renderArticles(articles) {
 
 function renderTableRowHtml(a) {
   const scoreBadge = getScoreBadgeHtml(a.quality_score);
-  const factBadge = a.fact_check_result ? `<span class="tag-fact-checked">${escapeHtml(a.fact_check_result)}</span>` : '<span class="tag-fact-none">未配置</span>';
-  const previewId = a.media_id || a.id;
+  const rawFact = a.fact_check_result ? stripEmojis(String(a.fact_check_result)).replace(/^[#\s*-]+/, '').trim() : '';
+  const shortFact = rawFact ? (rawFact.length > 36 ? rawFact.slice(0, 36) + '...' : rawFact) : '';
+  const factBadge = shortFact ? `<span class="badge badge-neutral" title="${escapeHtml(rawFact)}">${escapeHtml(shortFact)}</span>` : '<span class="badge badge-neutral">未配置</span>';
+  const previewId = a.preview_id || a.draft_id || a.media_id || a.id;
 
   return `
     <tr data-article-id="${a.id}">

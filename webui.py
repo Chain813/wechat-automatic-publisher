@@ -1046,8 +1046,8 @@ def test_sources():
 @app.route('/api/system/sd_status', methods=['GET'])
 def get_sd_status():
     try:
-        from utils.image_handler import detect_sd_api_url
-        sd_url = detect_sd_api_url()
+        from utils.image_handler import get_sd_api_url
+        sd_url = get_sd_api_url()
         if sd_url:
             return jsonify({
                 "connected": True,

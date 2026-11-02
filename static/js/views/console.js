@@ -14,6 +14,7 @@ export function initConsoleView() {
   bindActionButtons();
   bindViewModeToggles();
   bindAccordionToggles();
+  bindSidePanelActions();
 
   State.on('change:activeWorkflow', updateWorkflowSelectorUI);
   State.on('change:logViewMode', updateLogViewModeUI);
@@ -25,6 +26,15 @@ export function initConsoleView() {
 
   refreshConsoleTelemetry();
   startStatusPolling();
+}
+
+function bindSidePanelActions() {
+  const sideOpenTreeBtn = document.getElementById('btn-side-open-tree');
+  if (sideOpenTreeBtn) {
+    sideOpenTreeBtn.addEventListener('click', () => {
+      State.set({ currentStage: 'graph' });
+    });
+  }
 }
 
 function bindWorkflowSelector() {
@@ -175,7 +185,7 @@ function updateLogViewModeUI(mode) {
   if (btnTimeline) btnTimeline.classList.toggle('active', isTimeline);
   if (btnRaw) btnRaw.classList.toggle('active', !isTimeline);
 
-  if (timelineView) timelineView.style.display = isTimeline ? 'flex' : 'none';
+  if (timelineView) timelineView.style.display = isTimeline ? '' : 'none';
   if (rawWell) rawWell.style.display = isTimeline ? 'none' : 'flex';
 }
 
@@ -211,17 +221,22 @@ export async function refreshConsoleTelemetry() {
     const treeStats = await api.get('/api/aikepu/tree_stats');
     if (treeStats && !treeStats.error) {
       const ratioEl = document.getElementById('skill-tree-ratio');
+      const sideRatioEl = document.getElementById('side-tree-ratio');
       const barEl = document.getElementById('skill-tree-progress-bar');
       const nextTopicEl = document.getElementById('skill-tree-next-topic');
+      const sideNextTopicEl = document.getElementById('side-next-topic');
 
       const completed = treeStats.published_count || 0;
       const total = treeStats.total_nodes || 30;
       const pct = Math.round((completed / (total || 1)) * 100);
 
-      if (ratioEl) ratioEl.textContent = `${completed}/${total} 篇 (${pct}%)`;
+      const ratioText = `${completed}/${total} 篇 (${pct}%)`;
+      if (ratioEl) ratioEl.textContent = ratioText;
+      if (sideRatioEl) sideRatioEl.textContent = ratioText;
       if (barEl) barEl.style.width = `${pct}%`;
-      if (nextTopicEl && treeStats.next_recommended_topic) {
-        nextTopicEl.textContent = treeStats.next_recommended_topic;
+      if (treeStats.next_recommended_topic) {
+        if (nextTopicEl) nextTopicEl.textContent = treeStats.next_recommended_topic;
+        if (sideNextTopicEl) sideNextTopicEl.textContent = treeStats.next_recommended_topic;
       }
     }
   } catch (_) {}
@@ -270,6 +285,20 @@ function renderPipelineArtifacts(model) {
   renderPhase2Card(model.phases[2]);
   renderPhase3Card(model.phases[3]);
   renderPhase4Card(model.phases[4]);
+
+  const sidePhaseBadge = document.getElementById('side-active-phase');
+  if (sidePhaseBadge) {
+    if (model.currentPhase && model.currentPhase >= 1 && model.currentPhase <= 4) {
+      sidePhaseBadge.textContent = `Phase ${model.currentPhase} Active`;
+      sidePhaseBadge.className = 'badge badge-indigo';
+    } else if (model.phases[4] && model.phases[4].status === 'completed') {
+      sidePhaseBadge.textContent = 'Completed';
+      sidePhaseBadge.className = 'badge badge-success';
+    } else {
+      sidePhaseBadge.textContent = 'Standby';
+      sidePhaseBadge.className = 'badge badge-neutral';
+    }
+  }
 }
 
 function renderStepper(model) {
@@ -356,10 +385,23 @@ function renderPhase4Card(phase) {
 
 function renderRawLogs(rawLines) {
   const well = document.getElementById('pipeline-raw-well');
-  if (!well || !Array.isArray(rawLines)) return;
+  const miniStream = document.getElementById('pipeline-mini-stream');
+  if (!Array.isArray(rawLines)) return;
 
-  well.innerHTML = rawLines.map(line => `<div class="raw-log-line">${escapeHtml(line)}</div>`).join('');
-  well.scrollTop = well.scrollHeight;
+  if (well) {
+    well.innerHTML = rawLines.map(line => `<div class="raw-log-line">${escapeHtml(line)}</div>`).join('');
+    well.scrollTop = well.scrollHeight;
+  }
+
+  if (miniStream) {
+    if (rawLines.length === 0) {
+      miniStream.innerHTML = '<div class="mini-stream-line muted">系统待命，就绪后实时输出最新流水线事件...</div>';
+    } else {
+      const recent = rawLines.slice(-12);
+      miniStream.innerHTML = recent.map(line => `<div class="mini-stream-line">${escapeHtml(line.trim())}</div>`).join('');
+      miniStream.scrollTop = miniStream.scrollHeight;
+    }
+  }
 }
 
 function escapeHtml(str) {

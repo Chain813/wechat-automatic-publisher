@@ -242,6 +242,42 @@
                             </div>
                         </div>
                     </div>
+
+                    <div class="pipeline-side-panel">
+                        <!-- Card 1: 知识图谱连载与推荐选题 -->
+                        <div class="pipeline-side-card">
+                            <div class="pipeline-side-card-header">
+                                <div class="side-card-title">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+                                    <span>知识图谱连载与推荐选题</span>
+                                </div>
+                                <span class="badge badge-accent" id="side-tree-ratio">0/0 篇 (0%)</span>
+                            </div>
+                            <div class="pipeline-side-card-body">
+                                <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">推荐选题</div>
+                                <div id="side-next-topic" style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px; line-height: 1.4;">等待就绪</div>
+                                <button class="btn btn-outline btn-sm" id="btn-side-open-tree" style="width: 100%; justify-content: center;">
+                                    <span>查看图谱全景</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Card 2: 实时引擎脉冲流 (Live Pulse Stream) -->
+                        <div class="pipeline-side-card">
+                            <div class="pipeline-side-card-header">
+                                <div class="side-card-title">
+                                    <span class="live-dot-pulse"></span>
+                                    <span>实时引擎脉冲流</span>
+                                </div>
+                                <span class="badge badge-neutral" id="side-active-phase">Standby</span>
+                            </div>
+                            <div class="pipeline-side-card-body stream-body">
+                                <div id="pipeline-mini-stream" class="mini-stream-feed">
+                                    <div class="mini-stream-line muted">系统待命，就绪后实时输出最新流水线事件...</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="pipeline-raw-well" id="pipeline-raw-well" style="display: none;"></div>

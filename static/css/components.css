@@ -316,13 +316,15 @@
   color: var(--accent);
 }
 
-.btn-danger {
+.btn-danger,
+.btn-danger-ghost {
   background: var(--status-danger-bg);
   color: var(--status-danger);
   border-color: rgba(239, 68, 68, 0.2);
 }
 
-.btn-danger:hover {
+.btn-danger:hover,
+.btn-danger-ghost:hover {
   background: var(--status-danger);
   color: #FFFFFF;
 }
