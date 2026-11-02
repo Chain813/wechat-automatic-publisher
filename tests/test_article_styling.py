@@ -482,6 +482,94 @@ def publish_article(title: str, content: str) -> bool:
             self.assertTrue(t_ok)
             self.assertTrue(os.path.exists(text_png) and os.path.getsize(text_png) > 500)
 
+    def test_h1_ol_li_hr_linear_light_styling(self):
+        """测试文章正文中 H1, OL, LI, HR 标签均遵循 Linear Modern Light 规范"""
+        article = """# 架构主标题
+
+导言段落。
+
+---
+
+## 阶段列表
+
+1. 初始化集群节点
+2. 挂载持久化存储卷
+
+- 备选方案A
+- 备选方案B
+"""
+        html_body, stats = process_article_content(
+            article,
+            self.publisher,
+            skip_photo_images=True,
+            generate_diagrams=False,
+        )
+
+        # 验证 H1 样式
+        self.assertIn("font-size: 24px", html_body)
+        self.assertIn("border-bottom: 1px solid #E2E8F0", html_body)
+        self.assertIn("color: #0C0D0E", html_body)
+
+        # 验证 HR 样式
+        self.assertIn("border-top: 1px solid #E2E8F0", html_body)
+
+        # 验证 OL 和 LI 样式
+        self.assertIn("<ol style=\"margin-bottom: 20px; padding-left: 22px; line-height: 1.85; color: #334155;\">", html_body)
+        self.assertIn("<li style=\"margin-bottom: 8px; line-height: 1.85; color: #334155;\">", html_body)
+
+    def test_default_cover_linear_light_generation(self):
+        """测试 utils/image_handler.py 的 generate_default_cover 彻底脱离深色模式，生成符合 Linear Light 规范的高清卡片"""
+        import tempfile
+        from PIL import Image
+        from utils.image_handler import generate_default_cover
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cover_path = os.path.join(tmpdir, "cover.jpg")
+            body_path = os.path.join(tmpdir, "body.jpg")
+
+            # 1. 封面图 (900x383)
+            generate_default_cover("大模型推理引擎全解析", cover_path, purpose="cover")
+            self.assertTrue(os.path.exists(cover_path))
+            with Image.open(cover_path) as img:
+                self.assertEqual(img.size, (900, 383))
+                # 采样中间背景像素，绝不能是深色 (#0b0e14 -> R,G,B < 40)
+                bg_pixel = img.getpixel((450, 190))
+                self.assertGreater(bg_pixel[0], 220)  # 高亮浅色底
+                self.assertGreater(bg_pixel[1], 220)
+                self.assertGreater(bg_pixel[2], 220)
+
+            # 2. 正文插图 (900x500)
+            generate_default_cover("大模型推理引擎全解析", body_path, purpose="body")
+            self.assertTrue(os.path.exists(body_path))
+            with Image.open(body_path) as img:
+                self.assertEqual(img.size, (900, 500))
+                bg_pixel = img.getpixel((450, 250))
+                self.assertGreater(bg_pixel[0], 220)
+
+    def test_selenium_diagram_prompt_linear_light(self):
+        """测试 utils/diagram_gen.py 中 SELENIUM_DIAGRAM_SYSTEM_PROMPT 绝无深色科技风残留"""
+        from utils.diagram_gen import SELENIUM_DIAGRAM_SYSTEM_PROMPT
+
+        self.assertNotIn("深色高档科技风", SELENIUM_DIAGRAM_SYSTEM_PROMPT)
+        self.assertNotIn("背景色为深色", SELENIUM_DIAGRAM_SYSTEM_PROMPT)
+        self.assertIn("Linear Modern Light", SELENIUM_DIAGRAM_SYSTEM_PROMPT)
+        self.assertIn("#4F5BD5", SELENIUM_DIAGRAM_SYSTEM_PROMPT)
+        self.assertIn("#0C0D0E", SELENIUM_DIAGRAM_SYSTEM_PROMPT)
+
+    def test_image_prompt_gen_preview_linear_light(self):
+        """测试 utils/image_prompt_gen.py 的 render_article_preview 生成 Linear Modern Light 预览"""
+        from utils.image_prompt_gen import render_article_preview
+
+        md = "# 系统设计\n\n【此处插入配图：架构拓扑】\n\n```python\nprint('hello')\n```"
+        html = render_article_preview(md, "测试文章标题", {})
+
+        # 占位符卡片应为浅底且无 emoji
+        self.assertNotIn("📷", html)
+        self.assertNotIn("1e293b", html)  # 无深色终端
+        self.assertIn("#F8F9FB", html)
+        self.assertIn("#0C0D0E", html)
+        self.assertIn("#4F5BD5", html)
+
 
 if __name__ == "__main__":
     unittest.main()

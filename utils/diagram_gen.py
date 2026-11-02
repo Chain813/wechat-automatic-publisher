@@ -102,11 +102,11 @@ SELENIUM_DIAGRAM_SYSTEM_PROMPT = """你是一位精通可视化设计的排版�
 3. **HTML** (适合展示对比表格、要点清单、带渐变色的核心概念总结卡、代码高亮)
    - 必须用 ```html 和 ``` 包裹。
    - 可以自由使用 Tailwind CSS 样式类。
-   - 确保使用现代科技感配色。
+   - 必须遵循 Linear Modern Light 现代浅色科技风设计规范。
 
 ## 设计要求
-1. 宽窗口布局在 700px 左右，请使用圆角和阴影增加立体感。
-2. 配色以深色高档科技风为主：背景色为深色，主色调青蓝色 #3b82f6 / #06b6d4，强调色橙色/红色 #f97316 / #ef4444。
+1. 宽窗口布局在 700px 左右，使用 rounded-2xl 圆角与细腻的多层柔和阴影。
+2. 配色以 Linear Modern Light 纯净浅色科技风为主：背景色为纯白 (#FFFFFF) 或极浅底色 (#F8F9FB)，主色调为 Linear 靛蓝 (#4F5BD5)，文字为墨黑 (#0C0D0E) 与深灰 (#5E6470)，边框为精致淡灰 (#E2E8F0)。
 3. 文本行高、内边距必须适中，提供极佳的阅读体验。
 
 ## 输出格式
@@ -507,7 +507,7 @@ def replace_diagram_placeholder(html_body, description, image_url):
         replacement = (
             '<section style="text-align:center;margin:28px 0;width:100%;box-sizing:border-box;">'
             f'<img src="{image_url}" style="width:100%;max-width:100%;height:auto;border-radius:12px;'
-            'box-shadow:0 6px 20px rgba(0,0,0,0.15);box-sizing:border-box;" alt="架构示意图">'
+            'box-shadow:0 1px 2px rgba(0,0,0,0.03), 0 4px 16px rgba(15,23,42,0.08);box-sizing:border-box;" alt="架构示意图">'
             '<section style="width:100%;max-width:100%;margin:10px auto 0 auto;padding:10px 16px;background:#F8F9FB;'
             'border:1px solid rgba(0,0,0,0.06);border-left:4px solid #4F5BD5;border-radius:6px;text-align:left;box-sizing:border-box;">'
             f'<span style="font-size:13px;color:#334155;line-height:1.6;font-weight:500;display:block;">'

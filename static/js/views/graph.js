@@ -176,7 +176,7 @@ function renderGraphUI(data) {
     }
 
     const card = document.createElement('div');
-    card.className = `graph-node-card status-${nodeStatus}`;
+    card.className = `graph-node-card status-${nodeStatus} ${nodeStatus}`;
     card.setAttribute('data-node-id', node.id);
     card.innerHTML = `
       <div class="node-card-head">
@@ -255,17 +255,12 @@ function bindHudControls() {
 
   if (btnToggle && hud) {
     btnToggle.addEventListener('click', () => {
-      hud.classList.toggle('collapsed');
-      State.set({ hudCollapsed: hud.classList.contains('collapsed') });
+      if (hud.classList.contains('collapsed')) openHud();
+      else closeHud();
     });
   }
 
-  if (backdrop && hud) {
-    backdrop.addEventListener('click', () => {
-      hud.classList.add('collapsed');
-      State.set({ hudCollapsed: true });
-    });
-  }
+  if (backdrop) backdrop.addEventListener('click', closeHud);
 
   const handleStatusChange = async (targetStatus) => {
     const node = State.selectedNode;
@@ -297,9 +292,27 @@ function bindHudControls() {
 
 function openHud() {
   const hud = document.getElementById('graph-hud-inspector');
+  const backdrop = document.getElementById('hud-close-backdrop');
   if (hud) {
     hud.classList.remove('collapsed');
+    hud.classList.add('open-mobile');
     State.set({ hudCollapsed: false });
+  }
+  if (backdrop && window.innerWidth < 768) {
+    backdrop.style.display = 'block';
+  }
+}
+
+function closeHud() {
+  const hud = document.getElementById('graph-hud-inspector');
+  const backdrop = document.getElementById('hud-close-backdrop');
+  if (hud) {
+    hud.classList.add('collapsed');
+    hud.classList.remove('open-mobile');
+    State.set({ hudCollapsed: true });
+  }
+  if (backdrop) {
+    backdrop.style.display = 'none';
   }
 }
 
@@ -312,6 +325,10 @@ function drawConnectors(nodes = []) {
   svg.setAttribute('width', `${canvas.scrollWidth}px`);
   svg.setAttribute('height', `${canvas.scrollHeight}px`);
 
+  const pubIds = (graphCache && graphCache.published_ids) || [];
+  const availIds = (graphCache && graphCache.available_ids) || [];
+  const draftIds = (graphCache && graphCache.draft_ids) || [];
+
   let pathsHtml = '';
   nodes.forEach(node => {
     if (!Array.isArray(node.prerequisites)) return;
@@ -321,6 +338,10 @@ function drawConnectors(nodes = []) {
     const tRect = targetCard.getBoundingClientRect();
     const tx = tRect.left - canvasRect.left + canvas.scrollLeft;
     const ty = tRect.top - canvasRect.top + canvas.scrollTop + tRect.height / 2;
+
+    const targetStatus = pubIds.includes(node.id) ? 'published' :
+                         availIds.includes(node.id) ? 'available' :
+                         draftIds.includes(node.id) ? 'draft' : 'locked';
 
     node.prerequisites.forEach(prereqId => {
       const sourceCard = document.querySelector(`.graph-node-card[data-node-id="${prereqId}"]`);
@@ -332,7 +353,7 @@ function drawConnectors(nodes = []) {
 
       const deltaX = Math.max(40, (tx - sx) / 2);
       const d = `M ${sx} ${sy} C ${sx + deltaX} ${sy}, ${tx - deltaX} ${ty}, ${tx} ${ty}`;
-      pathsHtml += `<path d="${d}" class="dag-connector-line" fill="none" />`;
+      pathsHtml += `<path d="${d}" class="dag-connector-line status-${targetStatus} ${targetStatus}" fill="none" />`;
     });
   });
 

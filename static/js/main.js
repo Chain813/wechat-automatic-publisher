@@ -145,11 +145,17 @@ function bindLanguageToggles() {
   const btnDesktop = document.getElementById('btn-lang-toggle');
   const btnMobile = document.getElementById('btn-lang-toggle-mobile');
 
-  const onToggle = () => {
-    const next = toggleLanguage();
-    const label = next === 'zh' ? 'EN' : '中文';
+  const updateLabels = (lang) => {
+    const label = lang === 'zh' ? 'EN' : '中文';
     if (btnDesktop) btnDesktop.textContent = label;
     if (btnMobile) btnMobile.textContent = label;
+  };
+
+  updateLabels(State.activeLanguage || 'zh');
+
+  const onToggle = () => {
+    const next = toggleLanguage();
+    updateLabels(next);
   };
 
   if (btnDesktop) btnDesktop.addEventListener('click', onToggle);

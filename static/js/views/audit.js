@@ -68,7 +68,10 @@ function bindPreviewModal() {
   const backdrop = document.getElementById('preview-modal-backdrop');
 
   const closeModal = () => {
-    if (modal) modal.classList.remove('open');
+    if (modal) {
+      modal.classList.remove('open');
+      modal.style.display = 'none';
+    }
     const iframe = document.getElementById('preview-iframe');
     if (iframe) iframe.src = 'about:blank';
   };
@@ -324,6 +327,7 @@ function openPreviewModal(previewId) {
   const iframe = document.getElementById('preview-iframe');
   if (modal && iframe) {
     iframe.src = `/api/preview/${encodeURIComponent(previewId)}`;
+    modal.style.display = 'flex';
     modal.classList.add('open');
   }
 }

@@ -171,98 +171,165 @@ def render_article_preview(article_text: str, article_title: str, images_mapping
             return (
                 '<p style="text-align:center;margin: 20px 0;">'
                 f'<img src="{img_url}" style="width:100%;max-width:600px;border-radius:12px;'
-                'box-shadow: 0 4px 12px rgba(0,0,0,0.1);">'
+                'box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px rgba(15,23,42,0.06);">'
                 '</p>'
             )
         else:
             return (
-                '<div style="margin: 20px auto; max-width: 600px; padding: 30px; text-align: center; '
-                'border: 2px dashed rgba(148, 163, 184, 0.3); border-radius: 12px; background: rgba(30, 41, 59, 0.2); '
-                'color: #94a3b8; font-family: sans-serif;">'
-                f'<div style="font-size: 24px; margin-bottom: 8px;">📷</div>'
-                f'<div style="font-size: 14px; font-weight: 600;">配图 #{current_idx+1}：{kw}</div>'
-                '<div style="font-size: 12px; margin-top: 4px; color: rgba(148, 163, 184, 0.6);">（尚未上传图片，拖拽图片到上方卡片进行配图）</div>'
+                '<section style="margin: 24px auto; max-width: 600px; padding: 24px 20px; text-align: center; '
+                'border: 1.5px dashed rgba(79, 91, 213, 0.3); border-radius: 14px; background: #F8F9FB; '
+                'color: #5E6470; box-shadow: 0 1px 2px rgba(0,0,0,0.02), inset 0 1px 0 rgba(255,255,255,1);">'
+                '<div style="display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 50%; background: rgba(79,91,213,0.08); margin-bottom: 8px;">'
+                '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4F5BD5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>'
                 '</div>'
+                f'<div style="font-size: 14.5px; font-weight: 600; color: #0C0D0E;">配图 #{current_idx+1}：{kw}</div>'
+                '<div style="font-size: 12px; margin-top: 4px; color: #8C919E;">（尚未配置图片，可直接上传或生成配图）</div>'
+                '</section>'
             )
 
     html_body = pattern_placeholder.sub(_replace_preview_placeholder, html_body)
         
-    # 5. Apply styling identical to article_utils.py
+    # 5. Apply Linear Modern Light styling aligned with article_utils.py
+    from core.shared.article_utils import _render_custom_callouts, _format_markdown_tables
+
+    html_body = _render_custom_callouts(html_body)
+    html_body = _format_markdown_tables(html_body)
+
     html_body = html_body.replace(
         '<p>', 
-        '<p style="margin-bottom: 15px; line-height: 1.8; text-align: justify; font-size: 16px; color: #333;">'
+        '<p style="margin-bottom: 16px; line-height: 1.85; text-align: justify; font-size: 16px; color: #334155;">'
     )
-    html_body = html_body.replace(
-        '<blockquote>', 
-        '<blockquote style="margin: 20px 0; padding: 15px 20px; border-left: 5px solid #0366d6; background-color: #f6f8fa; color: #586069; border-radius: 4px; font-size: 15px;">'
+    # Remove empty paragraphs
+    html_body = re.sub(r'<p style="[^"]*">\s*(?:&nbsp;|<br\s*/?>)?\s*</p>\s*', '', html_body)
+    html_body = re.sub(r'<p[^>]*>\s*(?:&nbsp;|<br\s*/?>)?\s*</p>\s*', '', html_body)
+
+    bq_style = (
+        'margin: 22px 0; padding: 16px 20px; border: 1px solid rgba(0,0,0,0.06); '
+        'border-left: 4px solid #4F5BD5; background-color: #F8F9FB; color: #5E6470; '
+        'border-radius: 8px; font-size: 15px; line-height: 1.75; box-shadow: 0 1px 2px rgba(0,0,0,0.02);'
+    )
+    html_body = re.sub(
+        r'<blockquote>(.*?)</blockquote>',
+        lambda m: f'<blockquote style="{bq_style}">{m.group(1).strip()}</blockquote>',
+        html_body,
+        flags=re.DOTALL
+    )
+
+    html_body = re.sub(
+        r'<h1>(.*?)</h1>',
+        r'<h1 style="margin-top: 36px; margin-bottom: 20px; font-size: 24px; color: #0C0D0E; font-weight: 700; line-height: 1.4; letter-spacing: -0.02em; border-bottom: 1px solid #E2E8F0; padding-bottom: 12px;">\1</h1>',
+        html_body
     )
     html_body = re.sub(
         r'<h2>(.*?)</h2>',
-        r'<h2 style="margin-top: 35px; margin-bottom: 20px; padding-bottom: 8px; border-bottom: 2px solid #eaecef; font-size: 22px; color: #24292e; font-weight: bold;">\1</h2>',
+        r'<h2 style="margin-top: 38px; margin-bottom: 22px; padding: 10px 16px; border-left: 4px solid #4F5BD5; background: linear-gradient(90deg, rgba(79,91,213,0.08) 0%, rgba(248,249,251,0) 100%); border-radius: 6px; font-size: 20px; color: #0C0D0E; font-weight: 700; letter-spacing: -0.01em;">\1</h2>',
         html_body
     )
     html_body = re.sub(
         r'<h3>(.*?)</h3>',
-        r'<h3 style="margin-top: 25px; margin-bottom: 15px; font-size: 18px; color: #0366d6; font-weight: bold; border-left: 4px solid #0366d6; padding-left: 10px;">\1</h3>',
+        r'<h3 style="margin-top: 28px; margin-bottom: 16px; font-size: 17px; color: #0C0D0E; font-weight: 600; border-left: 3px solid #4F5BD5; padding-left: 10px;">\1</h3>',
         html_body
     )
     html_body = html_body.replace(
         '<ul>',
-        '<ul style="margin-bottom: 20px; padding-left: 25px; line-height: 1.8; color: #333;">'
+        '<ul style="margin-bottom: 20px; padding-left: 22px; line-height: 1.85; color: #334155;">'
     )
     html_body = html_body.replace(
-        '<redbold>', '<strong style="color: #d73a49; font-weight: bold;">'
+        '<ol>',
+        '<ol style="margin-bottom: 20px; padding-left: 22px; line-height: 1.85; color: #334155;">'
+    )
+    html_body = html_body.replace(
+        '<li>',
+        '<li style="margin-bottom: 8px; line-height: 1.85; color: #334155;">'
+    )
+    html_body = re.sub(
+        r'<hr\s*/?>',
+        '<hr style="border: none; border-top: 1px solid #E2E8F0; margin: 32px 0;">',
+        html_body
+    )
+    html_body = html_body.replace(
+        '<redbold>', '<strong style="color: #e11d48; background-color: #ffe4e6; padding: 2px 6px; border-radius: 4px; font-weight: bold; border: 1px solid #fecdd3;">'
     ).replace(
         '</redbold>', '</strong>'
     )
     html_body = re.sub(
         r'<strong>(.*?)</strong>',
-        r'<strong style="color: #1a1a1a; font-weight: bold;">\1</strong>',
+        r'<strong style="color: #0C0D0E; font-weight: 700; background-color: rgba(79,91,213,0.06); padding: 1px 4px; border-radius: 3px;">\1</strong>',
         html_body
     )
     
-    # Mac code terminal style
-    mac_dots = '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;"><span style="width:10px;height:10px;border-radius:50%;background:#ef4444;display:inline-block;"></span><span style="width:10px;height:10px;border-radius:50%;background:#f59e0b;display:inline-block;"></span><span style="width:10px;height:10px;border-radius:50%;background:#10b981;display:inline-block;"></span></div>'
-    code_container_style = (
-        'margin: 20px 0; padding: 14px 18px; background-color: #1e293b; color: #f8fafc; '
-        'border-radius: 12px; font-family: Consolas, Monaco, "Courier New", monospace; '
-        'font-size: 13.5px; line-height: 1.65; overflow-x: auto; box-shadow: 0 6px 18px rgba(0,0,0,0.25);'
+    # Linear Modern Light Sunken Code Card
+    code_header = (
+        '<div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; background-color: #F1F3F7; border-bottom: 1px solid #E2E8F0;">'
+        '<div style="display: flex; align-items: center; gap: 6px;">'
+        '<span style="width: 10px; height: 10px; border-radius: 50%; background: #EF4444; display: inline-block;"></span>'
+        '<span style="width: 10px; height: 10px; border-radius: 50%; background: #F59E0B; display: inline-block;"></span>'
+        '<span style="width: 10px; height: 10px; border-radius: 50%; background: #10B981; display: inline-block;"></span>'
+        '</div>'
+        '<span style="font-size: 11px; font-weight: 600; color: #5E6470; letter-spacing: 0.05em; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">CODE</span>'
+        '</div>'
     )
+    def _format_code_block(match):
+        code_content = match.group(1)
+        return (
+            '<section style="margin: 22px 0; border: 1px solid #E2E8F0; border-radius: 10px; '
+            'background-color: #F8F9FB; box-shadow: 0 1px 2px rgba(0,0,0,0.03), inset 0 1px 0 rgba(255,255,255,1); '
+            'overflow: hidden; display: block;">'
+            f'{code_header}'
+            f'<pre style="margin: 0; padding: 14px 18px; background-color: #F8F9FB; color: #0C0D0E; '
+            f'font-family: Consolas, Monaco, \'Courier New\', monospace; font-size: 13.5px; line-height: 1.65; '
+            f'white-space: pre-wrap; word-break: break-all; border: none; overflow-x: auto; display: block;">{code_content}</pre>'
+            '</section>'
+        )
+
     html_body = re.sub(
         r'<pre>\s*<code[^>]*>(.*?)</code>\s*</pre>',
-        r'<div style="' + code_container_style + r'">' + mac_dots + r'<pre style="margin:0;padding:0;background:transparent;border:none;color:#f8fafc;font-family:inherit;white-space:pre-wrap;word-break:break-all;">\1</pre></div>',
+        _format_code_block,
         html_body,
         flags=re.DOTALL
     )
     
-    font_stack = "-apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif"
-    html_body = html_body.replace(
-        '<code>',
-        f'<code style="font-family: {font_stack}; background-color: #f1f5f9; padding: 2px 5px; border-radius: 4px; color: #2563eb; font-size: 0.95em;">'
+    html_body = re.sub(
+        r'<code>(.*?)</code>',
+        r'<code style="font-family: Consolas, Monaco, \'Courier New\', monospace; background-color: #F1F3F7; padding: 2px 6px; border-radius: 4px; color: #4F5BD5; border: 1px solid rgba(79,91,213,0.15); font-size: 0.92em;">\1</code>',
+        html_body
     )
     
-    # Wrap in a standard mobile preview wrapper
+    # Wrap in a Linear Modern Light mobile preview wrapper
     full_html = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
             body {{
                 margin: 0;
-                padding: 20px;
-                font-family: {font_stack};
-                background-color: #fff;
-                color: #333;
+                padding: 24px 16px;
+                font-family: "Inter", "Geist Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+                background-color: #F8F9FB;
+                color: #0C0D0E;
+                box-sizing: border-box;
+                display: flex;
+                justify-content: center;
+            }}
+            .article-preview-container {{
+                width: 100%;
                 max-width: 677px;
-                margin: 0 auto;
+                background-color: #FFFFFF;
+                border: 1px solid rgba(0, 0, 0, 0.06);
+                border-radius: 16px;
+                padding: 32px 28px;
+                box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 4px 16px rgba(15, 23, 42, 0.04), inset 0 1px 0 rgba(255, 255, 255, 1);
                 box-sizing: border-box;
             }}
         </style>
     </head>
     <body>
-        <h1 style="font-size: 22px; line-height: 1.4; margin-bottom: 20px; font-weight: bold; color: #333;">{article_title}</h1>
-        {html_body}
+        <div class="article-preview-container">
+            <h1 style="font-size: 24px; line-height: 1.4; margin-top: 0; margin-bottom: 24px; font-weight: 700; color: #0C0D0E; border-bottom: 1px solid #E2E8F0; padding-bottom: 16px; letter-spacing: -0.02em;">{article_title}</h1>
+            {html_body}
+        </div>
     </body>
     </html>
     """

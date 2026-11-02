@@ -6,6 +6,7 @@
 ============================================================
 """
 import os
+import re
 import textwrap
 from loguru import logger
 
@@ -113,18 +114,18 @@ def render_formula_card(title, formula_lines, notes=None, output_path="formula.p
 
         # 标题 (Linear Indigo)
         ax.text(
-            0.5, 0.9, title,
+            0.5, 0.88, title,
             ha="center", va="top",
             fontsize=16, fontweight="bold",
             color="#4F5BD5",
         )
 
-        # 公式（每行一个，墨黑高对比）
+        # 公式（每行一个，墨黑高对比，精准垂直居中防止与标题重叠）
         n = len(formula_lines)
+        y_positions = [0.52] if n == 1 else [0.68 - i * (0.42 / max(n - 1, 1)) for i in range(n)]
         for i, formula in enumerate(formula_lines):
-            y = 0.72 - i * (0.5 / max(n, 1))
             ax.text(
-                0.5, y, f"${formula}$",
+                0.5, y_positions[i], f"${formula}$",
                 ha="center", va="center",
                 fontsize=18, color="#0C0D0E",
             )
@@ -180,8 +181,13 @@ def render_comparison_card(title, columns, rows, output_path="compare.png"):
         rcParams["axes.unicode_minus"] = False
 
         n_rows = len(rows)
-        fig_height = max(3, 1.5 + n_rows * 0.5)
-        fig, ax = plt.subplots(figsize=(8, fig_height))
+        n_cols = len(columns)
+        # 自适应多列宽度与行高，多列场景防止文字水平挤压重叠
+        fig_width = max(8.0, n_cols * 2.5) if n_cols >= 4 else 8.0
+        fig_height = max(3.2, 1.8 + n_rows * 0.55)
+        fontsize = 10 if n_cols <= 3 else (9 if n_cols <= 4 else 8)
+
+        fig, ax = plt.subplots(figsize=(fig_width, fig_height))
         fig.patch.set_facecolor("#F8F9FB")
         ax.set_facecolor("#F8F9FB")
         ax.axis("off")
@@ -189,7 +195,7 @@ def render_comparison_card(title, columns, rows, output_path="compare.png"):
         # 标题 (Linear Indigo)
         ax.set_title(
             title, fontsize=16, fontweight="bold",
-            color="#4F5BD5", pad=15
+            color="#4F5BD5", pad=16
         )
 
         # 创建表格 (Linear Modern Light: 白底单元格 + 极浅灰表头)
@@ -207,8 +213,8 @@ def render_comparison_card(title, columns, rows, output_path="compare.png"):
             colColours=["#F1F3F7"] * len(columns),
         )
         table.auto_set_font_size(False)
-        table.set_fontsize(11)
-        table.scale(1.0, 1.6)
+        table.set_fontsize(fontsize)
+        table.scale(1.0, 1.8)
 
         # 设置单元格样式
         for key, cell in table.get_celld().items():
@@ -238,22 +244,27 @@ def _wrap_chinese_text(text, max_units=40):
     """
     针对中英混合文本的自适应折行函数：
     中文字符/全角标点计为 2 个单位宽度，英文字符/数字/半角标点计为 1 个单位宽度。
+    保护完整英文单词/数字，防止在单词内部被截断拆分。
     """
     if not text:
         return ""
+    # 将文本切分为中文字符与连续英文单词/数字/符号块
+    tokens = re.findall(r'[a-zA-Z0-9_\-\.\%]+|[^\w\s]|\s|[\u4e00-\u9fa5]|.', text)
     lines = []
     current_line = ""
     current_units = 0
 
-    for char in text:
-        unit = 2 if ord(char) > 127 else 1
-        if current_units + unit > max_units and current_line:
+    for token in tokens:
+        if not token:
+            continue
+        token_units = sum(2 if ord(c) > 127 else 1 for c in token)
+        if current_units + token_units > max_units and current_line:
             lines.append(current_line)
-            current_line = char
-            current_units = unit
+            current_line = token.lstrip()
+            current_units = sum(2 if ord(c) > 127 else 1 for c in current_line)
         else:
-            current_line += char
-            current_units += unit
+            current_line += token
+            current_units += token_units
 
     if current_line:
         lines.append(current_line)
@@ -306,18 +317,18 @@ def render_text_card(title, bullet_points, output_path="card.png"):
         ax.add_patch(bg)
 
         ax.text(
-            0.5, 0.92, title,
+            0.5, 0.90, title,
             ha="center", va="top",
             fontsize=15, fontweight="bold", color="#4F5BD5"
         )
 
         n = len(wrapped_points)
+        y_positions = [0.52] if n == 1 else [0.74 - i * (0.52 / max(n - 1, 1)) for i in range(n)]
         for i, wrapped in enumerate(wrapped_points):
-            y = 0.82 - i * (0.75 / max(n, 1))
             ax.text(
-                0.08, y, f"• {wrapped}",
-                ha="left", va="top",
-                fontsize=11, color="#0C0D0E",
+                0.08, y_positions[i], f"• {wrapped}",
+                ha="left", va="center",
+                fontsize=11.5, color="#0C0D0E",
                 linespacing=1.4
             )
 

@@ -940,59 +940,85 @@ def preview_draft(preview_id):
 
     fallback_html = """
     <!DOCTYPE html>
-    <html>
+    <html lang="zh-CN">
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>草稿预览说明</title>
         <style>
-            body {{
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                background-color: #0f172a;
-                color: #f8fafc;
-                padding: 40px 20px;
-                text-align: center;
+            *, *::before, *::after {
+                box-sizing: border-box;
                 margin: 0;
-            }}
-            .card {{
-                max-width: 500px;
+                padding: 0;
+            }
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+                background-color: #F8F9FB;
+                color: #0C0D0E;
+                padding: 48px 20px;
+                text-align: center;
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .card {
+                max-width: 480px;
+                width: 100%;
                 margin: 0 auto;
-                background: rgba(30, 41, 59, 0.7);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 16px;
-                padding: 30px;
-                box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
-                backdrop-filter: blur(10px);
-            }}
-            .icon {{
-                font-size: 48px;
-                margin-bottom: 16px;
-            }}
-            h3 {{
-                margin-top: 0;
-                color: #38bdf8;
-                font-size: 20px;
-            }}
-            p {{
-                color: #94a3b8;
-                font-size: 14px;
+                background: #FFFFFF;
+                border: 1px solid rgba(0, 0, 0, 0.06);
+                border-radius: 14px;
+                padding: 36px 28px;
+                box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 8px 24px rgba(15, 23, 42, 0.05), inset 0 1px 0 0 #FFFFFF;
+            }
+            .icon-wrapper {
+                width: 48px;
+                height: 48px;
+                border-radius: 12px;
+                background: rgba(79, 91, 213, 0.08);
+                color: #4F5BD5;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                margin-bottom: 18px;
+            }
+            h3 {
+                margin: 0 0 10px;
+                color: #0C0D0E;
+                font-size: 17px;
+                font-weight: 600;
+                letter-spacing: -0.01em;
+            }
+            p {
+                color: #5E6470;
+                font-size: 13px;
                 line-height: 1.6;
-            }}
-            .badge {{
+                margin: 6px 0;
+            }
+            .badge {
                 display: inline-block;
-                background: rgba(56, 189, 248, 0.15);
-                color: #38bdf8;
-                padding: 4px 12px;
-                border-radius: 20px;
+                background: rgba(79, 91, 213, 0.08);
+                color: #4F5BD5;
+                padding: 4px 14px;
+                border-radius: 9999px;
                 font-size: 12px;
-                margin-top: 15px;
-                border: 1px solid rgba(56, 189, 248, 0.3);
-            }}
+                font-weight: 500;
+                margin-top: 20px;
+                border: 1px solid rgba(79, 91, 213, 0.25);
+            }
         </style>
     </head>
     <body>
         <div class="card">
-            <div class="icon">[Draft]</div>
+            <div class="icon-wrapper">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                </svg>
+            </div>
             <h3>微信远端草稿提示</h3>
             <p>该文章记录创建时间较早，或对应微信草稿已被发布/删除/转移。</p>
             <p>系统出于安全保护，未在本地留下额外静态缓存。</p>

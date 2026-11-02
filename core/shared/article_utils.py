@@ -521,7 +521,7 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
             return (
                 '<p style="text-align:center;margin: 20px 0;">'
                 f'<img src="{image_url}" style="width:100%;max-width:600px;border-radius:12px;'
-                'box-shadow: 0 4px 12px rgba(0,0,0,0.1);">'
+                'box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px rgba(15,23,42,0.06);">'
                 '</p>'
             )
         else:
@@ -567,7 +567,7 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
                 image_html = (
                     '<p style="text-align:center;margin: 20px 0;">'
                     f'<img src="{image_url}" style="width:100%;max-width:600px;border-radius:12px;'
-                    'box-shadow: 0 4px 12px rgba(0,0,0,0.1);">'
+                    'box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px rgba(15,23,42,0.06);">'
                     "</p>"
                 )
                 html_body = pattern.sub(lambda m: image_html, html_body)
@@ -683,6 +683,13 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
         flags=re.DOTALL
     )
 
+    # 统一 H1 标题样式 (Linear Modern Light: 墨黑字体 + 底边淡灰精致分隔)
+    html_body = re.sub(
+        r'<h1>(.*?)</h1>',
+        r'<h1 style="margin-top: 40px; margin-bottom: 24px; font-size: 24px; color: #0C0D0E; font-weight: 700; line-height: 1.4; letter-spacing: -0.02em; border-bottom: 1px solid #E2E8F0; padding-bottom: 12px;">\1</h1>',
+        html_body
+    )
+
     # 统一 H2 标题样式 (Linear Modern Light: Indigo 左侧条 + 渐变微光底色 + 墨黑字体)
     html_body = re.sub(
         r'<h2>(.*?)</h2>',
@@ -697,7 +704,7 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
         html_body
     )
 
-    # 统一列表样式
+    # 统一列表样式 (包含 ul, ol 以及 li 单项间距与墨深颜色)
     html_body = html_body.replace(
         '<ul>',
         '<ul style="margin-bottom: 20px; padding-left: 22px; line-height: 1.85; color: #334155;">'
@@ -705,6 +712,17 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
     html_body = html_body.replace(
         '<ol>',
         '<ol style="margin-bottom: 20px; padding-left: 22px; line-height: 1.85; color: #334155;">'
+    )
+    html_body = html_body.replace(
+        '<li>',
+        '<li style="margin-bottom: 8px; line-height: 1.85; color: #334155;">'
+    )
+
+    # 统一分隔线样式 (Linear Modern Light 淡灰细线)
+    html_body = re.sub(
+        r'<hr\s*/?>',
+        '<hr style="border: none; border-top: 1px solid #E2E8F0; margin: 32px 0;">',
+        html_body
     )
 
     # 重点分级样式：红色加粗微光卡片（最核心顿悟时刻） → 黑色加粗徽章（重要术语）

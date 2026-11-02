@@ -121,7 +121,9 @@ class StateStore {
       if (isPaused) nextEngineState = WORKFLOW_STATES.PAUSED;
       else if (isRunning) nextEngineState = WORKFLOW_STATES.RUNNING;
 
-      this.set({ engineState: nextEngineState });
+      if (this.engineState !== nextEngineState) {
+        this.transitionEngine(nextEngineState);
+      }
       this.emit('status:resync', data);
       return data;
     } catch (err) {
