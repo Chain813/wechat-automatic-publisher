@@ -80,10 +80,13 @@ export async function request(url, options = {}) {
     const response = await fetch(url, config);
 
     if (response.status === 401) {
-      showToast('登录态已失效，正在跳转认证页...', 'warning');
-      setTimeout(() => {
-        window.location.href = '/';
-      }, 800);
+      if (!window.__awRedirectingToLogin) {
+        window.__awRedirectingToLogin = true;
+        showToast('登录态已失效，正在跳转认证页...', 'warning');
+        setTimeout(() => {
+          window.location.replace('/login');
+        }, 250);
+      }
       throw new Error('Unauthorized');
     }
 

@@ -36,7 +36,7 @@
 @media (max-width: 767px) {
   .app-shell {
     padding-top: 48px;
-    padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px));
   }
   .view-stage {
     padding: 12px;
@@ -279,6 +279,9 @@
 @media (max-width: 899px) {
   #pipeline-timeline-view {
     grid-template-columns: 1fr;
+  }
+  .pipeline-side-panel {
+    order: -1;
   }
 }
 
@@ -564,6 +567,8 @@
 
 /* Raw Monospace Log Well */
 .pipeline-raw-well {
+  flex-direction: column;
+  gap: 2px;
   background: var(--surface-sunken);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
@@ -587,6 +592,32 @@
 @media (max-width: 767px) {
   .asset-slots-grid {
     grid-template-columns: 1fr;
+  }
+  .pipeline-stage-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .pipeline-stage-header .mode-toggle-btn {
+    min-height: 44px;
+    padding: 8px 14px;
+  }
+  .side-card-stream {
+    order: -1;
+  }
+  .mini-stream-feed {
+    max-height: 220px;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  .pipeline-raw-well {
+    max-height: none;
+    overflow-y: visible;
+    padding: 12px;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 }
 

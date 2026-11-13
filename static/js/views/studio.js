@@ -70,8 +70,10 @@ function bindRedrawBar() {
         showToast(msg, 'error');
       }
     } catch (err) {
-      if (resultsBox) resultsBox.innerHTML = `<div style="padding:12px;font-size:13px;color:var(--status-danger);">重绘异常: ${err.message}</div>`;
-      showToast(`重绘异常: ${err.message}`, 'error');
+      if (err?.message !== 'Unauthorized') {
+        if (resultsBox) resultsBox.innerHTML = `<div style="padding:12px;font-size:13px;color:var(--status-danger);">重绘异常: ${err.message}</div>`;
+        showToast(`重绘异常: ${err.message}`, 'error');
+      }
     } finally {
       btn.disabled = false;
       btn.innerHTML = origHtml;
@@ -111,7 +113,7 @@ function bindPromptExtraction() {
         showToast(data?.message || '提取提示词失败', 'error');
       }
     } catch (err) {
-      showToast(`提取提示词请求失败: ${err.message}`, 'error');
+      if (err?.message !== 'Unauthorized') showToast(`提取提示词请求失败: ${err.message}`, 'error');
     } finally {
       btn.disabled = false;
       btn.innerHTML = origHtml;
@@ -246,7 +248,7 @@ async function handleUploadFile(file, index) {
       showToast(res?.message || '图片上传失败', 'error');
     }
   } catch (err) {
-    showToast(`上传网络异常: ${err.message}`, 'error');
+    if (err?.message !== 'Unauthorized') showToast(`上传网络异常: ${err.message}`, 'error');
   } finally {
     renderPromptCards();
   }
@@ -287,7 +289,7 @@ function bindStudioPreview() {
         showToast(data?.message || '生成图文预览失败', 'error');
       }
     } catch (err) {
-      showToast(`预览渲染异常: ${err.message}`, 'error');
+      if (err?.message !== 'Unauthorized') showToast(`预览渲染异常: ${err.message}`, 'error');
     } finally {
       btn.disabled = false;
       btn.innerHTML = origHtml;

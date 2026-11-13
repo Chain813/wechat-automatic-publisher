@@ -66,10 +66,16 @@
   padding: 0;
 }
 
-html, body {
-  height: 100%;
+html {
+  height: auto;
+  min-height: 100%;
+  overflow-x: clip;
+}
+
+body {
+  height: auto;
   min-height: 100dvh;
-  overflow-x: hidden;
+  overflow-x: clip;
   font-family: var(--font-sans);
   color: var(--text-primary);
   background-color: var(--bg-base);

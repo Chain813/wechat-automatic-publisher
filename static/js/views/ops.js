@@ -146,7 +146,7 @@ function bindSourcesActions() {
         showToast(data?.message || '信源检测未通过', 'warning');
       }
     } catch (err) {
-      showToast(`信源测试失败: ${err.message}`, 'error');
+      notifyOpsError('信源测试失败', err);
     } finally {
       btn.disabled = false;
       btn.innerHTML = origHtml;
@@ -205,7 +205,7 @@ function bindJobRowActions(container) {
         await apiPost('/api/schedule/pause', { job_id: btn.dataset.id });
         showToast('定时任务已暂停', 'info');
         loadScheduleJobs();
-      } catch (e) { showToast(`暂停失败: ${e.message}`, 'error'); }
+      } catch (e) { notifyOpsError('暂停失败', e); }
     });
   });
 
@@ -215,7 +215,7 @@ function bindJobRowActions(container) {
         await apiPost('/api/schedule/resume', { job_id: btn.dataset.id });
         showToast('定时任务已恢复', 'success');
         loadScheduleJobs();
-      } catch (e) { showToast(`恢复失败: ${e.message}`, 'error'); }
+      } catch (e) { notifyOpsError('恢复失败', e); }
     });
   });
 
@@ -226,7 +226,7 @@ function bindJobRowActions(container) {
         await apiPost('/api/schedule/remove', { job_id: btn.dataset.id });
         showToast('定时任务已移除', 'info');
         loadScheduleJobs();
-      } catch (e) { showToast(`删除失败: ${e.message}`, 'error'); }
+      } catch (e) { notifyOpsError('删除失败', e); }
     });
   });
 }
@@ -256,7 +256,7 @@ function bindScheduleActions() {
         showToast(res?.message || '添加失败', 'error');
       }
     } catch (err) {
-      showToast(`添加任务异常: ${err.message}`, 'error');
+      notifyOpsError('添加任务异常', err);
     } finally {
       btn.disabled = false;
       btn.innerHTML = origHtml;
@@ -293,7 +293,7 @@ async function loadSystemSettings() {
       sdEl.textContent = sd.connected ? `已连接 (${sd.url})` : '文字卡片兜底模式';
     }
   } catch (err) {
-    showToast(`载入系统配置失败: ${err.message}`, 'error');
+    notifyOpsError('载入系统配置失败', err);
   }
 }
 
@@ -327,7 +327,7 @@ function bindSettingsForm() {
       if (res?.status === 'success') showToast('系统设置已成功保存', 'success');
       else showToast(res?.message || '设置保存未成功', 'warning');
     } catch (err) {
-      showToast(`保存异常: ${err.message}`, 'error');
+      notifyOpsError('保存异常', err);
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = '保存全部设置'; }
     }
@@ -335,6 +335,11 @@ function bindSettingsForm() {
 
   if (form) form.addEventListener('submit', onSave);
   if (btn && (!form || btn.form !== form)) btn.addEventListener('click', onSave);
+}
+
+function notifyOpsError(prefix, err) {
+  if (err?.message === 'Unauthorized') return;
+  showToast(`${prefix}: ${err?.message || err}`, 'error');
 }
 
 function getVal(id) {

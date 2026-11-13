@@ -92,8 +92,10 @@ export async function loadAuditData() {
 
     articlesCache = normalizeHistoryData(data);
     renderArticles(filterArticles(articlesCache, currentFilterTab));
-  } catch (_) {
-    showToast('加载审稿历史列表失败', 'error');
+  } catch (err) {
+    if (err?.message !== 'Unauthorized') {
+      showToast('加载审稿历史列表失败', 'error');
+    }
   } finally {
     if (container) {
       container.classList.remove('loading-state');

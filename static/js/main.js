@@ -39,12 +39,13 @@ function initLoginFlow(form) {
       return;
     }
 
-    document.cookie = `aw_token=${encodeURIComponent(pwd)}; path=/; max-age=604800; SameSite=Lax`;
+    const secureAttr = window.location.protocol === 'https:' ? '; Secure' : '';
+    document.cookie = `aw_token=${encodeURIComponent(pwd)}; path=/; max-age=604800; SameSite=Lax${secureAttr}`;
 
     try {
-      const res = await fetch('/api/config');
+      const res = await fetch('/api/config', { cache: 'no-store' });
       if (res.ok) {
-        window.location.href = '/';
+        window.location.replace('/');
       } else {
         if (errorEl) {
           errorEl.textContent = 'Token 校验失败，请核对后重试';
@@ -198,9 +199,33 @@ function closeAllModals() {
   }
 }
 
+let _lastSessionCheckAt = 0;
+
+async function verifySessionOrRedirect(force = false) {
+  const now = Date.now();
+  if (!force && now - _lastSessionCheckAt < 10000) return;
+  _lastSessionCheckAt = now;
+  try {
+    const res = await fetch('/api/config', { cache: 'no-store' });
+    if (res.status === 401 && !window.__awRedirectingToLogin) {
+      window.__awRedirectingToLogin = true;
+      window.location.replace('/login');
+    }
+  } catch (_) {
+    // Ignore transient offline errors during resume
+  }
+}
+
 function bindVisibilityResync() {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
+      verifySessionOrRedirect(false);
+      State.resyncRunningStatus();
+    }
+  });
+  window.addEventListener('pageshow', (event) => {
+    verifySessionOrRedirect(Boolean(event.persisted));
+    if (event.persisted) {
       State.resyncRunningStatus();
     }
   });

@@ -1,7 +1,9 @@
 import os
 import re
+import hmac
 import threading
-from flask import Flask, render_template, jsonify, request
+from urllib.parse import unquote
+from flask import Flask, render_template, jsonify, request, redirect
 from core.shared.runtime import configure_runtime, log_queue
 from core.engine import run_main
 import queue
@@ -42,6 +44,37 @@ CLOUD_MODE = os.getenv("CLOUD_MODE", "").strip() == "1"
 WEBUI_TOKEN = os.getenv("WEBUI_TOKEN", "").strip()
 
 
+def _extract_request_token() -> str:
+    raw_cookie = request.cookies.get("aw_token", "")
+    if raw_cookie:
+        return raw_cookie
+    auth_header = request.headers.get("Authorization", "")
+    return auth_header.replace("Bearer ", "").strip()
+
+
+def _token_matches(candidate: str) -> bool:
+    if not WEBUI_TOKEN or not candidate:
+        return False
+    decoded = unquote(candidate)
+    return hmac.compare_digest(candidate, WEBUI_TOKEN) or hmac.compare_digest(decoded, WEBUI_TOKEN)
+
+
+def _render_login_page():
+    if os.path.exists("templates/login.html"):
+        return render_template("login.html")
+    return ("[Security] AutoWeChat Cloud — 需要 token 认证", 401)
+
+
+@app.after_request
+def _apply_cache_headers(response):
+    mimetype = (response.mimetype or "").lower()
+    if request.path in ("/", "/login") or request.path.startswith("/api/") or mimetype == "text/html":
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
 # ---- Token 认证中间件（云端模式） ----
 @app.before_request
 def _check_auth():
@@ -53,25 +86,23 @@ def _check_auth():
     if request.path == "/api/status":
         return None
 
-    # 静态资源无需认证（登录页需加载 /static 下的样式与 3D 背景脚本）
+    # 静态资源与登录页本身无需认证
     if request.path.startswith("/static/"):
+        return None
+    if request.path == "/login" and request.method in ("GET", "HEAD"):
         return None
 
     # /api/start 允许通过 ?token=xxx 参数验证（GitHub Actions curl 用）
     if request.path == "/api/start" and request.method == "POST":
         token = request.args.get("token", "")
-        if token == WEBUI_TOKEN:
+        if _token_matches(token):
             return None
 
     # 其他页面检查 Cookie 或 Authorization header
-    token = request.cookies.get("aw_token", "")
-    if not token:
-        token = request.headers.get("Authorization", "").replace("Bearer ", "")
-
-    if token != WEBUI_TOKEN:
+    if not _token_matches(_extract_request_token()):
         # 如果是浏览器请求 / 且无 token，显示登录页
-        if request.path == "/" and request.method == "GET":
-            return render_template("login.html") if os.path.exists("templates/login.html") else ("[Security] AutoWeChat Cloud — 需要 token 认证", 401)
+        if request.path == "/" and request.method in ("GET", "HEAD"):
+            return _render_login_page()
         return jsonify({"status": "error", "message": "Unauthorized"}), 401
 
     return None
@@ -160,6 +191,13 @@ def _mask_secret(value):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
+@app.route('/login', methods=['GET', 'HEAD'])
+def login_page():
+    if not CLOUD_MODE or not WEBUI_TOKEN or _token_matches(_extract_request_token()):
+        return redirect('/')
+    return _render_login_page()
 
 
 # ---- 定时调度 API ----

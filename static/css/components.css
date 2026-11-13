@@ -361,11 +361,17 @@
 }
 
 /* Touch targets enforcement on Tablet & Mobile */
-@media (max-width: 1023px) {
+@media (max-width: 1180px), (pointer: coarse) {
   .btn,
   .nav-pill,
   .filter-pill,
-  .dock-item {
+  .dock-item,
+  .workflow-seg-btn,
+  .workflow-item,
+  .mode-toggle-btn,
+  .ops-tab-btn,
+  .linear-input,
+  .linear-select {
     min-height: 44px;
     touch-action: manipulation;
   }
