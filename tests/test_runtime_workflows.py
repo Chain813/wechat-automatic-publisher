@@ -107,6 +107,21 @@ class TestRuntimeWorkflowsSafety:
             assert article_text == ""
             assert concept == ""
 
+    def test_daily_knowledge_placeholder_normalization_and_capping(self):
+        from daily_knowledge.workflow import _normalize_and_cap_placeholders
+        raw_text = (
+            "段落一\n【此处绘制图表：图表一寓言场景】\n"
+            "段落二\n【此处绘制示意图：示意图二机制】\n"
+            "段落三\n【此处插入配图：配图三画面】\n"
+            "段落四\n【此处绘制架构图：架构图四细节】\n"
+        )
+        normalized = _normalize_and_cap_placeholders(raw_text, max_images=3)
+        # 前 3 个必须被转为【此处插入配图：...】
+        assert normalized.count("【此处插入配图：") == 3
+        # 超过上限的第 4 个必须转为【此处绘制图表：...】
+        assert normalized.count("【此处绘制图表：") == 1
+        assert "架构图四细节" in normalized
+
     def test_preview_id_traversal_sanitization(self):
         from webui import app
         with app.test_client() as client:

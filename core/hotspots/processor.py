@@ -281,16 +281,18 @@ def _auto_add_placeholders(article, topic, min_count=3):
 
 def _is_article_truncated(article):
     """检测文章是否被 API 静默截断（结尾不完整）"""
-    if not article:
+    if not article or len(article.strip()) < 500:
         return True
     stripped = article.rstrip()
-    # 正常结尾应该是句号、感叹号、问号、引号、或品牌关注语
-    valid_endings = ['。', '！', '？', '"', '）', '】', '。*', '！*', '？*']
-    if not any(stripped.endswith(end) for end in valid_endings):
-        # 检查是否以品牌关注语结尾
-        if BRAND_NAME not in stripped[-50:]:
-            return True
-    return False
+    # 剥除尾部 Markdown 格式符号与空白，准确定位最后有效字符
+    clean_tail = re.sub(r'[\s\*_#>`~\-—]+$', '', stripped)
+    valid_endings = ('。', '！', '？', '…', '"', '”', '’', '）', '】', '》', '.', '!', '?')
+    if clean_tail and clean_tail.endswith(valid_endings):
+        return False
+    # 检查末尾是否包含品牌关注语或结语标记
+    if BRAND_NAME in stripped[-100:] or "关注" in stripped[-60:] or "洞见" in stripped[-60:]:
+        return False
+    return True
 
 
 def _auto_add_quotes(article, min_count=3):

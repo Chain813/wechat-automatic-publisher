@@ -36,7 +36,7 @@ def generate_daily_knowledge(domain: str = "人工智能与深度学习", max_re
         
         user_prompt = f"请为领域【{domain}】生成今天的每日小知识寓言。\n"
         user_prompt += "【排版铁律】：严禁使用任何 LaTeX 数学公式与 $...$ 美元符号！所有变量与表达式必须直接写成纯文本（如写 K 而非 $K$，写 x_i 而非 $x_i$，写 ≥ 而非 \\ge）。\n"
-        user_prompt += "【配图铁律】：文章中必须包含 3-5 个 `【此处绘制图表：...】` 占位符，分布在寓言场景、概念揭底、计算流程等各个小节，绝对不能少于 3 个！\n"
+        user_prompt += "【配图铁律】：文章中必须包含 2-3 个 `【此处插入配图：...】` 占位符（详细描摹生动的寓言场景画面或底层算法机制示意），分布在寓言故事高潮与概念揭底等关键小节，以便调用 AI 生图 API 渲染高质量插图！\n"
         if historical_concepts:
             user_prompt += "注意，请绝对不要使用以下已经在历史中讲述过的概念：\n"
             user_prompt += ", ".join(historical_concepts) + "\n"

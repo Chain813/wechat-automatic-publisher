@@ -287,9 +287,9 @@ class ParallelPublishNode(BaseNode):
                 digest=digest,
             )
 
-            # 主编审校门禁 (Critic & Quality Gate)
-            from core.pipeline.critic import evaluate_article_quality, format_critic_report
-            review_res = evaluate_article_quality(clean_title, final_html)
+            # 主编审校门禁与自愈闭环 (Critic & Quality Gate with Auto-Remediation)
+            from core.pipeline.critic import evaluate_and_repair_article, format_critic_report
+            final_html, review_res = evaluate_and_repair_article(clean_title, final_html, article_type="hotspots")
             print(format_critic_report(review_res))
 
             source_url = getattr(topic, "url", "") if hasattr(topic, "url") else ""

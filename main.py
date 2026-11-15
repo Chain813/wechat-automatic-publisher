@@ -7,10 +7,10 @@ from core.engine import run_main
 
 
 if __name__ == "__main__":
+    configure_runtime()
     parser = argparse.ArgumentParser(description="AutoWeChat AI 内容工厂")
     parser.add_argument("--task", choices=["hotspots", "github", "aikepu", "daily_knowledge"], default="hotspots",
                         help="任务类型: hotspots (热点发布), github (开源项目), aikepu (体系科普) 或 daily_knowledge (每日小知识)")
     args = parser.parse_args()
 
-    configure_runtime()
     run_main(task_type=args.task)

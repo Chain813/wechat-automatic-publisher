@@ -3,7 +3,7 @@
   体系连载文章生成器 v3.0 (三阶段 Map-Reduce 架构)
   阶段1: 大纲生成
   阶段2: LLM 提示词自优化 (跨节一致性保障)
-  阶段3: 串行生成 + 上文衔接
+  阶段3: ThreadPoolExecutor 多节并行协同生成
 ============================================================
 """
 import os
@@ -420,7 +420,7 @@ def generate_aikepu_article(topic_info):
     三阶段 Map-Reduce 架构生成 15000+ 字长文：
     阶段1: 大纲生成
     阶段2: LLM 提示词自优化 (跨节一致性保障)
-    阶段3: 串行生成 + 上文衔接
+    阶段3: ThreadPoolExecutor 多节并行协同生成
     """
     title = topic_info.get("title", "")
     tags = topic_info.get("tags", [])
@@ -451,20 +451,36 @@ def generate_aikepu_article(topic_info):
     def _run_subagent_worker(args):
         idx, opt_sec = args
         sec_title = opt_sec.get("title", f"第 {idx + 1} 节")
-        logger.info("✍️  [子 Agent-{}/{}] 开始生成小节: {}", idx + 1, len(optimized), sec_title)
-        content = _generate_section(
-            title, diff_label, opt_sec,
-            prev_tail="",  # 在并行 Map 模式下依靠阶段 2 提供的定制 Prompt 和禁忌块控制内容边界
-            section_index=idx,
-            total_sections=len(optimized),
-            custom_prompt=custom_prompt
-        )
-        if content:
-            logger.info("✅ [子 Agent-{}/{}] 小节生成完毕", idx + 1, len(optimized))
-            return idx, content.strip()
-        else:
-            logger.warning("❌ [子 Agent-{}/{}] 小节生成失败", idx + 1, len(optimized))
-            return idx, ""
+        logger.info("[子 Agent-{}/{}] 启动小节撰写: {}", idx + 1, len(optimized), sec_title)
+        
+        # 提取前置章节上下文衔接标记，保障章节过渡自然
+        prev_summary = ""
+        if idx > 0 and idx - 1 < len(optimized):
+            prev_sec = optimized[idx - 1]
+            prev_summary = f"前序章节「{prev_sec.get('title', '')}」的核心脉络，请紧承其推导逻辑，严禁重复前文细节。"
+
+        # 子 Agent 独立容错闭环（最多 2 次尝试，确保零断节）
+        for attempt in range(1, 3):
+            try:
+                content = _generate_section(
+                    title, diff_label, opt_sec,
+                    prev_tail=prev_summary,
+                    section_index=idx,
+                    total_sections=len(optimized),
+                    custom_prompt=custom_prompt
+                )
+                if content and len(content.strip()) > 300:
+                    logger.info("[子 Agent-{}/{}] 小节创作完成 (字数: {})", idx + 1, len(optimized), len(content))
+                    return idx, content.strip()
+                logger.warning("[子 Agent-{}/{}] 第 {} 次输出不足，正在自愈重试...", idx + 1, len(optimized), attempt)
+            except Exception as e:
+                logger.warning("[子 Agent-{}/{}] 第 {} 次生成异常: {}", idx + 1, len(optimized), attempt, e)
+
+        # 降级兜底生成，确保小节内容绝不丢失
+        logger.warning("[子 Agent-{}/{}] 触发应急保底生成", idx + 1, len(optimized))
+        fallback_prompt = f"请以严谨学术风格深入撰写章节「{sec_title}」，要求字数不少于 1200 字，包含核心原理解析与应用论证。"
+        fallback_res = call_deepseek_with_retry(fallback_prompt, system_content=load_aikepu_skill_prompt(), timeout=120)
+        return idx, (fallback_res or f"## {sec_title}\n\n本章节聚焦于 {sec_title} 的核心技术原理。").strip()
 
     section_results = [None] * len(optimized)
     max_workers = min(4, len(optimized))

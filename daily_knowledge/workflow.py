@@ -8,15 +8,44 @@ from concurrent.futures import ThreadPoolExecutor
 from daily_knowledge.engine import generate_daily_knowledge
 from core.shared.article_utils import process_article_content, _print_review_report
 from core.shared.runtime import check_cancelled
+from core.shared.llm import validate_title
+from utils.image_handler import download_cover_image, reset_image_cache
+from core.pipeline.critic import evaluate_and_repair_article, format_critic_report
+
+def _normalize_and_cap_placeholders(text: str, max_images: int = 3) -> str:
+    """
+    统一占位符格式并支持通义万相 AI 生图。
+    前 max_images 个转为真实配图占位符，多余的保留为图表分析卡片。
+    """
+    if not text:
+        return text
+    # 统一图表/配图描述为统一配图占位符
+    text = re.sub(
+        r'【\s*(?:此处绘制图表|此处绘制示意图|此处绘制架构图|此处绘制流程图|此处绘制)\s*[：:](.*?)\s*】',
+        r'【此处插入配图：\1】',
+        text
+    )
+    matches = list(re.finditer(r'【\s*此处插入配图\s*[：:](.*?)\s*】', text))
+    if len(matches) > max_images:
+        count = 0
+        def _repl(m):
+            nonlocal count
+            count += 1
+            if count <= max_images:
+                return m.group(0)
+            else:
+                return f"【此处绘制图表：{m.group(1).strip()}】"
+        text = re.sub(r'【\s*此处插入配图\s*[：:](.*?)\s*】', _repl, text)
+    return text
 
 def run_daily_knowledge_workflow(publisher):
     """
     全链路推送工作流，将纯文本 Markdown 推送至微信草稿箱。
+    接入通义万相 (Qwen-Image) AI 生图 API，生成专属封面与正文插图。
     保持高度解耦，仅引用必要的核心公共服务组件。
     """
     check_cancelled()
-    
-    pass # 延迟到标题生成后再绘制封面图
+    reset_image_cache()
 
     print("\n💡 正在撰写 每日小知识 文章...")
 
@@ -37,54 +66,33 @@ def run_daily_knowledge_workflow(publisher):
     if len(topic_title) > 60:
         topic_title = topic_title[:57] + "..."
 
-    # 优先寻找静态默认封面图 assets/default_daily_cover.png
-    cover_path = os.path.abspath(os.path.join("assets", "default_daily_cover.png"))
-    if os.path.exists(cover_path):
-        logger.info(f"✅ 找到默认动态封面图: {cover_path}")
-    else:
-        # 如果静态默认封面图不存在，动态生成占位封面图
-        import time
-        cover_filename = f"daily_cover_{int(time.time())}.png"
-        cover_path = os.path.abspath(os.path.join("assets", cover_filename))
-        logger.info(f"正在自动绘制动态封面图占位符: {cover_path}")
-        try:
-            os.makedirs(os.path.dirname(cover_path), exist_ok=True)
-            from PIL import Image as PILImage, ImageDraw, ImageFont
-            img = PILImage.new('RGB', (900, 383), color=(30, 41, 59))
-            draw = ImageDraw.Draw(img)
-            draw.rectangle([(50, 50), (850, 333)], outline=(56, 189, 248), width=4)
-            try:
-                # 尝试加载中文字体，Windows 环境常用 msyh.ttc
-                font = ImageFont.truetype("msyh.ttc", 40)
-            except Exception:
-                font = ImageFont.load_default()
-            
-            display_text = "封面占位\n\n(请后续在微信公众平台手动替换)\n\n" + topic_title[:15] + ("..." if len(topic_title)>15 else "")
-            draw.text((450, 191), display_text, fill=(255,255,255), font=font, anchor="mm", align="center")
-            img.save(cover_path, 'PNG')
-            print("✅ 动态封面图占位符生成成功。")
-        except Exception as e:
-            logger.warning(f"自动绘制封面图失败: {e}")
-            cover_path = None
+    # 规范化配图占位符并限制生图并发上限（默认前 3 张接入 AI 生图 API）
+    article_text = _normalize_and_cap_placeholders(article_text, max_images=3)
 
-    # 兼容性处理：将大模型偶尔生成的【此处插入配图】统一替换为【此处绘制图表】
-    # 因为 skip_photo_images=True 会将前者强制删除，改为后者则会渲染为美观的占位卡片供人工替换
-    article_text = re.sub(r'【\s*此处插入配图\s*[：:](.*?)\s*】', r'【此处绘制图表：\1】', article_text)
+    # 2. 并行生成封面图与正文排版（含正文逐图 AI 生图）
+    cover_keyword = f"每日小知识 {concept_name} {topic_title}"
+    logger.info("🎨 正在发起通义万相 (Qwen-Image) AI 封面生成: '{}'...", cover_keyword)
 
-    print("\n🎨 正在执行排版优化与图表渲染...")
-    # 2. 调用主项目公共排版方法，处理图表占位符和 HTML 转换
-    final_html, review_data = process_article_content(
-        article_text, publisher, use_ai_first=False, skip_photo_images=True
-    )
-    check_cancelled()
-    
-    if not final_html:
-        print("❌ 内容格式化与渲染异常，跳过。")
-        return False
+    with ThreadPoolExecutor(max_workers=1) as cover_pool:
+        cover_future = cover_pool.submit(download_cover_image, cover_keyword, "assets")
+
+        print("\n🎨 正在执行排版优化与正文配图渲染 (接入通义万相生图 API)...")
+        # 调用核心排版方法，use_ai_first=True, skip_photo_images=False 启用 AI 生图 API 逐图生成与上传
+        final_html, review_data = process_article_content(
+            article_text, publisher, use_ai_first=True, skip_photo_images=False
+        )
+        check_cancelled()
+        
+        if not final_html:
+            cover_future.cancel()
+            print("❌ 内容格式化与渲染异常，跳过。")
+            return False
+
+        cover_path = cover_future.result()
 
     # 3. 封面图上传
     thumb_id = None
-    if cover_path:
+    if cover_path and os.path.exists(cover_path):
         thumb_id = publisher.upload_image(cover_path)
         if not thumb_id:
             print("⚠️ 封面上传失败，尝试压缩后重试...")
@@ -115,13 +123,11 @@ def run_daily_knowledge_workflow(publisher):
         ignore_word_count=True,
     )
 
-    from core.shared.llm import validate_title
     clean_title, _ = validate_title(topic_title)
     title_hash = hashlib.md5(clean_title.encode('utf-8')).hexdigest()
 
-    # 4. 主编审校门禁 (Critic & Quality Gate)
-    from core.pipeline.critic import evaluate_article_quality, format_critic_report
-    review_res = evaluate_article_quality(clean_title, final_html, article_type="daily_knowledge")
+    # 4. 主编审校门禁与自愈闭环 (Critic & Quality Gate with Auto-Remediation)
+    final_html, review_res = evaluate_and_repair_article(clean_title, final_html, article_type="daily_knowledge")
     print(format_critic_report(review_res))
 
     if not review_res["passed"]:

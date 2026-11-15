@@ -134,7 +134,7 @@ SD_TIMEOUT = int(os.getenv("SD_TIMEOUT", "120"))        # 单次生图超时秒�
 SD_STEPS = int(os.getenv("SD_STEPS", "15"))              # 采样步数（15 兼顾速度与质量）
 SD_MAX_RETRIES = int(os.getenv("SD_MAX_RETRIES", "2"))   # 最大重试次数（不含首次）
 
-# 12b. 图源说明：默认链路为 千问生图 → Bing 搜图 → 本地文字卡兜底（全国内可用，无需境外 Key）
+# 12b. 图源说明：默认链路为 Qwen-Image-3.0 AI 生图 → 本地 Stable Diffusion → Pillow Linear Light 矢量卡片兜底（已禁用 Bing 爬虫抓图）
 
 # 13. 微信敏感词列表 (部分示例，根据实际情况补充)
 SENSITIVE_WORDS = []  # 留空则跳过敏感词过滤

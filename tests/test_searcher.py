@@ -223,15 +223,17 @@ class TestSearchTopicFacts:
         assert search_topic_facts("人工智能", max_results=0) == []
         assert search_topic_facts("人工智能", max_results=-1) == []
 
+    @patch("core.hotspots.searcher.requests.get", side_effect=requests.RequestException("Bing disabled"))
     @patch("core.hotspots.searcher.requests.post")
-    def test_search_exception_safe(self, mock_post):
+    def test_search_exception_safe(self, mock_post, mock_get):
         mock_post.side_effect = requests.RequestException("网络连接异常超时")
         # 异常应被安全捕获，返回空列表，不抛异常
         results = search_topic_facts("重大科技突破")
         assert results == []
 
+    @patch("core.hotspots.searcher.requests.get", side_effect=requests.RequestException("Bing fallback to DDG"))
     @patch("core.hotspots.searcher.requests.post")
-    def test_search_success_mock(self, mock_post):
+    def test_search_success_mock(self, mock_post, mock_get):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.text = """
@@ -252,7 +254,8 @@ class TestSearchTopicFacts:
 
     def test_search_with_hotspot_item(self):
         item = HotspotItem(title="国产操作系统新版发布")
-        with patch("core.hotspots.searcher.requests.post") as mock_post:
+        with patch("core.hotspots.searcher.requests.get", side_effect=requests.RequestException("Bing fallback to DDG")), \
+             patch("core.hotspots.searcher.requests.post") as mock_post:
             mock_resp = MagicMock()
             mock_resp.status_code = 200
             mock_resp.text = """

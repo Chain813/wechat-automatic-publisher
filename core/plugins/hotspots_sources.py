@@ -601,7 +601,12 @@ class HuxiuPlugin(BaseSourcePlugin):
         except Exception as e:
             logger.warning(f"  {self.display_name}抓取失败: {e}，将尝试 Selenium 降级")
 
-        # 降级至 Selenium
+        # 降级至 Selenium 前先检测环境支持
+        from utils.spider import is_browser_available
+        if not is_browser_available():
+            logger.info("  虎嗅网深度 HTTP 触发防护，当前环境未安装无头浏览器，安全跳过 Selenium 尝试")
+            _mark_source_failure(self.source_id)
+            return []
         return self._fetch_huxiu_selenium()
 
     def _fetch_huxiu_selenium(self) -> List[Any]:
@@ -741,7 +746,12 @@ class WeiboPlugin(BaseSourcePlugin):
                     _mark_source_success(self.source_id)
                     return topics[:NEWS_MAX_PER_SOURCE]
         except Exception as e:
-            logger.warning(f"  微博 60s API 也失败: {e}，降级至 Selenium")
+            logger.warning(f"  微博 60s API 也失败: {e}，准备尝试 Selenium 降级")
+            from utils.spider import is_browser_available
+            if not is_browser_available():
+                logger.info("  微博热搜 当前环境未安装无头浏览器，安全跳过 Selenium 尝试")
+                _mark_source_failure(self.source_id)
+                return []
             return self._fetch_weibo_selenium()
         
         return topics

@@ -180,44 +180,50 @@ def search_topic_facts(query: Any, max_results: Optional[int] = None) -> List[Di
     if limit <= 0:
         return []
 
+    # 1. 优先尝试国内高速直连引擎：Bing 中国
     try:
-        # 1. 优先尝试 DuckDuckGo HTML 搜索
+        bing_resp = requests.get(
+            f"https://cn.bing.com/search?q={urllib.parse.quote(search_query)}",
+            headers=DEFAULT_HEADERS,
+            timeout=6,
+        )
+        if bing_resp.status_code == 200 and bing_resp.text:
+            bing_results = parse_bing_html(bing_resp.text, limit)
+            if bing_results:
+                logger.info(f"  [事实检索] 成功从 Bing 捕获 {len(bing_results)} 条权威背景素材 ({search_query})")
+                return bing_results[:limit]
+    except Exception as e:
+        logger.debug(f"Bing 检索跳过 ({search_query}): {e}")
+
+    # 2. 备选尝试 DuckDuckGo HTML 搜索（境外环境适用）
+    try:
         ddg_resp = requests.post(
             "https://html.duckduckgo.com/html/",
             data={"q": search_query, "b": ""},
             headers=DEFAULT_HEADERS,
-            timeout=8,
+            timeout=5,
         )
         if ddg_resp.status_code == 200 and ddg_resp.text:
             ddg_results = parse_duckduckgo_html(ddg_resp.text, limit)
             if ddg_results:
                 return ddg_results[:limit]
+    except Exception as e:
+        logger.debug(f"DuckDuckGo HTML 检索跳过: {e}")
 
-        # 2. 尝试 DuckDuckGo Lite 搜索
+    # 3. 备选尝试 DuckDuckGo Lite 搜索
+    try:
         ddg_lite_resp = requests.post(
             "https://lite.duckduckgo.com/lite/",
             data={"q": search_query},
             headers=DEFAULT_HEADERS,
-            timeout=8,
+            timeout=5,
         )
         if ddg_lite_resp.status_code == 200 and ddg_lite_resp.text:
             ddg_lite_results = parse_duckduckgo_html(ddg_lite_resp.text, limit)
             if ddg_lite_results:
                 return ddg_lite_results[:limit]
-
-        # 3. 公开引擎兜底（Bing HTML）
-        bing_resp = requests.get(
-            f"https://cn.bing.com/search?q={urllib.parse.quote(search_query)}",
-            headers=DEFAULT_HEADERS,
-            timeout=8,
-        )
-        if bing_resp.status_code == 200 and bing_resp.text:
-            bing_results = parse_bing_html(bing_resp.text, limit)
-            if bing_results:
-                return bing_results[:limit]
-
     except Exception as e:
-        logger.warning(f"事实检索异常 ({search_query}): {e}")
+        logger.debug(f"DuckDuckGo Lite 检索跳过: {e}")
 
     return []
 

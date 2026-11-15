@@ -707,7 +707,7 @@ def _render_tree_text_to_png(repo_name, tree_items, save_dir):
 
     # 加载字体
     font = None
-    for fp in ["C:/Windows/Fonts/consola.ttf", "C:/Windows/Fonts/msyh.ttc"]:
+    for fp in ["C:/Windows/Fonts/consola.ttf", "C:/Windows/Fonts/msyh.ttc", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"]:
         if os.path.exists(fp):
             try:
                 font = ImageFont.truetype(fp, font_size)
@@ -917,7 +917,10 @@ def take_github_readme_screenshot(repo_name, readme_file_path=None, save_dir="as
     import os
     import time
     from PIL import Image
-    from utils.spider import build_stealth_browser
+    from utils.spider import build_stealth_browser, is_browser_available
+    if not is_browser_available():
+        logger.info("  [GitHub文档截图] 当前云端环境未安装无头浏览器，安全跳过截图")
+        return None
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
@@ -1012,7 +1015,10 @@ def take_live_ui_screenshot(repo_name, homepage_url, save_dir="assets"):
         logger.warning(f"  跳过在线 UI 截图：主页地址 '{homepage_url}' 不在安全域名白名单中或无效")
         return None
 
-    from utils.spider import build_stealth_browser
+    from utils.spider import build_stealth_browser, is_browser_available
+    if not is_browser_available():
+        logger.info("  [Demo演示截图] 当前云端环境未安装无头浏览器，安全跳过截图")
+        return None
 
     logger.info(f"  🖥️ 正在截取在线 UI 页面: {homepage_url}")
     os.makedirs(save_dir, exist_ok=True)

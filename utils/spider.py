@@ -33,10 +33,28 @@ window.navigator.permissions.query = (parameters) => (
 """
 
 
+class BrowserUnavailableError(RuntimeError):
+    """当运行环境缺少可用无头浏览器时抛出此异常，便于调用方优雅降级"""
+    pass
+
+
+def is_browser_available() -> bool:
+    """快速安全检测当前系统是否存在可用的 Chrome / Edge 浏览器"""
+    try:
+        return _is_chrome_installed() or _is_edge_installed()
+    except Exception:
+        return False
+
+
 def _is_chrome_installed():
-    """检查 Chrome 是否已安装"""
-    # PATH 中有 chrome
-    if shutil.which("chrome") or shutil.which("google-chrome"):
+    """检查 Chrome / Chromium 是否已安装"""
+    # PATH 中有 chrome / chromium
+    if (
+        shutil.which("chrome")
+        or shutil.which("google-chrome")
+        or shutil.which("chromium")
+        or shutil.which("chromium-browser")
+    ):
         return True
     # Windows 常见安装路径
     for path in [
@@ -92,12 +110,23 @@ def _build_common_options(headless: bool, user_data_dir: str | None = None, down
 
 
 def _try_chrome(headless: bool, user_data_dir: str | None = None, download_dir: str | None = None):
-    """启动 Chrome"""
+    """启动 Chrome / Chromium"""
     from selenium import webdriver
     from selenium.webdriver.chrome.service import Service
-    from webdriver_manager.chrome import ChromeDriverManager
 
     options = _build_common_options(headless, user_data_dir, download_dir)
+    for bin_name in ("google-chrome", "chromium-browser", "chromium", "chrome"):
+        bin_path = shutil.which(bin_name)
+        if bin_path:
+            options.binary_location = bin_path
+            break
+
+    sys_driver = shutil.which("chromedriver")
+    if sys_driver:
+        service = Service(sys_driver)
+        return webdriver.Chrome(service=service, options=options)
+
+    from webdriver_manager.chrome import ChromeDriverManager
     service = Service(ChromeDriverManager().install())
     return webdriver.Chrome(service=service, options=options)
 
@@ -151,7 +180,7 @@ def build_stealth_browser(headless: bool = False, user_data_dir: str | None = No
         candidates.append(("Edge", lambda h: _try_edge(h, user_data_dir, download_dir)))
 
     if not candidates:
-        raise RuntimeError("未找到 Chrome 或 Edge 浏览器，请安装其中之一。")
+        raise BrowserUnavailableError("未检测到 Chrome 或 Edge 浏览器（当前处于无界面云端轻量环境，已安全跳过浏览器级渲染）。")
 
     for name, factory in candidates:
         try:
@@ -170,4 +199,4 @@ def build_stealth_browser(headless: bool = False, user_data_dir: str | None = No
     )
 
 
-__all__ = ["build_stealth_browser"]
+__all__ = ["build_stealth_browser", "is_browser_available", "BrowserUnavailableError"]
