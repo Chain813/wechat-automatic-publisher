@@ -1,44 +1,46 @@
 @echo off
+chcp 65001 >nul 2>&1
 setlocal
 cd /d "%~dp0"
 title AutoWeChat - Web UI Launcher
 
 echo ==========================================
-echo   Starting AutoWeChat Web GUI ...
+echo   Starting AutoWeChat Web GUI
 echo ==========================================
 
-:: Check if Python is available
-echo [System] Checking Python...
+REM Check Python
+echo [System] Checking Python environment
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [Error] Python not found.
+    echo [Error] Python not found. Please install Python 3.8+ and add it to PATH.
     pause
     exit /b 1
 )
 
-:: Auto create .env
+REM Auto create .env
 if not exist ".env" (
     if exist ".env.example" (
         copy .env.example .env >nul
     )
 )
 
-:: Check and create venv
+REM Check and create venv
 if not exist "venv\Scripts\activate.bat" (
-    echo [System] Creating venv...
+    echo [System] Creating virtual environment
     python -m venv venv
+    echo [System] Activating venv
+    call "%~dp0venv\Scripts\activate.bat"
+    echo [System] Installing dependencies
+    python -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+) else (
+    REM Activate venv
+    echo [System] Activating venv
+    call "%~dp0venv\Scripts\activate.bat"
 )
 
-:: Activate venv
-echo [System] Activating venv...
-call venv\Scripts\activate.bat
-
-:: Install requirements
-echo [System] Installing requirements...
-python -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-
-:: Start Flask App
-echo [INFO] Starting Backend Service...
+REM Start Web UI Service
+echo [INFO] Starting Backend Service
+echo [INFO] Web UI will open in browser at http://127.0.0.1:5000
 python webui.py
 
 pause

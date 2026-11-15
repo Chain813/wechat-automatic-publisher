@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### 🔍 事实核查、动态叙事与 AI Critic 质量门禁 (Fact Grounding & Quality Gate)
+- **联网事实核查与正文深抓**：新增 `core/hotspots/scraper.py`（基于 `trafilatura` 与浏览器伪装请求提取原始网页正文）及 `core/hotspots/searcher.py`（DuckDuckGo HTML/Lite 与 Bing 网页事实检索，由 `ENABLE_FACT_SEARCH` / `MAX_FACT_SNIPPETS` 控制），为深度创作提供可核查事实现场。
+- **动态叙事防套话引擎**：新增 `core/hotspots/narrative.py`，支持 4 种写作原型（`investigative_game` / `tech_deep_dive` / `business_war` / `narrative_human`）× 4 种黄金开篇钩子动态调度。
+- **Critic 自动质检门禁与 HITL 审稿台**：新增 `core/pipeline/`（`PipelineEngine`、`nodes.py`、`critic.py`），自动清洗常见 AI 套话、补齐缺失 H2 小节并执行多维评分；拦截稿件标记为 `REJECTED`、预览落地至 `data/previews/fail_*.html` 并同步 `data/auto_publish.sqlite`（WAL 模式），通过 WebUI `审稿 (Audit)` 视图支持人工复核与 `/api/review/approve` 直推微信草稿箱。
+
+### 🎨 Linear Modern Light 全新前端与微信正文排版重构
+- **WebUI 五维零构建控制台**：全面重构前端为 **Linear Modern Light** 浅色设计体系（`tokens.css` / `components.css` / `views.css` + 4 层纯 CSS `.ambient-canvas` + 零构建原生 ES Module `static/js/core/` 与 `static/js/views/`），支持桌面端分段导航与移动端底部 Dock 双端适配，整合为 `总控 (console)`、`图谱 (graph)`、`审稿 (audit)`、`配图 (image)`、`运维 (ops)` 五大核心视图及 ZH/EN 实时切换。
+- **微信正文 Linear Light 排版**：升级 `core/shared/article_utils.py`，支持沉降式代码块卡片、对比数据表格与 Highlight Callout 提示框，并优化 H2/H3 标题层级与可阅读性。
+- **前端工程清理**：正式移除旧版单文件样式 `static/css/style.css` 与 Three.js 3D 粒子网络背景（`three-bg.js` / `three.min.js`），显著降低首屏负载。
+
+### 📚 每日小知识工作流与并发图表引擎 (`daily_knowledge` & `diagram_gen`)
+- **每日百科工作流**：新增 `daily_knowledge/` 独立模块（专属 `engine.py`、`workflow.py`、`deduplicator.py` 与 `data/daily_knowledge.sqlite`），支持 `--task daily_knowledge` 独立或定时运行。
+- **体系科普 Phase 3 并行生成**：重构 `core/aikepu/processor.py` Phase 3，由串行改为 `ThreadPoolExecutor`（最多 4 并发 Sub-Agent Worker）协同撰写。
+- **5 模多模态技术图表引擎**：升级 `utils/diagram_gen.py` 与 `utils/lite_render.py` / `utils/html_render.py`，统一 Mermaid、`HTML+Tailwind+KaTeX`、Graphviz DOT 与 Matplotlib 卡片（公式/对比/总结）的 Linear Modern Light 浅色配色，支持 `DIAGRAM_PARALLEL_WORKERS=5` 并行渲染与微信透明 PNG 白底兼容转换。
+
+### 🖼️ 100% AI 生图收敛与境内基础设施优化
+- **纯 AI 生图容错链**：`utils/image_handler.py` 主配图与封面生成已禁用热点 Bing 爬虫抓取，收敛为「`Qwen-Image-3.0`（含并发与间隔限流，`QWEN_IMAGE_SIZE=1280*720`）→ 本地 `Stable Diffusion` → 本地 Pillow Linear Modern Light 矢量封面卡片」三级链路；Image Studio 参考图合规重绘模型升级为 `qwen-image-3.0-pro`。
+- **移除境外与重型本地依赖**：彻底移除 Gemini Vision、Ollama 本地视觉、Pixabay/Pexels/Unsplash/Pollinations 图库代码与配置（保留可选 `GITHUB_TOKEN` 提升 GitHub API 限额），视觉评估模块收敛为 `Qwen-VL-Max` (`utils/image_filter.py`)；清理遗留 `_try_icrawler_bing()` 死代码与 `requirements.txt` 中的 `icrawler` 依赖，并同步更新 `Dockerfile`、`docker-compose*.yml`、`render.yaml` 与 `.github/workflows/trigger.yml`。
+- **多 Key 线程安全轮换池**：新增 `utils/key_pool.py`，支持 `LLM_API_KEYS` 与 `DASHSCOPE_API_KEYS` 逗号分隔多 Key 轮询与 429/认证异常冷却（120s / 300s）。
+
+### 🧬 零访谈账号定制与多领域知识包 (Customization & Knowledge Packs)
+- **零访谈风格克隆**：新增 `tools/analyze_account.py` 账号画像分析器与 `tools/build_knowledge_tree.py` 定制知识库生成器（支持 `--samples` / `--profile`），自动生成 DAG 知识图谱与 `prompts/{slug}_skill.md`。
+- **内置 5 套领域图谱**：`data/knowledge_trees/` 内置 `aikepu`（30 节点）、`career`（10 节点）、`health`（8 节点）、`law`（10 节点）与 `tax`（6 节点），配合 `law_skill.md`、`tax_skill.md` 等领域写法规范与 `_active.txt` 热切换。
+- **运维与自动化加固**：升级 [`.github/workflows/trigger.yml`](.github/workflows/trigger.yml) 与容器清单，支持持久化数据库与多工作流定时调度；新增 13 个 Pytest 单元、集成及 WebUI 交互测试套件（`tests/`）。
+
 ## [4.3.0] - 2026-07-21
 
 ### ✨ 新特性 (New Features)

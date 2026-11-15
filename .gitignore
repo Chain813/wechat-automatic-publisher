@@ -13,8 +13,8 @@ venv/
 .venv/
 
 # Runtime generated
-*.sqlite
-data/*.sqlite
+*.sqlite*
+data/*.sqlite*
 data/previews/
 data/gemini_chrome_profile/
 data/gemini_session/
@@ -33,3 +33,13 @@ assets/manual_images/
 # Dev artifacts
 scratch/
 .codegraph/
+
+deploy_pack/
+# Superpowers brainstorm & plan scratch directories
+.superpowers/
+
+# Private deploy script & runtime customization outputs
+deploy_to_server.py
+data/profile.json
+data/knowledge_trees/_active.txt
+data/markdown/transformer_attention_*.md

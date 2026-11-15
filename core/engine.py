@@ -7,7 +7,6 @@ from core.hotspots.workflow import run_hotspots_workflow
 from core.github.workflow import run_github_workflow
 from core.aikepu.workflow import run_aikepu_workflow
 from daily_knowledge.workflow import run_daily_knowledge_workflow
-from utils.image_filter import ollama_startup, ollama_shutdown
 from core.shared.runtime import check_cancelled, WorkflowCancelled
 
 def sync_local_history_with_wechat(publisher):
@@ -21,13 +20,17 @@ def sync_local_history_with_wechat(publisher):
     
     print("\n🔄 正在同步云端状态，检测是否有推文被删除...")
     try:
-        active_titles = publisher.get_all_active_titles()
+        active_cloud_titles = publisher.get_cloud_active_titles()
     except Exception as e:
-        logger.warning(f"获取微信状态失败，跳过历史同步: {e}")
+        logger.warning(f"获取微信云端状态失败，跳过历史同步: {e}")
+        return
+
+    if active_cloud_titles is None:
+        logger.warning("获取微信云端草稿/已发布列表未成功，跳过本地历史同步以防误删")
         return
 
     def is_title_active(title):
-        for act in active_titles:
+        for act in active_cloud_titles:
             if title in act or act in title:
                 return True
         return False
@@ -90,7 +93,6 @@ def run_main(task_type="hotspots"):
     reset_source_health()
 
     try:
-        ollama_startup()
         publisher = WeChatPublisher(WECHAT_APP_ID, WECHAT_APP_SECRET)
         if not publisher.access_token:
             print("❌ 微信发布组件初始化失败，请检查公众号凭证配置。")
@@ -123,7 +125,5 @@ def run_main(task_type="hotspots"):
         raise
     except Exception as exc:
         logger.exception("系统核心崩溃: {}", exc)
-    finally:
-        ollama_shutdown()
 
 __all__ = ["run_main"]

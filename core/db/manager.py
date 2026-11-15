@@ -24,15 +24,47 @@ class DBManager:
             
         self.engine = create_engine(
             f"sqlite:///{DB_PATH}",
-            connect_args={"check_same_thread": False},
+            connect_args={"check_same_thread": False, "timeout": 30},
             echo=False
         )
-        from sqlalchemy import text
+        from sqlalchemy import event, text
+
+        @event.listens_for(self.engine, "connect")
+        def set_sqlite_pragma(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA busy_timeout=30000")
+            except Exception:
+                pass
+            finally:
+                cursor.close()
+
         Base.metadata.create_all(self.engine)
         try:
             with self.engine.connect() as conn:
-                conn.execute(text("ALTER TABLE article_history ADD COLUMN is_published BOOLEAN DEFAULT 0;"))
-                conn.commit()
+                existing_cols = set()
+                try:
+                    result = conn.execute(text("PRAGMA table_info(article_history);")).fetchall()
+                    existing_cols = {row[1] for row in result}
+                except Exception:
+                    pass
+
+                columns_to_add = [
+                    ("is_published", "BOOLEAN DEFAULT 0"),
+                    ("source_url", "TEXT"),
+                    ("quality_score", "FLOAT DEFAULT 0.0"),
+                    ("status", "VARCHAR(50) DEFAULT 'PENDING_REVIEW'"),
+                    ("thumb_media_id", "VARCHAR(255)"),
+                    ("fact_check_result", "TEXT"),
+                ]
+                for col_name, col_def in columns_to_add:
+                    if not existing_cols or col_name not in existing_cols:
+                        try:
+                            conn.execute(text(f"ALTER TABLE article_history ADD COLUMN {col_name} {col_def};"))
+                            conn.commit()
+                        except Exception:
+                            pass
         except Exception:
             pass
         self.session_factory = sessionmaker(bind=self.engine)

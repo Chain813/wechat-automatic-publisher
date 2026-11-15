@@ -1,437 +1,178 @@
-# 开发工作流
+# AutoWeChat 二次开发与架构指南
 
-本文档面向开发者，说明项目的开发环境搭建、代码规范、测试方法和发布流程。
-
----
-
-## 目录
-
-- [开发环境搭建](#开发环境搭建)
-- [项目架构](#项目架构)
-- [代码规范](#代码规范)
-- [测试方法](#测试方法)
-- [发布流程](#发布流程)
-- [常见开发任务](#常见开发任务)
-- [调试技巧](#调试技巧)
-- [故障排查](#故障排查)
+本文档面向 **AutoWeChat** 的维护者与二次开发者，详细介绍系统的模块分层、核心流水线契约、Linear Modern Light 零构建前端工程以及测试排查规范。
 
 ---
 
-## 开发环境搭建
+## 1. 开发环境搭建
 
-### 必需环境
+### 1.1 基础环境
+- **Python**: 3.11+（推荐 3.11 或 3.12）
+- **依赖安装**:
+  ```bash
+  python -m venv .venv
+  # Windows
+  .venv\Scripts\activate
+  # macOS / Linux
+  source .venv/bin/activate
 
-```bash
-# 1. Python 3.8+
-python --version
+  pip install -r requirements.txt
+  cp .env.example .env
+  ```
 
-# 2. 克隆项目
-git clone https://github.com/Chain813/wechat-automatic-publisher.git
-cd wechat-automatic-publisher
-
-# 3. 创建虚拟环境
-python -m venv venv
-venv\Scripts\activate        # Windows
-# source venv/bin/activate   # macOS/Linux
-
-# 4. 安装依赖
-pip install -r requirements.txt
-
-# 5. 配置环境变量
-cp .env.example .env
-# 编辑 .env 填入 API Key
-```
-
-### 可选环境
-
-| 组件 | 用途 | 安装方式 |
-|------|------|---------|
-| [Stable Diffusion WebUI](https://github.com/AUTOMATIC1111/stable-diffusion-webui) | AI 生图 | 启动时加 `--api` 参数 |
-| [Ollama](https://ollama.com) | 本地视觉 AI 评估 | `ollama pull gemma3:4b` |
-| [Graphviz](https://graphviz.org/download/) | 架构图渲染 | 安装后添加到系统 PATH |
-| Chrome 浏览器 | Selenium 截图 | 自动由 webdriver-manager 管理 |
-
-### 快速验证
-
-```bash
-# 验证所有 Python 文件语法正确
-python -c "import py_compile; import os; [py_compile.compile(os.path.join(r,f), doraise=True) for r,_,fs in os.walk('.') for f in fs if f.endswith('.py') and 'venv' not in r]"
-
-# 验证配置完整性
-python -c "from config import *; print('Config OK')"
-
-# CLI 启动
-python main.py --task hotspots
-```
+### 1.2 可选外部服务与浏览器依赖
+- **Chrome / Chromium（Selenium & Playwright）**: 用于 `HTML+KaTeX`、本地 `Mermaid` 降级图表渲染、GitHub 无头抓取降级以及 [`tests/test_webui_e2e_interactions.py`](tests/test_webui_e2e_interactions.py) WebUI E2E 交互测试。
+- **Graphviz (`dot`)**: 加入系统 `PATH` 后，[`utils/lite_render.py`](utils/lite_render.py) 可使用原生 Graphviz 渲染轻量结构图。
+- **Local Stable Diffusion WebUI**: 可选启动 `http://127.0.0.1:7860`（需开启 `--api` 参数），作为通义万相 `Qwen-Image` 不可用时的二级 AI 生图备选。
 
 ---
 
-## 项目架构
+## 2. 模块化架构总览
 
-### 分层设计
+系统通过 [`core/engine.py`](core/engine.py) 对外暴露统一入口，支持 CLI（[`main.py`](main.py)）与 Web 控制台（[`webui.py`](webui.py)）双模式驱动：
 
-```
-┌─────────────────────────────────────────────┐
-│  入口层：main.py / webui.py                  │
-├─────────────────────────────────────────────┤
-│  调度层：core/engine.py                       │
-├──────────────────────┬──────────────────────┤
-│  热点模块             │  GitHub 模块          │
-│  collector → processor│  collector → processor│
-│  → workflow           │  → workflow           │
-├──────────────────────┴──────────────────────┤
-│  共享层：publisher / llm / article_utils      │
-├─────────────────────────────────────────────┤
-│  工具层：image_handler / image_filter / http  │
-├─────────────────────────────────────────────┤
-│  基础设施：config / runtime / .env            │
-└─────────────────────────────────────────────┘
-```
-
-### 数据流
-
-```
-热点文章：
-  12源采集 → LLM选题 → LLM创作 → 配图下载上传 → 微信草稿 + 本地预览缓存
-
-GitHub文章：
-  Search API → LLM评估 → 并行配图(6路) → LLM创作 → 微信草稿 + 本地预览缓存
-
-AI科普文章（三阶段 Map-Reduce）：
-  DAG技能树选题 → Phase 1:大纲生成 → Phase 2:提示词自优化 → Phase 3:串行生成与上文传递(每步传入前一步末尾500字) → 微信草稿 + 本地预览缓存
-```
-
-### 关键设计决策
-
-| 决策 | 理由 |
-|------|------|
-| ThreadPoolExecutor 而非 asyncio | requests 库同步 API，改动成本低。 |
-| cancel_event 全局检查点 | 用户可随时中断，无需等待长操作完成。 |
-| 配图并行 + 集满即停 | 6 种来源同时跑，最快 3 个胜出。 |
-| Map-Reduce 提示词自优化 | 专门用于超长科普文生成。用第2步的大纲优化逻辑，设定排他规则和衔接钩子，消除多章节内容“失忆”和比喻重复。 |
-| 双通道预览机制 | `/api/preview/<preview_id>` 接口优先读取本地 `data/previews/*.html` 静态缓存，若不存在则回退请求微信 API。不仅提供离线预览，还支持了“发布失败”任务的稿件排版预览。 |
-| 实时信源健康轮询 | 前端信源 Tab 激活后，启动 3 秒一次的定时轮询 (`setInterval`)，实现无刷新健康状态同步，切换离开时自动销毁。 |
-| Graphviz Windows PATH 自动注入 | 在 `utils/lite_render.py` 中，如果检测到 Windows 平台且默认安装路径 `C:\Program Files\Graphviz\bin` 存在但未加入系统 PATH，运行时会自动将其动态添加到 `os.environ["PATH"]`，极大降低了本地部署和运行难度。 |
-| LLM 提示词在 processor.py | 集中管理，方便调优。 |
-| 微信 API 封装在 publisher.py | Token 自动刷新、线程安全、标题去重。 |
-
----
-
-## 代码规范
-
-### 基本规则
-
-- **编码**：所有文件 UTF-8
-- **缩进**：4 空格，不用 Tab
-- **行宽**：建议 120 字符以内
-- **字符串**：内部用单引号，用户可见文本用双引号
-
-### 日志规范
-
-```python
-from loguru import logger
-
-# ✅ 正确：用 loguru
-logger.info("正在处理 {}", item)
-logger.warning("失败: {}", error)
-logger.debug("调试信息")
-
-# ❌ 错误：不用 print 做日志
-print(f"Processing {item}")  # 只在 _print_banner 等用户可见输出中使用
-```
-
-### 线程安全规范
-
-```python
-# ✅ 共享资源加锁
-_lock = threading.Lock()
-with _lock:
-    shared_resource.append(item)
-
-# ✅ 检查中断信号
-from core.shared.runtime import check_cancelled
-check_cancelled()  # 在长时间操作前后调用
-
-# ✅ 可中断等待
-from core.shared.llm import _interruptible_sleep
-_interruptible_sleep(5)  # 替代 time.sleep(5)
-```
-
-### 网络请求规范
-
-```python
-# ✅ 用封装的 Session（自动重试 + 缓存）
-from utils.http_client import build_api_session
-session = build_api_session()
-res = session.get(url, timeout=15)
-
-# ✅ 热点采集用缓存 Session
-from utils.http_client import build_cached_session
-session = build_cached_session("cache_name", ttl_seconds)
-
-# ❌ 不用裸 requests
-import requests  # 缺少重试和缓存
-```
-
-### LLM 调用规范
-
-```python
-# ✅ 统一用 call_deepseek_with_retry
-from core.shared.llm import call_deepseek_with_retry
-result = call_deepseek_with_retry(
-    prompt,
-    system_content="...",
-    max_retries=2,
-    timeout=180,
-)
-
-# ❌ 不直接调用 requests.post 到 LLM API
+```text
+├── core/
+│   ├── engine.py              # 统一任务分发中心: hotspots / github / aikepu / daily_knowledge
+│   ├── db/
+│   │   ├── models.py          # ArticleHistory ORM 模型 (status / quality_score / fact_check_result 等)
+│   │   └── manager.py         # SQLite WAL 线程安全单例管理器 (data/auto_publish.sqlite)
+│   ├── pipeline/
+│   │   ├── nodes.py           # 流水线节点输入输出协议与上下文数据结构
+│   │   ├── engine.py          # PipelineEngine 节点编排器
+│   │   └── critic.py          # AI Critic 自动质检修复、评分与 REJECTED 门禁拦截
+│   ├── plugins/
+│   │   ├── base.py            # BaseSourcePlugin / HotspotItem 抽象基类
+│   │   ├── manager.py         # PluginManager 动态源调度与健康度追踪
+│   │   ├── hotspots_sources.py# 12 路热点源插件实现
+│   │   └── github_source.py   # GitHub 开源项目数据插件
+│   ├── hotspots/
+│   │   ├── processor.py       # 热点主题聚类、大纲/正文生成与图谱过滤
+│   │   ├── scraper.py         # Trafilatura 正文提取 + 浏览器伪装请求降级
+│   │   ├── searcher.py        # DuckDuckGo (HTML/Lite) + Bing 实时联网事实搜索
+│   │   ├── narrative.py       # 4 种叙事原型 × 4 种黄金开篇钩子动态策略器
+│   │   └── workflow.py        # 热点端到端流水线
+│   ├── github/
+│   │   ├── collector.py       # Trending + Search 采集、截图抓取与 Demo 识别
+│   │   ├── processor.py       # GitHub 技术深潜写作提示词与成文器
+│   │   └── workflow.py        # GitHub 流水线与多图并行抓取
+│   ├── aikepu/
+│   │   ├── skill_tree.py      # 知识图谱 DAG 解析、前置依赖检查与状态同步
+│   │   ├── processor.py       # Phase 1 Outline -> Phase 2 Flash Prompt 优化 -> Phase 3 并行 Sub-Agent
+│   │   └── workflow.py        # 体系科普流水线
+│   └── shared/
+│       ├── llm.py             # DeepSeek/OpenAI 路由、可中断重试、Prompt Cache 统计
+│       ├── publisher.py       # 微信 Token 锁、草稿上传、4 层标题防重、企微通知
+│       ├── article_utils.py   # Linear Modern Light 微信内联排版 & 配图/图表并行替换
+│       └── runtime.py         # Loguru 实时日志队列、cancel_event / pause_event 控制信号
+├── daily_knowledge/           # 每日小知识独立工作流 (engine/workflow/deduplicator/database/llm_client)
+├── tools/                     # 零访谈风格分析 (analyze_account.py) & 知识库构建 (build_knowledge_tree.py)
+├── utils/                     # 生图链、5 模图表引擎、KeyPool、HTTP Session、反爬工具
+└── templates/ & static/       # Linear Modern Light 零构建 ES Module 前端工程
 ```
 
 ---
 
-## 测试方法
+## 3. 核心机制与扩展契约
 
-### 自动化单元测试（推荐，<0.1s 极速响应）
+### 3.1 统一控制信号与线程安全（必须遵守）
+所有耗时操作、网络轮询与并发任务均必须兼容 [`core/shared/runtime.py`](core/shared/runtime.py) 的信号机制：
+- **`cancel_event` (`threading.Event`)**：WebUI 点击「停止」时置位，循环与耗时步骤须调用 `check_cancelled()`。
+- **`pause_event` (`threading.Event`)**：WebUI 点击「暂停」时清除，`check_cancelled()` 内部自动阻塞等待恢复。
+- **`_interruptible_sleep()`**：禁止在工作流内部直接调用长时间 `time.sleep()`，防止任务卡死无法即时停止。
+- **网络 Session 复用**：统一使用 [`utils/http_client.py`](utils/http_client.py) 提供的 `build_api_session()` 或 `build_cached_session()`，禁止裸用 `requests.get`。
 
-系统在 `tests/` 目录下提供纯内存隔离的单元测试套件，无需连接外网 API 即可验证核心逻辑与 Prompt Cache 计费公式：
+### 3.2 新增热点信息源插件
+1. 在 [`core/plugins/hotspots_sources.py`](core/plugins/hotspots_sources.py) 继承 `BaseSourcePlugin` 实现抓取方法，返回标准 `HotspotItem` 列表。
+2. 在 [`core/plugins/manager.py`](core/plugins/manager.py) 的插件注册流程完成注册。
+3. 在 [`config.py`](config.py) 的 `NEWS_SOURCES` 列表添加对应源标识。
+4. 在 WebUI [`static/js/views/ops.js`](static/js/views/ops.js) 与 [`static/js/core/i18n.js`](static/js/core/i18n.js) 中补全展示标签，使「运维 → 信源健康矩阵」可探测与展示该信源。
 
-```bash
-# 使用 pytest 运行单元测试（推荐）
-python -m pytest tests/
+### 3.3 事实核查（Fact Grounding）与动态叙事
+- **事实检索链路**：当 `ENABLE_FACT_SEARCH=True` 时，[`core/hotspots/scraper.py`](core/hotspots/scraper.py) 先用 `trafilatura` 抓取原文详情；随后 [`core/hotspots/searcher.py`](core/hotspots/searcher.py) 通过 DuckDuckGo（HTML/Lite 双回退）与 Bing 网页检索补充事件时间线、数据实体（最多 `MAX_FACT_SNIPPETS` 条，默认 `4`）。
+- **动态叙事策略**：[`core/hotspots/narrative.py`](core/hotspots/narrative.py) 根据主题匹配写作原型（`investigative_game` / `tech_deep_dive` / `business_war` / `narrative_human`）并分配开篇钩子（`counter_intuitive` / `cost_and_bill` / `critical_scene` / `cognitive_reversal`），防止多篇热文结构趋同。
 
-# 或使用 Python 标准库 unittest 运行
-python -m unittest discover tests
-```
+### 3.4 AI Critic 质量门禁与 SQLite WAL 审计
+- [`core/pipeline/critic.py`](core/pipeline/critic.py) 的 `evaluate_and_repair_article()` 在成文后执行：
+  1. 正则清除“AI 味”套话与空洞过渡词。
+  2. 为缺少小节标题的长文自动补充 H2 锚点分段。
+  3. 按文章类型检查汉字长度、标题字符上限与禁用结尾标点，计算综合 `quality_score`。
+- **门禁拦截流程**：若评分或硬性规则不达标，文章状态记为 `REJECTED`，渲染预览保存至 `data/previews/fail_*.html`，并写入 [`data/auto_publish.sqlite`](core/db/manager.py)（启用 `PRAGMA journal_mode=WAL` 与 `busy_timeout=30000` 防并发锁死）。人工可在 WebUI `Audit` 审稿台预览并通过 `/api/review/approve` 核准补发草稿箱。
 
-### 语法检查
+### 3.5 体系科普三阶段并发模型 (`core/aikepu/processor.py`)
+1. **Phase 1 (`_generate_outline`)**：结合知识节点元数据与历史脉络生成结构化多节大纲。
+2. **Phase 2 (`_optimize_section_prompts`)**：使用 Flash 模型为每节设计差异化论据、排他边界、类比与承接提示词。
+3. **Phase 3 (`_run_subagent_worker`)**：使用 `ThreadPoolExecutor(max_workers=min(4, len(optimized)))` 并发生成多节正文并注入前序章节概要，再拼接全局校验。
 
-```bash
-# 检查所有 Python 文件语法
-python -c "
-import py_compile, os
-for root, _, files in os.walk('.'):
-    if 'venv' in root or '__pycache__' in root: continue
-    for f in files:
-        if f.endswith('.py'):
-            py_compile.compile(os.path.join(root, f), doraise=True)
-print('All files compile OK')
-"
-```
+### 3.6 100% AI 配图链路与 5 模图表引擎
+- **插图与封面 (`utils/image_handler.py`)**：主链路已彻底禁用 Bing 网页搜图爬虫，固定采用：
+  1. `Qwen-Image-3.0`（`QWEN_IMAGE_SIZE="1280*720"`，受 `QWEN_IMAGE_MAX_CONCURRENCY` 与 `QWEN_IMAGE_MIN_INTERVAL` 信号量保护；Image Studio 重绘默认用 `qwen-image-3.0-pro`）。
+  2. 本地 `Stable Diffusion WebUI`（`SD_ENABLED=True` 且可达时自动触发）。
+  3. 本地 Pillow `Linear Modern Light` 矢量卡片兜底（`generate_default_cover()`）。
+- **视觉评估模块 (`utils/image_filter.py`)**：收敛为 `Qwen-VL-Max` + 多维 CV 评分接口（已移除 Gemini Vision 与 Ollama）。
+- **技术图表引擎 (`utils/diagram_gen.py`)**：
+  - 高保真路线：Mermaid（`mermaid.ink` API → [`utils/html_render.py`](utils/html_render.py) Selenium 本地降级）、HTML + Tailwind + KaTeX 公式/数据面板。
+  - 轻量路线：Graphviz DOT（[`utils/lite_render.py`](utils/lite_render.py)）与 Matplotlib 结构化卡片（公式、对比、总结卡）。
+  - 微信兼容性：渲染结果统一转换为不透明纯白底图，防止微信黑暗模式/透明 PNG 发黑。
 
-### 单模块测试
-
-```bash
-# 测试热点采集
-python -c "
-from core.shared.runtime import configure_runtime
-configure_runtime()
-from core.hotspots.collector import fetch_all_hotspots
-data = fetch_all_hotspots()
-print(f'Got {len(data)} chars of hotspot data')
-"
-
-# 测试 LLM 调用
-python -c "
-from core.shared.runtime import configure_runtime
-configure_runtime()
-from core.shared.llm import call_deepseek_with_retry
-result = call_deepseek_with_retry('你好，请回复OK', max_retries=1)
-print(f'LLM response: {result}')
-"
-
-# 测试微信 Token
-python -c "
-from config import WECHAT_APP_ID, WECHAT_APP_SECRET
-from core.shared.publisher import WeChatPublisher
-p = WeChatPublisher(WECHAT_APP_ID, WECHAT_APP_SECRET)
-print(f'Token: {p.access_token[:10]}...' if p.access_token else 'FAILED')
-"
-```
-
-### 集成测试
-
-```bash
-# 完整工作流测试（会实际调用 API）
-python main.py --task hotspots
-
-# Web UI 测试
-python webui.py
-# 浏览器访问 http://127.0.0.1:5000
-```
-
-### 测试文件
-
-项目在 `scratch/` 目录下有历史测试脚本：
-
-| 文件 | 用途 |
-|------|------|
-| `test_scrapers.py` | 爬虫功能测试 |
-| `test_similarity.py` | 标题相似度算法测试 |
-| `test_github_trending.py` | GitHub Trending 采集测试 |
-| `verify_all_imports.py` | 全模块导入验证 |
+### 3.7 多 Key 轮换池 (`utils/key_pool.py`)
+- `LLM_API_KEYS` 与 `DASHSCOPE_API_KEYS` 支持逗号分隔多个 Key。
+- 线程安全 Round-Robin 调度；遇到 429 限流默认冷却 `120s`，遇到 401/403 认证异常冷却 `300s` 并自动切换下一可用 Key。
 
 ---
 
-## 发布流程
+## 4. Linear Modern Light 前端工程开发指南
 
-### 版本号规范
+前端完全去除构建打包步骤（Zero-Build）及 Three.js WebGL 依赖，全部采用原生浏览器支持的 ES Module 与 CSS 变量设计体系：
 
-项目使用语义化版本：`主版本.次版本.修订号`
+### 4.1 样式与画布结构 (`static/css/`)
+- [`tokens.css`](static/css/tokens.css)：全局色彩、字体排版（Inter / 思源黑体栈）、边框 (`--border`)、阴影与圆角设计令牌。
+- [`components.css`](static/css/components.css)：胶囊切换器、按钮、状态徽章、卡片与模态弹窗标准件。
+- [`views.css`](static/css/views.css)：4 层纯 CSS `.ambient-canvas`（柔光渐变球 `ambient-blob-1..3` + 精密工程网格 `ambient-grid` + 噪点微纹理 `ambient-noise`）以及 5 视图布局与移动端底部 Dock 响应式规则。
 
-- **主版本**：重大架构变更或不兼容改动
-- **次版本**：新功能或显著优化
-- **修订号**：Bug 修复和小改动
-
-### 发布步骤
-
-```bash
-# 1. 确保所有改动已提交
-git status
-
-# 2. 运行语法检查
-python -c "import py_compile; ..."
-
-# 3. 更新 README.md 版本号和变更说明
-
-# 4. 提交
-git add -A
-git commit -m "vX.Y.Z: description"
-
-# 5. 推送
-git push origin main
-```
-
-### 提交信息规范
-
-```
-<类型>: <简短描述>
-
-类型：
-- feat: 新功能
-- fix: Bug 修复
-- perf: 性能优化
-- refactor: 代码重构
-- docs: 文档更新
-- style: 格式调整
-- test: 测试相关
-- chore: 构建/工具相关
-```
+### 4.2 ES Module 结构 (`static/js/`)
+- **入口**：[`static/js/main.js`](static/js/main.js) 初始化全局状态、SSE 日志流绑定、视图切换与双语切换。
+- **核心层 (`static/js/core/`)**：
+  - `api.js`：统一封装后端 `/api/*` 请求（含 `WEBUI_TOKEN` 登录重定向处理）。
+  - `state.js` & `storage.js`：前端单向状态树与本地偏好持久化。
+  - `i18n.js` & `icons.js`：全量中英文词条映射与零 Emoji 纯矢量 SVG 图标集。
+  - `log-parser.js`：将后端 SSE 文本日志解析为 4 阶段 Pipeline Stepper 与 Timeline 手风琴结构。
+- **视图层 (`static/js/views/`)**：
+  - `console.js`（总控）、`graph.js`（知识图谱）、`audit.js`（审稿台）、`studio.js`（配图重绘工坊）、`ops.js`（信源探测 / APScheduler 调度 / 系统配置热更新）。
+- **DOM 契约**：修改 [`templates/index.html`](templates/index.html) 时严禁随意删除 `id`、`data-view`、`data-task`、`data-i18n` 等 JS 绑定锚点；[`templates/login.html`](templates/login.html) 静态资源目录 `/static/` 在 [`webui.py`](webui.py) 中豁免鉴权拦截。
 
 ---
 
-## 常见开发任务
+## 5. 测试与调试工作流
 
-### 添加新的热点数据源
+### 5.1 自动化测试套件 (`tests/`)
+仓库共维护 **13 个 Pytest 测试文件**，涵盖核心模型、文章排版、数据库 WAL 迁移、Critic 质量门禁、GitHub 拦截门禁、热点抓取、事实搜索、叙事引擎、AI 生图降级、WebUI 鉴权及浏览器交互：
 
-1. 在 `core/hotspots/collector.py` 添加 `fetch_xxx()` 函数
-2. 注册到 `_SOURCE_FETCHERS` 字典
-3. 在 `config.py` 的 `NEWS_SOURCES` 列表添加源名
-4. 在 `source_labels` 字典添加中文标签
-5. 测试：`python -c "from core.hotspots.collector import fetch_xxx; print(fetch_xxx())"`
+```bash
+# 1. 运行全部核心单元测试与 API 集成测试（无浏览器依赖，日常开发必跑）
+python -m pytest tests/ -v --ignore=tests/test_webui_e2e_interactions.py
 
-### 修改文章生成提示词
+# 2. 运行 WebUI Playwright 端到端交互测试（需本机安装 Playwright Chromium）
+python -m pytest tests/test_webui_e2e_interactions.py -v
+```
 
-- 热点文章：编辑 `core/hotspots/processor.py` 的 `SYSTEM_PROMPT`
-- GitHub 文章：编辑 `core/github/processor.py` 的 `SYSTEM_PROMPT`
-- 用户 prompt：编辑对应的 `generate_article()` / `generate_github_article()` 函数
-- 测试：运行一次工作流，检查生成的文章质量
-
-### 添加新的图片来源
-
-1. 在 `utils/image_handler.py` 添加 `try_xxx()` 函数
-2. 在 `download_image()` 中添加到调用链
-3. 如果需要评分，参考 `image_filter.py` 的 `evaluate_image()`
-
-### 修改配图管线
-
-- 热点配图：`core/shared/article_utils.py` 的 `process_article_content()`
-- GitHub 配图：`core/github/workflow.py` 的 `_ensure_deep_images()`
-- 图片评分：`utils/image_filter.py` 的 `evaluate_image()`
+### 5.2 离线渲染与导入验证脚本 (`scratch/`)
+根目录 `scratch/` 下保留有大量专题验证与视觉调优脚本，例如：
+- `python scratch/verify_all_imports.py`：快速检查核心模块循环导入与缺失依赖。
+- `python scratch/test_daily_knowledge.py` / `python scratch/test_diagram_and_code.py`：离线检验排版与图表样式渲染效果。
 
 ---
 
-## 调试技巧
+## 6. 常见故障排查
 
-### 查看实时日志
-
-```bash
-# CLI 模式直接看终端输出
-python main.py --task hotspots
-
-# Web 模式看浏览器控制台
-python webui.py
-# 浏览器 F12 → Console
-```
-
-### 调整日志级别
-
-```python
-# 在 configure_runtime() 中修改
-logger.add(sys.stderr, level="DEBUG")  # 改为 DEBUG 看更多信息
-```
-
-### 测试单个函数
-
-```python
-# 直接导入测试
-from core.shared.runtime import configure_runtime
-configure_runtime()  # 初始化日志和配置
-
-# 然后调用目标函数
-from core.hotspots.processor import generate_article
-article = generate_article("AI芯片禁令")
-print(f"字数: {len(article)}")
-```
-
-### 检查微信 API
-
-```bash
-# 测试 Token 获取
-python -c "
-from config import WECHAT_APP_ID, WECHAT_APP_SECRET
-from core.shared.publisher import WeChatPublisher
-p = WeChatPublisher(WECHAT_APP_ID, WECHAT_APP_SECRET)
-print('Token:', p.access_token[:20] if p.access_token else 'FAILED')
-print('Drafts:', p.get_draft_titles()[:3])
-"
-```
-
----
-
-## 故障排查
-
-### 常见问题
-
-| 症状 | 原因 | 解决 |
-|------|------|------|
-| `ModuleNotFoundError` | 依赖未安装 | `pip install -r requirements.txt` |
-| `Token 授权失败` | AppID/Secret 错误 | 检查 `.env` 配置 |
-| `AI 调用超时` | 网络或 API 问题 | 检查 `LLM_BASE_URL` 和网络 |
-| `SD 服务未连接` | SD WebUI 未启动 | 启动 SD 并加 `--api` |
-| `Selenium 报错` | Chrome 版本不匹配 | `pip install --upgrade webdriver-manager` |
-| `文章被截断` | `LLM_MAX_TOKENS` 太低 | 检查 `config.py`（默认 8192） |
-| `配图全部失败` | SD 服务挂了 | 检查 SD WebUI 状态 |
-
-### 日志分析
-
-```bash
-# 保存日志到文件
-python main.py --task hotspots 2>&1 | tee run.log
-
-# 搜索错误
-grep -i "error\|fail\|exception" run.log
-```
-
-### 重置状态
-
-```bash
-# 重置 SQLite 数据库（重新开始）
-rm data/auto_publish.sqlite
-
-# 清理图片缓存
-rm -rf assets/
-
-# 清理热点缓存及 AI 科普历史
-rm data/hotspot_cache.sqlite data/aikepu_history.json
-```
+1. **微信公众号草稿箱推送失败 / `40001` / `40164`**
+   - 核查微信公众号后台「基本配置 → IP 白名单」是否已录入当前机器或云端出口公网 IP。
+   - 检查 `WECHAT_APP_ID` / `WECHAT_APP_SECRET` 前后是否误带空格；`publisher.py` 会在失效时自动刷新 Token，若云端部署多实例并发抢占 Token 需确保仅保留单活写节点或调整频率。
+2. **DashScope 通义生图报 `429` 限流**
+   - 检查 `QWEN_IMAGE_MIN_INTERVAL`（默认 `4` 秒）与 `QWEN_IMAGE_MAX_CONCURRENCY`（默认 `1`），或通过 `DASHSCOPE_API_KEYS` 填入多个账号 Key 叠加配额与自动冷却轮换。
+3. **HTML+KaTeX 或本地 Mermaid 图表渲染失败**
+   - 检查本机是否正确安装 Chrome/Chromium 及对应 Selenium 驱动；临时缺少无头浏览器时，`diagram_gen.py` 会自动降级至 `mermaid.ink`、`Graphviz DOT` 或 `Matplotlib` 兜底渲染。
+4. **WebUI 无头服务器静态文件或登录后 401/403**
+   - 检查 `.env` 中是否设置了 `WEBUI_TOKEN`，登录页为 `/login`，`/static/` 已放行免鉴权。
+5. **SQLite `database is locked`**
+   - 确认未多进程同时直接挂载非本地网络盘（如 NFS）下的 `.sqlite` 文件；[`core/db/manager.py`](core/db/manager.py) 已开启 WAL 模式并配置 `busy_timeout=30000`。

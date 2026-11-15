@@ -1,0 +1,91 @@
+{
+  "meta": {
+    "name": "职场成长知识体系",
+    "column_name": "职场成长",
+    "description": "从简历面试到管理转型的完整职场进阶路线，按先修依赖拓扑排序",
+    "version": "1.0",
+    "created": "2026-08-14"
+  },
+  "nodes": [
+    {
+      "id": "career-resume",
+      "title": "简历撰写：从岗位拆解到亮点提炼",
+      "tags": ["简历", "求职"],
+      "prerequisites": [],
+      "difficulty": 1,
+      "summary": "拆解目标岗位 JD，用数据化表达把经历变成可量化的成果，让简历通过率翻倍"
+    },
+    {
+      "id": "interview-basics",
+      "title": "面试基础：结构化表达与 STAR 法则",
+      "tags": ["面试", "表达"],
+      "prerequisites": [],
+      "difficulty": 1,
+      "summary": "用 STAR 法则把经历讲成故事，掌握高频行为面试题的回答框架与追问应对"
+    },
+    {
+      "id": "career-planning",
+      "title": "职业规划：从自我认知到三年路线图",
+      "tags": ["规划", "成长"],
+      "prerequisites": [],
+      "difficulty": 1,
+      "summary": "用能力盘点与市场分析交叉定位自己的赛道，制定可执行、可复盘的三步走路线图"
+    },
+    {
+      "id": "workplace-comm",
+      "title": "职场沟通：向上管理与跨部门协作",
+      "tags": ["沟通", "协作"],
+      "prerequisites": ["career-planning"],
+      "difficulty": 2,
+      "summary": "学会用老板的语言汇报进度、用对方的利益推动协作，把沟通变成影响力"
+    },
+    {
+      "id": "time-mgmt",
+      "title": "时间与精力管理：GTD 与四象限实战",
+      "tags": ["效率", "习惯"],
+      "prerequisites": ["career-planning"],
+      "difficulty": 2,
+      "summary": "区分重要与紧急，用清单系统清空大脑负担，把精力留给真正产出价值的工作"
+    },
+    {
+      "id": "salary-negotiation",
+      "title": "薪资谈判：如何科学谈 offer",
+      "tags": ["薪资", "谈判"],
+      "prerequisites": ["interview-basics"],
+      "difficulty": 2,
+      "summary": "从薪酬结构拆解到议价话术，掌握 offer 谈判中的锚点、底线与让步策略"
+    },
+    {
+      "id": "personal-brand",
+      "title": "个人品牌：职场影响力的构建",
+      "tags": ["品牌", "影响力"],
+      "prerequisites": ["workplace-comm"],
+      "difficulty": 3,
+      "summary": "在组织内外建立可识别的专业标签，让机会主动找上门而不是被动等待"
+    },
+    {
+      "id": "leadership-basics",
+      "title": "初阶管理：从执行者到带人",
+      "tags": ["管理", "带团队"],
+      "prerequisites": ["workplace-comm"],
+      "difficulty": 3,
+      "summary": "完成角色转身：授权、反馈、目标拆解与团队激励，避免新经理的常见陷阱"
+    },
+    {
+      "id": "career-transition",
+      "title": "职业转型：第二曲线的规划与落地",
+      "tags": ["转型", "第二曲线"],
+      "prerequisites": ["career-planning", "personal-brand"],
+      "difficulty": 4,
+      "summary": "识别转型信号、评估沉没成本与迁移能力，用最小化试验验证新方向再全身投入"
+    },
+    {
+      "id": "side-business",
+      "title": "副业起步：从技能变现到个人商业模式",
+      "tags": ["副业", "变现"],
+      "prerequisites": ["personal-brand"],
+      "difficulty": 4,
+      "summary": "把主业技能产品化，设计定价、渠道与时间投入，从第一单开始跑通个人商业模式"
+    }
+  ]
+}

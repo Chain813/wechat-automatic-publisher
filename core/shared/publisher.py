@@ -31,9 +31,19 @@ except ImportError:
 #  标题查重辅助函数
 # ==========================================
 
+def _to_clean_title_str(title) -> str:
+    """安全将入参转换为纯字符串标题，防止调用 str.title 内置方法导致类型错误"""
+    if isinstance(title, str):
+        return title
+    if hasattr(title, "title") and isinstance(getattr(title, "title"), str):
+        return title.title
+    return str(title)
+
+
 def _normalize_title(title):
     """去除标点/空格，统一小写，用于字符级模糊匹配"""
-    return ''.join(c.lower() for c in title if c.isalnum())
+    title_str = _to_clean_title_str(title)
+    return ''.join(c.lower() for c in title_str if c.isalnum())
 
 
 def _extract_keywords(title):
@@ -43,14 +53,15 @@ def _extract_keywords(title):
     - 中文：使用 2~4 字滑动窗口生成 n-gram，弥补无分词器的缺陷
       例如 "脑机接口人体试验" → {"脑机", "机接", "接口", "口人", "脑机接口", ...}
     """
+    title_str = _to_clean_title_str(title)
     keywords = set()
     # 英文单词和数字
-    for m in re.finditer(r'[a-zA-Z][a-zA-Z0-9]*|[0-9]+', title):
+    for m in re.finditer(r'[a-zA-Z][a-zA-Z0-9]*|[0-9]+', title_str):
         token = m.group().lower()
         if len(token) >= 2:
             keywords.add(token)
     # 中文 n-gram (2~4 字滑动窗口)
-    chinese_chunks = re.findall(r'[\u4e00-\u9fff]+', title)
+    chinese_chunks = re.findall(r'[\u4e00-\u9fff]+', title_str)
     for chunk in chinese_chunks:
         for n in (2, 3, 4):
             for i in range(len(chunk) - n + 1):
@@ -78,25 +89,27 @@ def _select_semantic_candidates(new_title, existing_titles, max_candidates=15):
     基于本地关键词重叠和低阈值字符模糊匹配，筛选出最可能相似的候选标题，
     避免将成百上千个不相关标题全部传给大模型，节省 token 费用并提高速度。
     """
-    new_keywords = _extract_keywords(new_title)
+    new_title_str = _to_clean_title_str(new_title)
+    new_keywords = _extract_keywords(new_title_str)
     candidates_with_score = []
 
     for old in existing_titles:
-        old_keywords = _extract_keywords(old)
+        old_str = _to_clean_title_str(old)
+        old_keywords = _extract_keywords(old_str)
         intersection = new_keywords & old_keywords
         score = len(intersection)
 
         # 辅助计算粗略字符相似度 (0-100)
-        norm_new = _normalize_title(new_title)
-        norm_old = _normalize_title(old)
+        norm_new = _normalize_title(new_title_str)
+        norm_old = _normalize_title(old_str)
         if fuzz is not None:
             ratio = fuzz.ratio(norm_new, norm_old)
         else:
             ratio = int(SequenceMatcher(None, norm_new, norm_old).ratio() * 100)
 
         # 如果有关键词交集，或者字符相似度达到 20%+，或者是极短的标题
-        if score > 0 or ratio >= 20 or len(new_title) < 8 or len(old) < 8:
-            candidates_with_score.append((old, score, ratio))
+        if score > 0 or ratio >= 20 or len(new_title_str) < 8 or len(old_str) < 8:
+            candidates_with_score.append((old_str, score, ratio))
 
     # 排序：优先按关键词交集数量，其次按相似度比例，均降序
     candidates_with_score.sort(key=lambda x: (x[1], x[2]), reverse=True)
@@ -111,8 +124,9 @@ def _ai_semantic_check(new_title, existing_titles):
     使用本地粗筛机制降低输入给大模型的标题规模，提升响应速度并节省 token 资源。
     返回 (is_duplicate: bool, matched_title: str or None)
     """
+    new_title_str = _to_clean_title_str(new_title)
     # 1. 本地粗筛最相关的候选标题
-    candidates = _select_semantic_candidates(new_title, existing_titles, max_candidates=15)
+    candidates = _select_semantic_candidates(new_title_str, existing_titles, max_candidates=15)
     if not candidates:
         logger.info("  [AI查重粗筛] 未发现任何存在潜在交集的候选标题，直接判定为【不重复】")
         return False, None
@@ -126,7 +140,7 @@ def _ai_semantic_check(new_title, existing_titles):
     titles_text = "\n".join(f"{i+1}. {t}" for i, t in enumerate(candidates))
     prompt = (
         f"已发布文章标题列表：\n{titles_text}\n\n"
-        f"待发布话题：「{new_title}」\n\n"
+        f"待发布话题：「{new_title_str}」\n\n"
         "请判断待发布话题是否与列表中某篇文章覆盖了同一个核心事件或议题"
         "（即使措辞、角度不同，只要是同一件事就算重复）。\n"
         "如果重复，请回答：重复|<编号>\n"
@@ -354,59 +368,77 @@ class WeChatPublisher:
         return None
 
     def get_draft_titles(self, count=WECHAT_DRAFT_SCAN_COUNT):
-        """获取最近草稿标题列表"""
+        """获取最近草稿标题列表，若接口失败返回 None"""
         self._ensure_valid_token()
         if not self.access_token:
-            return []
+            return None
         url = f"https://api.weixin.qq.com/cgi-bin/draft/batchget?access_token={self.access_token}"
         data = {"offset": 0, "count": count, "no_content": 1}
         titles = []
         try:
             res = self.session.post(url, json=data, timeout=WECHAT_API_TIMEOUT)
             res_data = json.loads(res.content.decode('utf-8'))
+            if res_data.get("errcode", 0) != 0:
+                logger.warning("获取草稿标题微信接口返回错误: {}", res_data)
+                return None
             for item in res_data.get("item", []):
                 for news in item.get("content", {}).get("news_item", []):
                     if news.get("title"):
                         titles.append(news.get("title"))
+            return titles
         except Exception as exc:
             logger.warning("获取草稿标题失败: {}", exc)
-        return titles
+            return None
 
     def get_published_titles(self, count=WECHAT_DRAFT_SCAN_COUNT):
-        """获取最近已发布文章标题列表"""
+        """获取最近已发布文章标题列表，若接口失败返回 None"""
         self._ensure_valid_token()
         if not self.access_token:
-            return []
+            return None
         url = f"https://api.weixin.qq.com/cgi-bin/freepublish/batchget?access_token={self.access_token}"
         data = {"offset": 0, "count": count, "no_content": 1}
         titles = []
         try:
             res = self.session.post(url, json=data, timeout=WECHAT_API_TIMEOUT)
             res_data = json.loads(res.content.decode('utf-8'))
+            if res_data.get("errcode", 0) != 0:
+                logger.warning("获取发布标题微信接口返回错误: {}", res_data)
+                return None
             for item in res_data.get("item", []):
                 for news in item.get("content", {}).get("news_item", []):
                     if news.get("title"):
                         titles.append(news.get("title"))
+            return titles
         except Exception as exc:
             logger.warning("获取发布标题失败: {}", exc)
-        return titles
+            return None
+
+    def get_cloud_active_titles(self, count=WECHAT_DRAFT_SCAN_COUNT):
+        """仅拉取微信云端真实存在的草稿和已发布文章标题。如果请求接口失败返回 None。"""
+        drafts = self.get_draft_titles(count=count)
+        published = self.get_published_titles(count=count)
+        if drafts is None or published is None:
+            return None
+        return list(set(drafts + published))
 
     def get_all_active_titles(self):
         """合并拉取微信草稿箱、最近发布记录以及本地 SQLite 历史发布记录，做全量标题查重"""
         if self._draft_titles_cache is not None:
             return self._draft_titles_cache
         
-        drafts = self.get_draft_titles()
-        published = self.get_published_titles()
+        drafts = self.get_draft_titles() or []
+        published = self.get_published_titles() or []
         
         db_titles = []
         try:
             from core.db.manager import db_manager
             from core.db.models import ArticleHistory
             session = db_manager.get_session()
-            records = session.query(ArticleHistory).filter(ArticleHistory.success_status.is_(True)).all()
-            db_titles = [r.title for r in records if r.title]
-            db_manager.remove_session()
+            try:
+                records = session.query(ArticleHistory).filter(ArticleHistory.success_status.is_(True)).all()
+                db_titles = [r.title for r in records if r.title]
+            finally:
+                db_manager.remove_session()
         except Exception as e:
             logger.warning("从本地数据库获取历史发布标题失败: {}", e)
             
@@ -439,21 +471,23 @@ class WeChatPublisher:
         3. 关键词 n-gram 重叠匹配
         4. AI 语义查重 (DeepSeek，~300 tokens，兜底)
         """
-        existing = self.get_all_active_titles()
+        new_title_str = _to_clean_title_str(new_title)
+        raw_existing = self.get_all_active_titles()
         if extra_existing:
-            existing = existing + extra_existing
+            raw_existing = raw_existing + extra_existing
             
+        existing = [_to_clean_title_str(t) for t in raw_existing]
         if not existing:
             return False, None
 
-        new_keywords = _extract_keywords(new_title)
+        new_keywords = _extract_keywords(new_title_str)
         for old in existing:
             # 策略 1: 精确匹配
-            if new_title == old:
+            if new_title_str == old:
                 return True, old
 
             # 策略 2: 字符级模糊匹配
-            similarity = self._title_similarity(new_title, old)
+            similarity = self._title_similarity(new_title_str, old)
             if similarity >= TITLE_DUPLICATE_RATIO:
                 logger.info("命中相似标题(模糊{}%): {}", similarity, old)
                 return True, old
@@ -468,7 +502,7 @@ class WeChatPublisher:
 
         # 策略 4: AI 语义查重（前三层均未命中时，调用一次 AI 兜底）
         logger.info("本地查重未命中，启动 AI 语义查重...")
-        is_dup, matched = _ai_semantic_check(new_title, existing)
+        is_dup, matched = _ai_semantic_check(new_title_str, existing)
         if is_dup:
             logger.info("命中相似标题(AI语义): {}", matched)
             return True, matched
@@ -503,6 +537,22 @@ class WeChatPublisher:
 
         if not digest:
             digest = title[:60]
+
+        # 封面素材缺失自愈保护：防止直接向微信接口提交空 thumb_media_id 触发 40007 错误
+        if not thumb_media_id:
+            logger.warning("  ⚠️ 草稿发布缺少 thumb_media_id，尝试自动上传系统预设封面作为自愈兜底...")
+            fallback_covers = [
+                os.path.abspath(os.path.join("assets", "default_aikepu_cover.png")),
+                os.path.abspath(os.path.join("assets", "default_daily_cover.png")),
+                os.path.abspath(os.path.join("static", "images", "github_fixed_cover.png")),
+            ]
+            for fc in fallback_covers:
+                if os.path.exists(fc):
+                    uploaded = self.upload_image(fc)
+                    if uploaded:
+                        thumb_media_id = uploaded
+                        logger.info("  ✅ 成功自动补全兜底封面 media_id: {}", thumb_media_id)
+                        break
 
         data = {
             "articles": [{

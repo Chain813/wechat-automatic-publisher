@@ -1,5 +1,6 @@
 import os
 import time
+import hashlib
 from datetime import datetime
 from loguru import logger
 import threading
@@ -21,18 +22,42 @@ from core.db.models import ArticleHistory
 
 # --- 辅助方法 ---
 
+def _jsdelivr_mirror(url):
+    """raw.githubusercontent.com → cdn.jsdelivr.net 国内可直连镜像"""
+    import re as _re
+    m = _re.match(r"https?://raw\.githubusercontent\.com/([^/]+)/([^/]+)/([^/]+)/(.+)$", url)
+    if m:
+        user, repo, branch, path = m.groups()
+        return f"https://cdn.jsdelivr.net/gh/{user}/{repo}@{branch}/{path}"
+    return url
+
+
 def _download_and_upload_url(url, publisher, prefix="remote"):
     from utils.http_client import build_api_session
     tmp_path = None
+    candidates = [url]
+    if "raw.githubusercontent.com" in url:
+        candidates.append(_jsdelivr_mirror(url))
     try:
         session = build_api_session()
-        res = session.get(url, timeout=15)
-        if res.status_code != 200:
-            logger.warning("  下载失败 status={}: {}", res.status_code, url[:80])
+        res = None
+        used_url = url
+        for cand in candidates:
+            try:
+                r = session.get(cand, timeout=15)
+                if r.status_code == 200 and len(r.content) > 5000:
+                    res, used_url = r, cand
+                    break
+            except Exception:
+                res = None
+        if res is None or res.status_code != 200:
+            logger.warning("  下载失败 status={}: {}", getattr(res, "status_code", "网络异常"), url[:80])
             return None
         if len(res.content) <= 5000:
             logger.warning("  图片太小 ({} bytes): {}", len(res.content), url[:80])
             return None
+        if used_url != url:
+            logger.info("  🌐 已切换 jsdelivr 镜像下载: {}", url[:60])
 
         ext = ".jpg"
         if ".png" in url.lower():
@@ -247,7 +272,7 @@ class PublishGithubNode(BaseNode):
         for warning in title_warnings:
             print(f"  ⚠️ 标题警告: {warning}")
 
-        _print_review_report(
+        all_ok = _print_review_report(
             title=clean_title,
             word_count=review_data["word_count"],
             image_count=review_data["image_count"],
@@ -256,30 +281,111 @@ class PublishGithubNode(BaseNode):
             digest=digest,
         )
 
+        # 主编审校门禁与自愈闭环 (Critic & Quality Gate with Auto-Remediation)
+        from core.pipeline.critic import evaluate_and_repair_article, format_critic_report
+        final_html, review_res = evaluate_and_repair_article(clean_title, final_html, article_type="github")
+        print(format_critic_report(review_res))
+
+        if not review_res["passed"] or not all_ok:
+            err = f"未通过主编质量门禁 ({review_res['score']}分): {'; '.join(review_res['critic_issues'])}"
+            print(f"❌ 门禁拦截发布：「{clean_title}」— {err}")
+            try:
+                title_hash = hashlib.md5(clean_title.encode('utf-8')).hexdigest()
+                os.makedirs(os.path.join("data", "previews"), exist_ok=True)
+                with open(os.path.join("data", "previews", f"fail_{title_hash}.html"), "w", encoding="utf-8") as f:
+                    f.write(final_html)
+
+                primary_repo_url = f"https://github.com/{projects[0]['repo']}" if projects else ""
+                session = db_manager.get_session()
+                try:
+                    ah = ArticleHistory(
+                        title=clean_title,
+                        source_type="github",
+                        publish_date=datetime.now().strftime("%Y-%m-%d"),
+                        success_status=False,
+                        media_id=None,
+                        error_log=err,
+                        quality_score=review_res["score"],
+                        source_url=primary_repo_url,
+                        thumb_media_id=thumb_id,
+                        status="REJECTED"
+                    )
+                    session.add(ah)
+                    session.commit()
+                finally:
+                    db_manager.remove_session()
+            except Exception as e:
+                logger.warning("保存 GitHub 门禁拦截记录异常: {}", e)
+            return False
+
         print("\n🚀 正在同步至微信公众号云端草稿箱...")
         success, result = publisher.publish_and_notify(clean_title, final_html, thumb_id, digest)
         if not success:
-            print(f"❌ 同步草稿箱失败：{result}")
+            err = result.get("errmsg", str(result)) if isinstance(result, dict) else str(result)
+            print(f"❌ 同步草稿箱失败：{err}")
+            try:
+                title_hash = hashlib.md5(clean_title.encode('utf-8')).hexdigest()
+                os.makedirs(os.path.join("data", "previews"), exist_ok=True)
+                with open(os.path.join("data", "previews", f"fail_{title_hash}.html"), "w", encoding="utf-8") as f:
+                    f.write(final_html)
+
+                primary_repo_url = f"https://github.com/{projects[0]['repo']}" if projects else ""
+                session = db_manager.get_session()
+                try:
+                    ah = ArticleHistory(
+                        title=clean_title,
+                        source_type="github",
+                        publish_date=datetime.now().strftime("%Y-%m-%d"),
+                        success_status=False,
+                        media_id=None,
+                        error_log=err,
+                        quality_score=review_res["score"],
+                        source_url=primary_repo_url,
+                        thumb_media_id=thumb_id,
+                        status="FAILED"
+                    )
+                    session.add(ah)
+                    session.commit()
+                finally:
+                    db_manager.remove_session()
+            except Exception as e:
+                logger.warning("保存 GitHub 发布失败记录异常: {}", e)
             return False
 
         draft_id = result['media_id']
         print(f"\n{'⭐' * 30}\n  🎉 恭喜！发布成功\n  📄 标题：{clean_title}\n  🆔 草稿：{draft_id}\n{'⭐' * 30}")
         
+        # 保存本地 HTML 预览供 WebUI 人机工作台查看
+        try:
+            os.makedirs(os.path.join("data", "previews"), exist_ok=True)
+            with open(os.path.join("data", "previews", f"{draft_id}.html"), "w", encoding="utf-8") as f:
+                f.write(final_html)
+        except Exception as pe:
+            logger.debug("保存 GitHub 预览 HTML 异常: {}", pe)
+
         repo_names = [p['repo'] for p in projects]
         save_github_history(repo_names)
         
         try:
+            primary_repo_url = f"https://github.com/{projects[0]['repo']}" if projects else ""
             session = db_manager.get_session()
-            ah = ArticleHistory(
-                title=clean_title,
-                source_type="github",
-                publish_date=datetime.now().strftime("%Y-%m-%d"),
-                success_status=True,
-                media_id=draft_id,
-                error_log=None
-            )
-            session.add(ah)
-            session.commit()
+            try:
+                ah = ArticleHistory(
+                    title=clean_title,
+                    source_type="github",
+                    publish_date=datetime.now().strftime("%Y-%m-%d"),
+                    success_status=True,
+                    media_id=draft_id,
+                    error_log=None,
+                    quality_score=review_res["score"],
+                    source_url=primary_repo_url,
+                    thumb_media_id=thumb_id,
+                    status="DRAFT"
+                )
+                session.add(ah)
+                session.commit()
+            finally:
+                db_manager.remove_session()
         except Exception as e:
             logger.warning("保存 GitHub 发布记录失败: {}", e)
             

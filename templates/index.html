@@ -3,505 +3,588 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AutoWeChat - AI Console</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
-    <link rel="stylesheet" href="/static/css/style.css">
-    <link rel="stylesheet" href="/static/css/image-studio.css">
+    <title>AutoWeChat — Linear Modern Light 控制台</title>
+    <link rel="stylesheet" href="/static/css/tokens.css?v=2026">
+    <link rel="stylesheet" href="/static/css/components.css?v=2026">
+    <link rel="stylesheet" href="/static/css/views.css?v=2026">
 </head>
 <body>
-    <div class="app-container">
-        <aside class="sidebar glass-panel">
-            <div class="brand">
-                <div class="brand-logo">🚀</div>
-                <h1>AutoWeChat</h1>
-                <span class="badge">v3.0</span>
-            </div>
-            <nav class="nav-menu">
-                <a href="#" class="nav-item active" data-target="dashboard" id="nav-console-link">
-                    <span class="icon">📊</span> <span data-i18n="nav-console">Console</span>
+    <div class="ambient-canvas" aria-hidden="true">
+        <div class="ambient-blob ambient-blob-1"></div>
+        <div class="ambient-blob ambient-blob-2"></div>
+        <div class="ambient-blob ambient-blob-3"></div>
+        <div class="ambient-grid"></div>
+        <div class="ambient-noise"></div>
+    </div>
+
+    <div class="app-shell">
+        <header class="topbar">
+            <div style="display: flex; align-items: center; gap: 24px;">
+                <a href="/" class="brand-mark">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                        <polyline points="2 17 12 22 22 17"></polyline>
+                        <polyline points="2 12 12 17 22 12"></polyline>
+                    </svg>
+                    <span>AutoWeChat</span>
+                    <span class="brand-badge">Cloud</span>
                 </a>
-                <a href="#" class="nav-item" data-target="skill-tree-view" id="nav-skill-tree-link">
-                    <span class="icon">🎓</span> <span data-i18n="nav-skill-tree">Skill Tree</span>
-                </a>
-                <a href="#" class="nav-item" data-target="history" id="nav-history-link">
-                    <span class="icon">📜</span> <span data-i18n="nav-history">History</span>
-                </a>
-                <a href="#" class="nav-item" data-target="sources" id="nav-sources-link">
-                    <span class="icon">📡</span> <span data-i18n="nav-sources">Sources</span>
-                </a>
-                <a href="#" class="nav-item" data-target="schedule" id="nav-schedule-link">
-                    <span class="icon">⏰</span> <span data-i18n="nav-schedule">Schedule</span>
-                </a>
-                <a href="#" class="nav-item" data-target="settings" id="nav-settings-link">
-                    <span class="icon">⚙️</span> <span data-i18n="nav-settings">Settings</span>
-                </a>
-                <a href="#" class="nav-item" data-target="image-studio" id="nav-image-studio-link">
-                    <span class="icon">🖼️</span> <span data-i18n="nav-image-studio">Image Studio</span>
-                </a>
-            </nav>
-            
-            <div class="lang-toggle-container">
-                <button id="btn-lang-toggle" class="lang-btn">
-                    <span class="lang-icon">🌐</span> <span id="lang-btn-text" data-i18n="btn-lang-text">中文</span>
-                </button>
-            </div>
-
-            <div class="system-status">
-                <div class="status-indicator">
-                    <div class="dot idle" id="status-dot"></div>
-                    <span id="status-text" data-i18n="status-idle">Idle</span>
-                </div>
-            </div>
-        </aside>
-
-        <main class="main-content">
-            <!-- Dashboard -->
-            <section id="dashboard" class="view-section active">
-                <header class="view-header">
-                    <h2 data-i18n="console-title">Console</h2>
-                    <p data-i18n="console-subtitle">Auto fetch, generate, and publish to WeChat</p>
-                </header>
-                <div class="module-cards-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 16px;">
-                    <!-- Hotspots Card -->
-                    <div class="module-card glass-panel" style="padding: 20px; display: flex; flex-direction: column; justify-content: space-between;">
-                        <div>
-                            <div style="font-size: 24px; margin-bottom: 8px;">🌟</div>
-                            <h3 style="margin-bottom: 8px; font-size: 16px;" data-i18n="task-hotspots">Hotspots</h3>
-                            <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5;">全网资讯自动聚合，提取当日最热科技新闻进行智能改写并生成配图。</p>
-                        </div>
-                        <button class="btn btn-primary glow-effect btn-module-start" data-task="hotspots" style="width: 100%;">
-                            <span class="btn-icon">▶</span> <span data-i18n="btn-start">Start</span>
-                        </button>
-                    </div>
-
-                    <!-- GitHub Card -->
-                    <div class="module-card glass-panel" style="padding: 20px; display: flex; flex-direction: column; justify-content: space-between;">
-                        <div>
-                            <div style="font-size: 24px; margin-bottom: 8px;">💻</div>
-                            <h3 style="margin-bottom: 8px; font-size: 16px;" data-i18n="task-github">GitHub Trending</h3>
-                            <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5;">分析 GitHub Trending 开源项目，解析技术亮点，自动生成长图文分析报告。</p>
-                        </div>
-                        <button class="btn btn-primary glow-effect btn-module-start" data-task="github" style="width: 100%;">
-                            <span class="btn-icon">▶</span> <span data-i18n="btn-start">Start</span>
-                        </button>
-                    </div>
-
-                    <!-- AI Kepu Card -->
-                    <div class="module-card glass-panel" style="padding: 20px; display: flex; flex-direction: column; justify-content: space-between;">
-                        <div>
-                            <div style="font-size: 24px; margin-bottom: 8px;">🎓</div>
-                            <h3 style="margin-bottom: 8px; font-size: 16px;" data-i18n="task-aikepu">AI 科普</h3>
-                            <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5;">基于技能树前置依赖，智能解锁下一个图谱节点，生成体系化的硬核教程。</p>
-                        </div>
-                        <button class="btn btn-primary glow-effect btn-module-start" data-task="aikepu" style="width: 100%;">
-                            <span class="btn-icon">▶</span> <span data-i18n="btn-start">Start</span>
-                        </button>
-                    </div>
-
-                    <!-- Daily Knowledge Card -->
-                    <div class="module-card glass-panel" style="padding: 20px; display: flex; flex-direction: column; justify-content: space-between;">
-                        <div>
-                            <div style="font-size: 24px; margin-bottom: 8px;">💡</div>
-                            <h3 style="margin-bottom: 8px; font-size: 16px;">每日小知识</h3>
-                            <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5;">完全解耦的短文模块。精选高阶概念，运用隐喻手法讲解，并自动防重推送。</p>
-                        </div>
-                        <button class="btn btn-primary glow-effect btn-module-start" data-task="daily_knowledge" style="width: 100%;">
-                            <span class="btn-icon">▶</span> <span data-i18n="btn-start">Start</span>
-                        </button>
-                    </div>
-                </div>
-                
-                <!-- Global Controls (Pause/Resume/Stop) -->
-                <div class="global-controls glass-panel" style="padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; display: none;" id="active-task-controls">
-                    <div style="display: flex; align-items: center; gap: 12px;">
-                        <div class="spinner" style="width: 20px; height: 20px; border: 2px solid var(--border-color); border-top-color: var(--primary-color); border-radius: 50%; animation: spin 1s linear infinite;"></div>
-                        <span style="font-weight: 600;" id="active-task-label">Running...</span>
-                    </div>
-                    <div class="action-buttons" style="display: flex; gap: 8px;">
-                        <button id="btn-pause" class="btn btn-warning" style="display:none;">
-                            <span class="btn-icon">⏸</span> <span data-i18n="btn-pause">Pause</span>
-                        </button>
-                        <button id="btn-resume" class="btn btn-success" style="display:none;">
-                            <span class="btn-icon">▶</span> <span data-i18n="btn-resume">Resume</span>
-                        </button>
-                        <button id="btn-stop" class="btn btn-danger" style="display:none;">
-                            <span class="btn-icon">⏹</span> <span data-i18n="btn-stop">Stop</span>
-                        </button>
-                    </div>
-                </div>
-                
-                <!-- LLM Cache & Performance Dashboard -->
-                <div class="glass-panel cache-dashboard-panel mb-4" style="padding: 16px 20px; margin-top: 16px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
-                        <div style="font-weight: 700; font-size: 14px; display:flex; align-items:center; gap:8px;">
-                            <span>⚡ DeepSeek Prompt Cache 性能与加速监控</span>
-                            <span id="cache-warm-indicator" class="badge" style="background: rgba(16, 185, 129, 0.15); color: #10b981; font-size: 11px; padding: 2px 8px; border-radius: 12px;">已预热激活</span>
-                        </div>
-                        <button id="btn-warmup-cache" class="btn btn-secondary" style="font-size:12px; padding:4px 12px;">
-                            <span>🔥 一键预热缓存</span>
-                        </button>
-                    </div>
-                    <div class="cache-metrics-grid" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;">
-                        <div class="metric-card" style="background: #ffffff; padding: 10px 14px; border-radius: 8px; border: 1px solid #e2e8f0;">
-                            <div style="font-size:12px; color:#94a3b8;">Cache 命中率</div>
-                            <div id="stat-hit-rate" style="font-size:20px; font-weight:700; color:#38bdf8; margin-top:2px;">0.0%</div>
-                        </div>
-                        <div class="metric-card" style="background: #ffffff; padding: 10px 14px; border-radius: 8px; border: 1px solid #e2e8f0;">
-                            <div style="font-size:12px; color:#94a3b8;">累计已节省 Tokens</div>
-                            <div id="stat-saved-tokens" style="font-size:20px; font-weight:700; color:#34d399; margin-top:2px;">0</div>
-                        </div>
-                        <div class="metric-card" style="background: #ffffff; padding: 10px 14px; border-radius: 8px; border: 1px solid #e2e8f0;">
-                            <div style="font-size:12px; color:#94a3b8;">估计已节省 API 费用</div>
-                            <div id="stat-saved-cny" style="font-size:20px; font-weight:700; color:#facc15; margin-top:2px;">￥0.0000</div>
-                        </div>
-                        <div class="metric-card" style="background: #ffffff; padding: 10px 14px; border-radius: 8px; border: 1px solid #e2e8f0;">
-                            <div style="font-size:12px; color:#94a3b8;">最后请求响应耗时</div>
-                            <div id="stat-latency" style="font-size:20px; font-weight:700; color:#a78bfa; margin-top:2px;">0 ms</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- AI 科普技能树动态进度面板 -->
-                <div class="glass-panel aikepu-tree-panel mb-4" style="padding: 16px 20px; margin-top: 16px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
-                        <div style="font-weight: 700; font-size: 14px; display:flex; align-items:center; gap:8px;">
-                            <span>🎓 AI 科普技能树动态进度 (微信同步)</span>
-                            <span id="skill-tree-badge" class="badge" style="background: rgba(37, 99, 235, 0.1); color: #2563eb; font-size: 11px; padding: 2px 8px; border-radius: 12px;">自动对齐已发表记录</span>
-                        </div>
-                        <div style="display:flex; align-items:center; gap:12px;">
-                            <div id="skill-tree-ratio" style="font-size:13px; font-weight:600; color:#38bdf8;">进度: 0/0 (0%)</div>
-                            <button id="btn-open-skill-tree" class="btn btn-secondary" style="font-size:11px; padding:3px 10px; border-radius:6px; cursor:pointer;">
-                                <span>🌐 展开知识树</span>
-                            </button>
-                        </div>
-                    </div>
-                    <div style="background: #f1f5f9; height: 8px; border-radius: 4px; overflow: hidden; margin-bottom: 12px;">
-                        <div id="skill-tree-progress-bar" style="background: linear-gradient(90deg, #38bdf8, #818cf8); height: 100%; width: 0%; transition: width 0.4s ease;"></div>
-                    </div>
-                    <div style="font-size: 12px; color: #94a3b8; display:flex; align-items:center; gap: 6px;">
-                        <span>🎯 动态解锁下一个最佳选题：</span>
-                        <strong id="skill-tree-next-topic" style="color: #0f172a; font-weight: 600;">加载中...</strong>
-                    </div>
-                </div>
-                <div class="terminal-container glass-panel mt-4">
-                    <div class="terminal-header">
-                        <div class="mac-btns">
-                            <span class="mac-btn close"></span>
-                            <span class="mac-btn minimize"></span>
-                            <span class="mac-btn maximize"></span>
-                        </div>
-                        <div class="terminal-title">stdout</div>
-                        <button id="btn-clear-logs" class="btn-text">Clear</button>
-                    </div>
-                    <div class="terminal-body" id="log-console">
-                        <div class="log-line system">AutoWeChat console ready.</div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Skill Tree Visualizer View -->
-            <section id="skill-tree-view" class="view-section">
-                <header class="view-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
-                    <div>
-                        <h2>⚡ AI 全栈科普 30 核心知识点全景拓扑图谱</h2>
-                        <p>知识图谱 DAG 有向无环图 · 严谨先修依赖校验 · 微信全量同步状态</p>
-                    </div>
-                    <div style="display:flex; gap:10px;">
-                        <button id="btn-sync-wechat-skill-tree" class="btn btn-secondary" style="font-size:13px; padding:6px 14px; border-color: rgba(16, 185, 129, 0.4); color: #10b981;">
-                            <span class="btn-icon">💬</span> 微信同步
-                        </button>
-                        <button id="btn-refresh-skill-tree-view" class="btn btn-secondary" style="font-size:13px; padding:6px 14px;">
-                            <span class="btn-icon">🔄</span> 刷新拓扑图谱
-                        </button>
-                        <button id="btn-start-recommended-node" class="btn btn-primary glow-effect" style="font-size:13px; padding:6px 14px;">
-                            <span class="btn-icon">⚡</span> 撰写下一个可解锁节点
-                        </button>
-                    </div>
-                </header>
-
-                <div class="glass-panel mb-4" style="padding:16px 20px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
-                        <div class="tree-legend" style="display:flex; align-items:center; gap:20px; font-size:13px;">
-                            <span style="display:flex; align-items:center; gap:6px;">
-                                <span style="width:12px; height:12px; border-radius:50%; background:#10b981; box-shadow:0 0 8px #10b981;"></span> 已生成/微信草稿箱 (<strong id="legend-published-count" style="color:#10b981;">0</strong>)
-                            </span>
-                            <span style="display:flex; align-items:center; gap:6px;">
-                                <span style="width:12px; height:12px; border-radius:50%; background:#38bdf8; box-shadow:0 0 8px #38bdf8;"></span> 可解锁生成 (<strong id="legend-available-count" style="color:#38bdf8;">0</strong>)
-                            </span>
-                            <span style="display:flex; align-items:center; gap:6px;">
-                                <span style="width:12px; height:12px; border-radius:50%; background:#64748b;"></span> 锁定待先修条件 (<strong id="legend-locked-count" style="color:#94a3b8;">0</strong>)
-                            </span>
-                        </div>
-                        <div class="tree-filter-tabs" style="display:flex; gap:6px;">
-                            <button class="tree-filter-btn active" data-filter="all">全部 (30)</button>
-                            <button class="tree-filter-btn" data-filter="1">🌱 入门</button>
-                            <button class="tree-filter-btn" data-filter="2">📘 基础</button>
-                            <button class="tree-filter-btn" data-filter="3">🔥 进阶</button>
-                            <button class="tree-filter-btn" data-filter="4">⚡ 前沿</button>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="skill-tree-viewport glass-panel" id="skill-tree-viewport">
-                    <svg id="skill-tree-svg-canvas" class="tree-svg-overlay"></svg>
-                    <div id="skill-tree-columns-container" class="skill-tree-columns-container">
-                        <!-- Column 1: Tier 1 -->
-                        <div class="skill-tier-column" data-tier="1">
-                            <div class="tier-header"><span class="tier-badge tier-1">Level 1</span> 🌱 入门与数学工具箱</div>
-                            <div class="tier-nodes-list" id="tier-nodes-1"></div>
-                        </div>
-                        <!-- Column 2: Tier 2 -->
-                        <div class="skill-tier-column" data-tier="2">
-                            <div class="tier-header"><span class="tier-badge tier-2">Level 2</span> 📘 深度学习与核心网络</div>
-                            <div class="tier-nodes-list" id="tier-nodes-2"></div>
-                        </div>
-                        <!-- Column 3: Tier 3 -->
-                        <div class="skill-tier-column" data-tier="3">
-                            <div class="tier-header"><span class="tier-badge tier-3">Level 3</span> 🔥 大语言模型 & Transformer</div>
-                            <div class="tier-nodes-list" id="tier-nodes-3"></div>
-                        </div>
-                        <!-- Column 4: Tier 4 -->
-                        <div class="skill-tier-column" data-tier="4">
-                            <div class="tier-header"><span class="tier-badge tier-4">Level 4</span> ⚡ 智能体 & 前沿应用</div>
-                            <div class="tier-nodes-list" id="tier-nodes-4"></div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- History -->
-            <section id="history" class="view-section">
-                <header class="view-header">
-                    <h2 data-i18n="history-title">History</h2>
-                    <p data-i18n="history-subtitle">Published articles and results</p>
-                </header>
-                <div class="history-header-actions">
-                    <div class="history-tabs">
-                        <button class="history-tab active" id="tab-history-unsent" data-tab="unsent" data-i18n="tab-unsent">未发送</button>
-                        <button class="history-tab" id="tab-history-sent" data-tab="sent" data-i18n="tab-sent">已发送</button>
-                    </div>
-                    <button class="btn btn-danger btn-delete-batch" id="btn-delete-selected" disabled>
-                        <span class="btn-icon">🗑</span> <span data-i18n="btn-delete-selected">批量删除</span>
+                <nav class="segmented-nav" aria-label="Main Navigation">
+                    <button class="nav-pill active" data-view="console">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                        <span data-i18n="nav.console">总控</span>
                     </button>
-                </div>
-                <div class="history-select-all-container" id="history-select-all-box" style="display:none;">
-                    <input type="checkbox" id="chk-history-select-all" class="history-select-checkbox">
-                    <label for="chk-history-select-all" data-i18n="label-select-all" style="cursor:pointer; user-select:none;">全选</label>
-                </div>
-                <div id="history-content" class="glass-panel history-panel">
-                    <div class="log-line system">Loading...</div>
-                </div>
-            </section>
-
-            <!-- Sources -->
-            <section id="sources" class="view-section">
-                <header class="view-header" style="display:flex; justify-content:space-between; align-items:center;">
-                    <div>
-                        <h2 data-i18n="sources-title">Sources</h2>
-                        <p data-i18n="sources-subtitle">News source health status</p>
-                    </div>
-                    <button id="btn-retest-sources" class="btn btn-secondary" style="font-size:13px; padding:6px 14px;">
-                        <span class="btn-icon">⚡</span> <span data-i18n="btn-retest-sources">重新检测信源</span>
+                    <button class="nav-pill" data-view="graph">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+                        <span data-i18n="nav.graph">图谱</span>
                     </button>
-                </header>
-                <div id="sources-content" class="sources-grid">
-                    <div class="log-line system">Loading...</div>
+                    <button class="nav-pill" data-view="audit">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+                        <span data-i18n="nav.audit">审稿</span>
+                    </button>
+                    <button class="nav-pill" data-view="image">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                        <span data-i18n="nav.image">配图</span>
+                    </button>
+                    <button class="nav-pill" data-view="ops">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                        <span data-i18n="nav.ops">运维</span>
+                    </button>
+                </nav>
+            </div>
+            <div class="topbar-actions">
+                <div class="status-pill">
+                    <span class="status-dot idle" id="status-pill-dot"></span>
+                    <span id="status-pill-text">空闲中</span>
                 </div>
-            </section>
+                <button class="btn btn-ghost btn-sm" id="btn-lang-toggle" aria-label="Toggle Language">EN</button>
+            </div>
+        </header>
 
-            <!-- Schedule -->
-            <section id="schedule" class="view-section">
-                <header class="view-header">
-                    <h2 data-i18n="schedule-title">Schedule</h2>
-                    <p data-i18n="schedule-subtitle">Automate your publishing tasks</p>
-                </header>
-                
-                <div class="action-panel glass-panel mb-4">
-                    <h3 data-i18n="add-new-task">Add New Task</h3>
-                    <div class="form-group row">
-                        <div class="col">
-                            <label data-i18n="sched-task-type-label">Task Type</label>
-                            <select id="sched-task-type" class="form-control">
-                                <option value="hotspots">Hotspots</option>
-                                <option value="github">GitHub</option>
-                                <option value="aikepu">AI 科普</option>
-                            </select>
+        <main>
+            <!-- Stage 1: Console Stage -->
+            <section id="view-console" class="view-stage active">
+                <div class="console-control-bar">
+                    <div class="workflow-seg-group">
+                        <button class="workflow-seg-btn active" data-task="hotspots">综合热点</button>
+                        <button class="workflow-seg-btn" data-task="github">开源项目</button>
+                        <button class="workflow-seg-btn" data-task="aikepu">硬核科普</button>
+                        <button class="workflow-seg-btn" data-task="daily_knowledge">每日百科</button>
+                    </div>
+                    <div class="console-actions">
+                        <button class="btn btn-primary" id="btn-start-workflow">启动编排</button>
+                        <button class="btn btn-secondary" id="btn-pause-workflow" style="display:none;">暂停</button>
+                        <button class="btn btn-secondary" id="btn-resume-workflow" style="display:none;">恢复</button>
+                        <button class="btn btn-danger-ghost" id="btn-stop-workflow" style="display:none;">终止</button>
+                        <button class="btn btn-ghost btn-sm" id="btn-warmup-cache">预热 Cache</button>
+                        <button class="btn btn-ghost btn-sm" id="btn-open-skill-tree">查看知识图谱</button>
+                    </div>
+                </div>
+
+                <div class="telemetry-strip">
+                    <div class="telemetry-metrics">
+                        <div class="telemetry-item">
+                            <span>Prompt Cache 命中:</span>
+                            <strong id="stat-hit-rate">0%</strong>
                         </div>
-                        <div class="col">
-                            <label data-i18n="sched-cron-label">Cron Expression</label>
-                            <input type="text" id="sched-cron" class="form-control" placeholder="0 8 * * * (每天早8点)" value="0 8 * * *">
+                        <div class="telemetry-item">
+                            <span>节省 Token:</span>
+                            <strong id="stat-saved-tokens">0</strong>
                         </div>
-                        <div class="col" style="display:flex; align-items:flex-end;">
-                            <button id="btn-add-schedule" class="btn btn-primary glow-effect" style="width:100%" data-i18n="sched-add-btn">Add</button>
+                        <div class="telemetry-item">
+                            <span>折合节约:</span>
+                            <strong id="stat-saved-cny">¥0.00</strong>
+                        </div>
+                        <div class="telemetry-item">
+                            <span>推理均延:</span>
+                            <strong id="stat-latency">0ms</strong>
+                        </div>
+                        <div class="telemetry-item">
+                            <span>知识图谱进度:</span>
+                            <strong id="skill-tree-ratio">0/0 篇 (0%)</strong>
+                        </div>
+                        <div class="telemetry-item" style="flex: 1; min-width: 140px;">
+                            <div style="background: var(--bg-subtle); border-radius: 9999px; height: 6px; width: 100%; overflow: hidden;">
+                                <div id="skill-tree-progress-bar" style="background: var(--accent); height: 100%; width: 0%; transition: width 0.3s;"></div>
+                            </div>
+                        </div>
+                        <div class="telemetry-item">
+                            <span>推荐选题:</span>
+                            <span id="skill-tree-next-topic" style="color: var(--text-primary); font-weight: 500;">等待就绪</span>
                         </div>
                     </div>
                 </div>
 
-                <div class="glass-panel">
-                    <h3 data-i18n="active-jobs-title">Active Scheduled Jobs</h3>
-                    <div id="schedule-jobs-list" style="margin-top: 15px;">
-                        <div class="log-line system">Loading jobs...</div>
+                <div class="stepper-track" id="pipeline-stepper">
+                    <div class="step-node active" data-phase="1">
+                        <div class="step-node-header">
+                            <span>PHASE 01</span>
+                            <span class="step-node-badge badge badge-indigo">执行中</span>
+                        </div>
+                        <div class="step-node-title">01 信源采集去重</div>
+                        <div class="step-node-meta" id="phase1-source-count">等待扫描</div>
+                    </div>
+                    <div class="step-node pending" data-phase="2">
+                        <div class="step-node-header">
+                            <span>PHASE 02</span>
+                            <span class="step-node-badge badge badge-neutral">待命</span>
+                        </div>
+                        <div class="step-node-title">02 深度创作润色</div>
+                        <div class="step-node-meta" id="phase2-word-count">0 字</div>
+                    </div>
+                    <div class="step-node pending" data-phase="3">
+                        <div class="step-node-header">
+                            <span>PHASE 03</span>
+                            <span class="step-node-badge badge badge-neutral">待命</span>
+                        </div>
+                        <div class="step-node-title">03 多模配图渲染</div>
+                        <div class="step-node-meta">三槽位配图</div>
+                    </div>
+                    <div class="step-node pending" data-phase="4">
+                        <div class="step-node-header">
+                            <span>PHASE 04</span>
+                            <span class="step-node-badge badge badge-neutral">待命</span>
+                        </div>
+                        <div class="step-node-title">04 事实核查推送</div>
+                        <div class="step-node-meta">门禁与草稿</div>
                     </div>
                 </div>
-            </section>
 
-            <!-- Settings -->
-            <section id="settings" class="view-section">
-                <header class="view-header">
-                    <h2 data-i18n="settings-title">Settings</h2>
-                    <p data-i18n="settings-subtitle">API keys and configuration</p>
-                </header>
-                <form id="config-form" class="settings-form glass-panel">
-                    <div class="form-group">
-                        <label for="wechat-appid" data-i18n="label-wechat-appid">WeChat AppID</label>
-                        <input type="text" id="wechat-appid" name="WECHAT_APP_ID" class="form-control" placeholder="wxxxxxxxxxxxxxxxx">
-                    </div>
-                    <div class="form-group">
-                        <label for="wechat-secret" data-i18n="label-wechat-secret">WeChat AppSecret</label>
-                        <input type="password" id="wechat-secret" name="WECHAT_APP_SECRET" class="form-control" placeholder="Secret">
-                    </div>
-                    <div class="form-group">
-                        <label for="llm-apikey" data-i18n="label-llm-apikey">DeepSeek API Key</label>
-                        <input type="password" id="llm-apikey" name="LLM_API_KEY" class="form-control" placeholder="sk-xxxx">
-                    </div>
-                    <div class="form-group">
-                        <label for="gemini-apikey" data-i18n="label-gemini-apikey">Gemini API Key (optional)</label>
-                        <input type="password" id="gemini-apikey" name="GEMINI_API_KEY" class="form-control" placeholder="AIzaSy...">
-                    </div>
-                    <div class="form-group">
-                        <label for="llm-model" data-i18n="label-llm-model">LLM Model</label>
-                        <select id="llm-model" name="LLM_MODEL" class="form-control">
-                            <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
-                            <option value="deepseek-v4-flash">DeepSeek V4 Flash</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="qywechat-webhook" data-i18n="label-qywechat-webhook">QYWeChat Webhook (optional)</label>
-                        <input type="text" id="qywechat-webhook" name="QYWECHAT_WEBHOOK" class="form-control" placeholder="https://qyapi.weixin.qq.com/...">
-                    </div>
-                    <div class="form-group">
-                        <label for="image-gen-model" data-i18n="label-image-gen-model">提示词目标生图模型 (Image Model)</label>
-                        <input type="text" id="image-gen-model" name="IMAGE_GEN_MODEL" class="form-control" placeholder="Google Gemini Imagen 3 / Midjourney v6 / FLUX.1">
-                    </div>
-                    <div class="form-group">
-                        <label for="diagram-workers" data-i18n="label-diagram-workers">图表并行线程数</label>
-                        <input type="number" id="diagram-workers" name="DIAGRAM_PARALLEL_WORKERS" class="form-control" min="1" max="8" placeholder="3">
-                    </div>
-                    <div class="form-group mb-4" style="background: rgba(255, 255, 255, 0.03); padding: 12px 16px; border-radius: 8px; border: 1px solid #e2e8f0;">
-                        <label style="display:block; margin-bottom:6px; font-weight:600;" data-i18n="label-sd-status">生图引擎在线状态</label>
-                        <div id="sd-status-badge" style="font-size:13px; color:#94a3b8;">
-                            <span class="log-line system">正在检测生图服务...</span>
+                <div class="pipeline-stage-header">
+                    <div style="font-size: 14px; font-weight: 600; color: var(--text-primary);">流水线执行状态</div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <div class="mode-toggle">
+                            <button class="mode-toggle-btn active" id="btn-mode-timeline">结构化时间轴</button>
+                            <button class="mode-toggle-btn" id="btn-mode-raw">原始日志流</button>
                         </div>
+                        <button class="btn btn-ghost btn-sm" id="btn-clear-logs">清空</button>
                     </div>
-                    <div class="form-actions">
-                        <button type="submit" class="btn btn-primary glow-effect" data-i18n="btn-save-settings">Save</button>
-                        <span id="save-msg" class="save-message"></span>
-                    </div>
-                </form>
-            </section>
+                </div>
 
-            <!-- Image Studio -->
-            <section id="image-studio" class="view-section">
-                <header class="view-header">
-                    <h2 data-i18n="image-studio-title">🖼️ Image Studio</h2>
-                    <p data-i18n="image-studio-subtitle">Generate Imagen 3 prompts, drag &amp; drop images to embed in articles</p>
-                </header>
+                <div id="pipeline-timeline-view">
+                    <div class="phase-accordion-list">
+                        <div class="phase-card active" id="phase-card-1">
+                            <div class="phase-card-header phase-accordion-header" data-phase="1">
+                                <div class="phase-card-title">
+                                    <span class="badge badge-indigo">Phase 1</span>
+                                    <span>全网信源情报采集与聚合</span>
+                                </div>
+                                <span class="badge badge-neutral" id="phase1-status-badge">就绪</span>
+                            </div>
+                            <div class="phase-card-body">
+                                <div class="radar-strip" id="phase1-radar-sources">
+                                    <span style="color: var(--text-muted);">等待信源扫描任务下发...</span>
+                                </div>
+                                <div id="phase1-locked-topic" style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;"></div>
+                            </div>
+                        </div>
 
-                <div class="image-studio-container">
-                    <div class="glass-panel" style="padding:20px;">
-                        <div class="studio-input-area">
-                            <input type="text" class="studio-title-input" id="studio-article-title"
-                                   placeholder="文章标题（可选，用于优化提示词生成）">
-                            <textarea id="studio-article-text"
-                                      placeholder="粘贴 Markdown 文章内容...
+                        <div class="phase-card" id="phase-card-2">
+                            <div class="phase-card-header phase-accordion-header" data-phase="2">
+                                <div class="phase-card-title">
+                                    <span class="badge badge-neutral">Phase 2</span>
+                                    <span>深度结构化撰写与 Map-Reduce 章节生成</span>
+                                </div>
+                                <span class="badge badge-neutral" id="phase2-status-badge">等待中</span>
+                            </div>
+                            <div class="phase-card-body">
+                                <div class="section-progress-list" id="phase2-sections-list">
+                                    <span style="color: var(--text-muted); font-size: 12px;">待大纲确立后并行生成章节...</span>
+                                </div>
+                            </div>
+                        </div>
 
-文章中需包含 【此处插入配图：关键词】 格式的占位符，例如：
+                        <div class="phase-card" id="phase-card-3">
+                            <div class="phase-card-header phase-accordion-header" data-phase="3">
+                                <div class="phase-card-title">
+                                    <span class="badge badge-neutral">Phase 3</span>
+                                    <span>三槽位视觉资产生成与文章排版渲染</span>
+                                </div>
+                                <span class="badge badge-neutral" id="phase3-status-badge">等待中</span>
+                            </div>
+                            <div class="phase-card-body">
+                                <div class="asset-slots-grid" id="phase3-slots-grid">
+                                    <div class="asset-slot-card">
+                                        <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary);">槽位 1 · 封面头图</div>
+                                        <div class="asset-slot-preview" style="display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 11px;">等待生成</div>
+                                    </div>
+                                    <div class="asset-slot-card">
+                                        <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary);">槽位 2 · 核心架构</div>
+                                        <div class="asset-slot-preview" style="display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 11px;">等待生成</div>
+                                    </div>
+                                    <div class="asset-slot-card">
+                                        <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary);">槽位 3 · 关键细节</div>
+                                        <div class="asset-slot-preview" style="display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 11px;">等待生成</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
 
-【此处插入配图：AI 芯片微观特写】
-【此处插入配图：深度学习数据流可视化】"></textarea>
-                                <button id="btn-generate-prompts" class="btn btn-primary glow-effect">
-                                    <span class="btn-icon">✨</span> 生成英文提示词
-                                </button>
-                                <button id="btn-studio-preview" class="btn btn-secondary" style="display:none; margin-left: 10px;">
-                                    <span class="btn-icon">👁️</span> 预览文章效果
-                                </button>
+                        <div class="phase-card" id="phase-card-4">
+                            <div class="phase-card-header phase-accordion-header" data-phase="4">
+                                <div class="phase-card-title">
+                                    <span class="badge badge-neutral">Phase 4</span>
+                                    <span>事实核查、质量门禁与微信草稿同步</span>
+                                </div>
+                                <span class="badge badge-neutral" id="phase4-status-badge">等待中</span>
+                            </div>
+                            <div class="phase-card-body">
+                                <div class="gate-result-card">
+                                    <div>
+                                        <div style="font-size: 11px; color: var(--text-secondary);">核查评分门禁</div>
+                                        <div style="font-size: 18px; font-weight: 700; color: var(--text-primary);" id="phase4-quality-score">-- / 100</div>
+                                    </div>
+                                    <div>
+                                        <div style="font-size: 11px; color: var(--text-secondary);">微信草稿 MediaID</div>
+                                        <div style="font-family: var(--font-mono); font-size: 12px; color: var(--text-primary);" id="phase4-draft-id">尚未同步</div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
 
-                    <div id="prompt-cards-container">
-                        <div class="studio-empty">
-                            <div class="studio-empty-icon">🖼️</div>
-                            <div class="studio-empty-text">粘贴文章并点击「生成英文提示词」</div>
-                            <div class="studio-empty-hint">系统将自动提取配图占位符，生成 Gemini Imagen 3 英文 Prompt</div>
+                    <div class="pipeline-side-panel">
+                        <!-- Card 1: 知识图谱连载与推荐选题 -->
+                        <div class="pipeline-side-card">
+                            <div class="pipeline-side-card-header">
+                                <div class="side-card-title">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+                                    <span>知识图谱连载与推荐选题</span>
+                                </div>
+                                <span class="badge badge-accent" id="side-tree-ratio">0/0 篇 (0%)</span>
+                            </div>
+                            <div class="pipeline-side-card-body">
+                                <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">推荐选题</div>
+                                <div id="side-next-topic" style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px; line-height: 1.4;">等待就绪</div>
+                                <button class="btn btn-outline btn-sm" id="btn-side-open-tree" style="width: 100%; justify-content: center;">
+                                    <span>查看图谱全景</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Card 2: 实时引擎脉冲流 (Live Pulse Stream) -->
+                        <div class="pipeline-side-card side-card-stream">
+                            <div class="pipeline-side-card-header">
+                                <div class="side-card-title">
+                                    <span class="live-dot-pulse"></span>
+                                    <span>实时引擎脉冲流</span>
+                                </div>
+                                <span class="badge badge-neutral" id="side-active-phase">Standby</span>
+                            </div>
+                            <div class="pipeline-side-card-body stream-body">
+                                <div id="pipeline-mini-stream" class="mini-stream-feed">
+                                    <div class="mini-stream-line muted">系统待命，就绪后实时输出最新流水线事件...</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pipeline-raw-well" id="pipeline-raw-well" style="display: none;"></div>
+            </section>
+
+            <!-- Stage 2: Knowledge Graph Stage -->
+            <section id="view-graph" class="view-stage">
+                <div class="graph-toolbar">
+                    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                        <select id="knowledge-tree-select" class="linear-select" style="min-width: 220px;"></select>
+                        <div class="filter-pills" style="display: inline-flex;">
+                            <button class="tree-filter-btn filter-pill active" data-filter="all">全景</button>
+                            <button class="tree-filter-btn filter-pill" data-filter="1">阶梯 1</button>
+                            <button class="tree-filter-btn filter-pill" data-filter="2">阶梯 2</button>
+                            <button class="tree-filter-btn filter-pill" data-filter="3">阶梯 3</button>
+                            <button class="tree-filter-btn filter-pill" data-filter="4">阶梯 4</button>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span class="badge badge-success">已发布: <strong id="legend-published-count">0</strong></span>
+                            <span class="badge badge-indigo">可撰写: <strong id="legend-available-count">0</strong></span>
+                            <span class="badge badge-neutral">未解锁: <strong id="legend-locked-count">0</strong></span>
+                        </div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <button id="btn-start-recommended-node" class="btn btn-primary btn-sm">推荐撰写</button>
+                        <button id="btn-sync-wechat-skill-tree" class="btn btn-secondary btn-sm">同步微信已发</button>
+                        <button id="btn-refresh-skill-tree-view" class="btn btn-ghost btn-sm">刷新</button>
+                        <button id="btn-import-tree" class="btn btn-secondary btn-sm">导入新树</button>
+                        <button id="btn-toggle-hud" class="btn btn-ghost btn-sm">抽屉</button>
+                        <input type="file" id="tree-file-input" accept=".json" style="display: none;">
+                    </div>
+                </div>
+
+                <div class="graph-workspace">
+                    <div id="dotgrid-canvas" class="dotgrid-canvas"></div>
+                    <svg id="skill-tree-svg-canvas" class="graph-svg-layer"></svg>
+                    <div id="tier-columns-container" class="tier-columns-grid">
+                        <div class="tier-column" id="tier-column-1">
+                            <div class="tier-column-header"><span>入门基石 (Tier 1)</span></div>
+                            <div class="tier-nodes-list" id="tier-nodes-1"></div>
+                        </div>
+                        <div class="tier-column" id="tier-column-2">
+                            <div class="tier-column-header"><span>核心原理 (Tier 2)</span></div>
+                            <div class="tier-nodes-list" id="tier-nodes-2"></div>
+                        </div>
+                        <div class="tier-column" id="tier-column-3">
+                            <div class="tier-column-header"><span>进阶实战 (Tier 3)</span></div>
+                            <div class="tier-nodes-list" id="tier-nodes-3"></div>
+                        </div>
+                        <div class="tier-column" id="tier-column-4">
+                            <div class="tier-column-header"><span>前沿演进 (Tier 4)</span></div>
+                            <div class="tier-nodes-list" id="tier-nodes-4"></div>
+                        </div>
+                    </div>
+
+                    <div id="hud-close-backdrop" class="hud-backdrop" style="display: none;"></div>
+                    <div id="graph-hud-inspector" class="hud-inspector collapsed">
+                        <div class="hud-header">
+                            <div>
+                                <span class="badge badge-indigo" id="hud-node-badge">阶梯 1</span>
+                                <h3 class="hud-title" id="hud-node-title" style="margin-top: 4px;">节点详情</h3>
+                            </div>
+                            <span id="hud-node-id" style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);"></span>
+                        </div>
+                        <div class="hud-body">
+                            <div class="hud-section">
+                                <div class="hud-section-label">当前状态</div>
+                                <div id="hud-node-status"><span class="badge badge-neutral">未选择</span></div>
+                            </div>
+                            <div class="hud-section">
+                                <div class="hud-section-label">知识概要</div>
+                                <div id="hud-node-summary">请在拓扑图谱中选择节点查看详情。</div>
+                            </div>
+                            <div class="hud-section">
+                                <div class="hud-section-label">分类标签</div>
+                                <div id="hud-node-tags" style="display: flex; flex-wrap: wrap; gap: 4px;"></div>
+                            </div>
+                            <div class="hud-section">
+                                <div class="hud-section-label">前置依赖 (Prerequisites)</div>
+                                <div id="hud-node-prereqs">无前置依赖</div>
+                            </div>
+                            <div style="display: flex; flex-direction: column; gap: 8px; margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border-subtle);">
+                                <button id="btn-hud-generate-node" class="btn btn-primary btn-sm">立即撰写此篇</button>
+                                <button id="btn-hud-mark-published" class="btn btn-secondary btn-sm">标记为已发</button>
+                                <button id="btn-hud-mark-draft" class="btn btn-secondary btn-sm">标记为草稿</button>
+                                <button id="btn-hud-mark-reset" class="btn btn-ghost btn-sm">重置状态</button>
+                            </div>
                         </div>
                     </div>
                 </div>
             </section>
-        </main>
-    <!-- Preview Modal -->
-    <div id="preview-modal" class="modal-overlay">
-        <div class="modal-container glass-panel">
-            <div class="modal-header">
-                <span class="modal-title" id="preview-modal-title" data-i18n="preview-modal-title">Article Preview</span>
-                <button class="modal-close" id="btn-close-preview">&times;</button>
-            </div>
-            <div class="modal-body">
-                <iframe class="modal-iframe" id="preview-iframe" src="about:blank"></iframe>
-            </div>
-        </div>
-    </div>
 
-    <!-- Skill Tree Node Detail Modal -->
-    <div id="skill-node-modal" class="modal-overlay">
-        <div class="modal-container glass-panel" style="max-width: 520px; height: auto; max-height: 85vh;">
-            <div class="modal-header">
-                <div style="display:flex; align-items:center; gap:8px;">
-                    <span id="node-modal-icon" style="font-size:1.2rem;">🎓</span>
-                    <span class="modal-title" id="node-modal-title">知识节点详情</span>
-                </div>
-                <button class="modal-close" id="btn-close-node-modal">&times;</button>
-            </div>
-            <div style="padding: 20px; color: var(--text-primary);">
-                <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px; flex-wrap:wrap;">
-                    <span id="node-modal-badge" class="badge" style="background:rgba(37, 99, 235, 0.1); color:#2563eb; font-size:11px;">Level 1</span>
-                    <span id="node-modal-id" style="font-family:var(--font-mono); font-size:11px; color:var(--text-secondary);">id: math-basics</span>
-                    <span id="node-modal-status-badge" style="margin-left:auto;"></span>
-                </div>
-                <h3 id="node-modal-heading" style="font-size: 1.1rem; color: #0f172a; margin-bottom: 12px; font-weight:600;">--</h3>
-                <p id="node-modal-summary" style="font-size: 0.88rem; color: #475569; line-height: 1.6; background: #f8fafc; padding:12px 14px; border-radius:8px; margin-bottom:14px; border:1px solid var(--border-color);">--</p>
-                
-                <div style="margin-bottom:14px;">
-                    <div style="font-size:12px; color:var(--text-secondary); margin-bottom:6px;">🏷️ 知识点分类标签</div>
-                    <div id="node-modal-tags" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+            <!-- Stage 3: Audit Stage -->
+            <section id="view-audit" class="view-stage">
+                <div class="audit-toolbar">
+                    <div class="filter-pills">
+                        <button class="audit-filter-pill filter-pill active" data-tab="all">全部</button>
+                        <button class="audit-filter-pill filter-pill" data-tab="pending">待核准</button>
+                        <button class="audit-filter-pill filter-pill" data-tab="approved">已通过</button>
+                        <button class="audit-filter-pill filter-pill" data-tab="unsent">待推送</button>
+                        <button class="audit-filter-pill filter-pill" data-tab="sent">已推送</button>
+                    </div>
+                    <div class="audit-actions">
+                        <span style="font-size: 12px; color: var(--text-secondary); margin-right: 8px;">已选: <strong id="selected-articles-count">0</strong> 篇</span>
+                        <label style="display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary); cursor: pointer; margin-right: 8px;">
+                            <input type="checkbox" id="chk-audit-select-all"> 全选
+                        </label>
+                        <button class="btn btn-secondary btn-sm" id="btn-refresh-history">刷新</button>
+                        <button class="btn btn-danger-ghost btn-sm" id="btn-delete-selected">删除所选</button>
+                    </div>
                 </div>
 
-                <div style="margin-bottom:18px;">
-                    <div style="font-size:12px; color:var(--text-secondary); margin-bottom:6px;">🔗 先修依赖节点</div>
-                    <div id="node-modal-prereqs" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+                <div id="history-content">
+                    <div style="text-align: center; padding: 32px; color: var(--text-muted);">正在加载审稿历史记录...</div>
+                </div>
+            </section>
+
+            <!-- Stage 4: Image Studio Stage -->
+            <section id="view-image" class="view-stage">
+                <div class="studio-redraw-bar">
+                    <input type="url" id="studio-redraw-url" class="linear-input" placeholder="输入微信公众号文章链接 (http/https)" style="flex: 1; min-width: 260px;">
+                    <input type="hidden" id="input-redraw-topic">
+                    <button id="btn-studio-redraw" class="btn btn-primary">合规重绘配图</button>
+                    <button id="btn-redraw-all" style="display: none;"></button>
+                    <div id="studio-redraw-results" style="width: 100%;"></div>
                 </div>
 
-                <div style="border-top: 1px solid var(--border-color); padding-top: 14px;">
-                    <div style="margin-bottom:10px;">
-                        <div style="font-size:12px; color:var(--text-secondary); margin-bottom:6px;">🔧 手动标记节点状态</div>
-                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                            <button class="btn btn-secondary" id="btn-override-published-modal" title="手动标记为已群发" style="font-size:12px; padding:6px 14px; color:#10b981; border-color:rgba(16, 185, 129, 0.4); background:rgba(16,185,129,0.06); font-weight:600;">✅ 标记已群发</button>
-                            <button class="btn btn-secondary" id="btn-override-draft-modal" title="手动标记为草稿箱" style="font-size:12px; padding:6px 14px; color:#38bdf8; border-color:rgba(56, 189, 248, 0.4); background:rgba(56,189,248,0.06); font-weight:600;">📝 标记草稿箱</button>
-                            <button class="btn btn-secondary" id="btn-override-reset-modal" title="重置回未完成状态" style="font-size:12px; padding:6px 14px; color:#ef4444; border-color:rgba(239, 68, 68, 0.4); background:rgba(239,68,68,0.06); font-weight:600;">🔄 重置状态</button>
+                <div class="studio-split-grid">
+                    <div class="linear-card">
+                        <div class="card-header">
+                            <div class="card-title">正文 Markdown 与提示词提取</div>
+                        </div>
+                        <div class="card-body" style="display: flex; flex-direction: column; gap: 12px;">
+                            <input type="text" id="studio-article-title" class="linear-input" placeholder="文章标题 (例如：深度解析大模型注意力机制)">
+                            <textarea id="studio-article-text" class="linear-textarea" rows="18" placeholder="在此粘贴文章 Markdown 正文，系统将自动分析【此处插入配图】槽位..."></textarea>
+                            <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+                                <button id="btn-generate-prompts" class="btn btn-secondary">提取配图提示词</button>
+                                <button id="btn-extract-prompts" style="display: none;"></button>
+                                <button id="btn-studio-preview" class="btn btn-primary" style="display: none;">预览合成图文</button>
+                            </div>
                         </div>
                     </div>
-                    <div style="display:flex; justify-content:flex-end; gap:8px;">
-                        <button class="btn btn-secondary" id="btn-cancel-node-modal" style="font-size:12px; padding:6px 14px;">关闭</button>
-                        <button class="btn btn-primary glow-effect" id="btn-generate-node-modal" style="font-size:12px; padding:6px 14px;">
-                            <span class="btn-icon">🚀</span> 撰写此知识点
-                        </button>
+
+                    <div class="linear-card">
+                        <div class="card-header">
+                            <div class="card-title">配图槽位与拖拽上传</div>
+                        </div>
+                        <div class="card-body">
+                            <div id="prompt-cards-container">
+                                <div style="text-align: center; color: var(--text-muted); padding: 32px;">点击左侧提取提示词以加载配图槽位</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
+            </section>
+
+            <!-- Stage 5: Ops Stage -->
+            <section id="view-ops" class="view-stage">
+                <nav class="ops-subnav" aria-label="Ops Navigation">
+                    <button class="ops-tab-btn active" data-ops-tab="sources">信源健康监控</button>
+                    <button class="ops-tab-btn" data-ops-tab="schedule">定时发布任务</button>
+                    <button class="ops-tab-btn" data-ops-tab="settings">系统与模型配置</button>
+                </nav>
+
+                <div id="ops-subview-sources" class="ops-subview active">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                        <div style="font-size: 14px; font-weight: 600; color: var(--text-primary);">全网 12 信源连通性矩阵</div>
+                        <button id="btn-test-sources" class="btn btn-secondary btn-sm">全量连通性探测</button>
+                    </div>
+                    <div id="sources-matrix-container" class="sources-matrix-grid">
+                        <div style="grid-column: 1/-1; padding: 24px; text-align: center; color: var(--text-secondary); font-size: 13px;">正在读取信源健康状态...</div>
+                    </div>
+                </div>
+
+                <div id="ops-subview-schedule" class="ops-subview">
+                    <div class="schedule-adder-bar">
+                        <select id="schedule-workflow" class="linear-select" style="min-width: 140px;">
+                            <option value="hotspots">综合热点</option>
+                            <option value="github">开源项目</option>
+                            <option value="aikepu">硬核科普</option>
+                            <option value="daily_knowledge">每日百科</option>
+                        </select>
+                        <select id="sched-task-type" style="display: none;"></select>
+                        <input type="text" id="schedule-time" class="linear-input" placeholder="Cron 表达式 (例如: 0 8 * * *)" style="flex: 1; min-width: 180px;">
+                        <input type="hidden" id="sched-cron">
+                        <button id="btn-add-job" class="btn btn-primary">添加定时任务</button>
+                        <button id="btn-add-schedule" style="display: none;"></button>
+                    </div>
+                    <div id="schedule-jobs-container" class="schedule-jobs-list">
+                        <div style="padding: 24px; text-align: center; color: var(--text-secondary); font-size: 13px;">正在读取定时任务列表...</div>
+                    </div>
+                </div>
+
+                <div id="ops-subview-settings" class="ops-subview">
+                    <form id="config-form" class="settings-form-grid">
+                        <div style="display: flex; flex-direction: column; gap: 6px;">
+                            <label for="wechat-appid" style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">WeChat AppID</label>
+                            <input type="text" id="wechat-appid" class="linear-input" placeholder="wx...">
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 6px;">
+                            <label for="wechat-secret" style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">WeChat AppSecret</label>
+                            <input type="password" id="wechat-secret" class="linear-input" placeholder="密钥">
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 6px;">
+                            <label for="llm-apikey" style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">LLM API Key</label>
+                            <input type="password" id="llm-apikey" class="linear-input" placeholder="sk-...">
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 6px;">
+                            <label for="dashscope-apikey" style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">DashScope API Key</label>
+                            <input type="password" id="dashscope-apikey" class="linear-input" placeholder="sk-...">
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 6px;">
+                            <label for="llm-model" style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">LLM 模型</label>
+                            <select id="llm-model" class="linear-select">
+                                <option value="deepseek-ai/DeepSeek-V3">deepseek-ai/DeepSeek-V3</option>
+                                <option value="deepseek-ai/DeepSeek-R1">deepseek-ai/DeepSeek-R1</option>
+                                <option value="qwen-plus">qwen-plus</option>
+                                <option value="qwen-max">qwen-max</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 6px;">
+                            <label for="qwen-image-model" style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">重绘视觉模型</label>
+                            <select id="qwen-image-model" class="linear-select">
+                                <option value="qwen-image-redraw">qwen-image-redraw</option>
+                                <option value="wanx2.1-t2i-turbo">wanx2.1-t2i-turbo</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 6px;">
+                            <label for="qwen-vl-model" style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">多模态核查模型 (VL)</label>
+                            <select id="qwen-vl-model" class="linear-select">
+                                <option value="qwen-vl-plus">qwen-vl-plus</option>
+                                <option value="qwen-vl-max">qwen-vl-max</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 6px;">
+                            <label for="image-gen-model" style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">首选生图服务</label>
+                            <select id="image-gen-model" class="linear-select">
+                                <option value="qwen-image-3.0">qwen-image-3.0</option>
+                                <option value="imagen-3">imagen-3</option>
+                                <option value="sd-local">sd-local</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 6px;">
+                            <label for="qywechat-webhook" style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">企业微信推送 Webhook</label>
+                            <input type="text" id="qywechat-webhook" class="linear-input" placeholder="https://qyapi.weixin.qq.com/...">
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 6px;">
+                            <label for="diagram-workers" style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">图解并行 Worker 线程数</label>
+                            <input type="number" id="diagram-workers" class="linear-input" value="5" min="1" max="16">
+                        </div>
+                        <div style="grid-column: 1/-1; display: flex; align-items: center; gap: 10px; padding: 10px 0;">
+                            <span style="font-size: 12px; color: var(--text-secondary);">生图服务连接状态:</span>
+                            <span id="sd-status-indicator" class="badge badge-neutral">检测中...</span>
+                        </div>
+                        <div style="grid-column: 1/-1; display: flex; justify-content: flex-end; margin-top: 10px;">
+                            <button type="submit" id="btn-save-config" class="btn btn-primary">保存全部设置</button>
+                            <button type="button" id="btn-save-settings" style="display: none;"></button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+        </main>
+
+        <nav class="mobile-bottom-dock" aria-label="Mobile Navigation">
+            <button class="dock-item active" data-view="console">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+                <span data-i18n="nav.console">总控</span>
+            </button>
+            <button class="dock-item" data-view="graph">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+                <span data-i18n="nav.graph">图谱</span>
+            </button>
+            <button class="dock-item" data-view="audit">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+                <span data-i18n="nav.audit">审稿</span>
+            </button>
+            <button class="dock-item" data-view="image">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                <span data-i18n="nav.image">配图</span>
+            </button>
+            <button class="dock-item" data-view="ops">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                <span data-i18n="nav.ops">运维</span>
+            </button>
+            <button class="dock-item" id="btn-lang-toggle-mobile" style="display: none;">EN</button>
+        </nav>
+    </div>
+
+    <!-- Preview Modal -->
+    <div class="modal-overlay" id="preview-modal" style="display: none;">
+        <div id="preview-modal-backdrop" class="modal-backdrop"></div>
+        <div class="modal-card">
+            <div class="modal-header">
+                <div class="modal-title" id="preview-modal-title">微信排版预览</div>
+                <button class="btn btn-ghost btn-sm btn-close-modal" id="btn-close-preview-modal" aria-label="Close modal">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <iframe class="modal-iframe" id="preview-iframe" src="about:blank" title="Preview Frame"></iframe>
             </div>
         </div>
     </div>
 
-    <script src="/static/js/app.js"></script>
-    <script src="/static/js/image-studio.js"></script>
+    <!-- Toast Notifications Stack -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script type="module" src="/static/js/main.js?v=2026"></script>
 </body>
 </html>

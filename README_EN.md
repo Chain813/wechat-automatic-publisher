@@ -1,405 +1,246 @@
-English | [中文](README.md)
+# AutoWeChat — Enterprise AI WeChat Official Account Creation & Compliant Publishing Workbench
 
-# AutoWeChat: AI Content Factory
+<p align="center">
+  <strong>Human-in-the-Loop Publishing</strong> · <strong>4 Automated Content Workflows</strong> · <strong>Web Fact Grounding & AI Critic Gate</strong> · <strong>Linear Modern Light Bilingual WebUI</strong>
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python: 3.8+](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![DeepSeek: Powered](https://img.shields.io/badge/LLM-DeepSeek-green.svg)](https://api.deepseek.com)
-[![Gemini Vision](https://img.shields.io/badge/Vision-Gemini%20Flash-orange.svg)](https://ai.google.dev/)
-
-Fully automated WeChat public account content production and publishing system. Integrates real-time hotspot monitoring, AI topic selection, deep article creation, intelligent image selection, and one-click publishing.
+<p align="center">
+  <a href="README.md">简体中文</a> ·
+  <a href="#core-workflows">Core Workflows</a> ·
+  <a href="#architecture--quality-loop">Architecture</a> ·
+  <a href="#webui-5-stage-console">WebUI Console</a> ·
+  <a href="#quick-start">Quick Start</a> ·
+  <a href="DEVELOPMENT.md">Development Guide</a>
+</p>
 
 ---
 
-## 📋 Table of Contents
+**AutoWeChat** is an end-to-end AI content production and operations workbench built for tech media, vertical creators, and professional WeChat Official Account teams. It automates the entire lifecycle from **multi-source / knowledge-graph discovery → full-text scraping & live fact grounding → dynamic narrative drafting → 100% AI illustration & technical diagram rendering → AI Critic quality gate & human audit → 4-layer deduplicated WeChat Draft Box publishing**.
 
-- [🏗️ Architecture Overview](#🏗️-architecture-overview)
+> [!IMPORTANT]
+> **Compliance & Safety Principle**: Every automated task only pushes articles to the WeChat Official Account **Draft Box**, paired with an interactive **Audit Workbench** for final human-in-the-loop review before publication.
 
-- [✨ Features](#✨-features)
-- [🛠️ Tech Stack](#🛠️-tech-stack)
-- [📁 Project Structure](#📁-project-structure)
-- [🚀 Quick Start](#🚀-quick-start)
-- [💻 Web UI](#💻-web-ui-v30)
-- [🖼️ Image Selection Strategy](#🖼️-image-selection-strategy)
-- [⚙️ Core Configuration](#⚙️-core-configuration)
-- [📚 Glossary](GLOSSARY_EN.md)
-- [👨‍💻 Development Workflow](DEVELOPMENT.md)
-- [Claude Code Guide](CLAUDE.md)
-- [📋 Requirements](#📋-requirements)
-- [📄 License](#📄-license)
-- [⚠️ Disclaimer](#⚠️-disclaimer)
+---
 
-## 🏗️ Architecture Overview
+## Table of Contents
+
+- [Core Workflows](#core-workflows)
+- [Architecture & Quality Loop](#architecture--quality-loop)
+- [Key Engineering Capabilities](#key-engineering-capabilities)
+- [WebUI 5-Stage Console](#webui-5-stage-console)
+- [Project Structure](#project-structure)
+- [Quick Start](#quick-start)
+- [Environment Variables](#environment-variables)
+- [Cloud Deployment & Scheduling](#cloud-deployment--scheduling)
+- [Testing & Companion Docs](#testing--companion-docs)
+
+---
+
+## Core Workflows
+
+Driven by a unified engine ([`core/engine.py`](core/engine.py) & [`main.py`](main.py)), AutoWeChat supports CLI execution, APScheduler cron jobs, and one-click WebUI dispatch across 4 specialized workflows:
+
+| Task ID (`--task`) | Console Tab | Use Case | Core Mechanism |
+| :--- | :--- | :--- | :--- |
+| **`hotspots`** | Trending Hotspots | Tech, finance & current affairs commentary | 12 news sources + domain keyword filtering + `trafilatura` extraction + DuckDuckGo/Bing live fact grounding + 4 dynamic narrative archetypes |
+| **`github`** | GitHub Open Source | Trending & high-potential OSS deep dives | GitHub Trending & API collector (optional `GITHUB_TOKEN`) + repository technical analysis + automated diagram/illustration rendering |
+| **`aikepu`** | Science & Knowledge | Structured long-form series from knowledge trees | DAG-ordered unlocking across 5 built-in domain packs; Outline → Flash prompt optimization → up to 4 parallel `ThreadPoolExecutor` Sub-Agent workers |
+| **`daily_knowledge`** | Daily Knowledge | Lightweight daily encyclopedia & bite-sized insights | Standalone [`daily_knowledge/`](daily_knowledge) engine with topic planning, historical deduplicator, and SQLite tracking |
+
+---
+
+## Architecture & Quality Loop
 
 ```mermaid
-graph TD
-    classDef ui fill:#1E1E1E,stroke:#4CAF50,stroke-width:2px,color:#fff,rx:5px
-    classDef engine fill:#2C3E50,stroke:#3498DB,stroke-width:2px,color:#fff,rx:10px
-    classDef plugin fill:#8E44AD,stroke:#9B59B6,stroke-width:2px,color:#fff,rx:10px
-    classDef llm fill:#E67E22,stroke:#D35400,stroke-width:2px,color:#fff,rx:5px
-    classDef vision fill:#16A085,stroke:#1ABC9C,stroke-width:2px,color:#fff,rx:5px
-    classDef wechat fill:#27AE60,stroke:#2ECC71,stroke-width:3px,color:#fff,rx:15px
-    classDef db fill:#F39C12,stroke:#F1C40F,stroke-width:2px,color:#fff,rx:5px
-
-    subgraph UI ["User Interface"]
-        A1["💻 Web UI (Flask)"]:::ui
-        A2["⌨️ CLI (Command Line)"]:::ui
-    end
-
-    subgraph Core ["Core Dispatcher"]
-        B{"⚙️ Core Engine"}:::engine
-        C[["🔌 Plugin Manager"]]:::plugin
-    end
-
-    subgraph Workflows ["Content Workflows"]
-        D["🌐 12 Hotspot Sources"]:::plugin
-        E["🐙 GitHub PyGithub+Rich"]:::plugin
-        F["🎓 AI Kepu Skill Tree DAG"]:::plugin
-    end
-
-    subgraph AIEngines ["AI Engines"]
-        G{"🧠 DeepSeek LLM\n(Text Generation)"}:::llm
-        H{"👁️ Gemini/Ollama\n(Vision AI)"}:::vision
-    end
-
-    subgraph Publishing ["Publishing & Storage"]
-        J["📝 Publisher Module"]:::ui
-        DB[("🗄️ SQLite Database\n(Dedup & History)")]:::db
-        K(("💬 WeChat Official Account\n(Draft API)")):::wechat
-    end
-
-    A1 -->|Trigger| B
-    A2 -->|Trigger| B
-    B -->|Route Task| C
-    C -->|Fetch| D
-    C -->|Fetch| E
-    C -->|Fetch| F
-    
-    D -->|Raw Data| G
-    E -->|Raw Data| G
-    F -->|Raw Data| G
-    
-    G -->|Draft Article| H
-    H -->|Select Cover & Images| J
-    J -->|Check Title| DB
-    J -->|Upload HTML| K
+flowchart TD
+    A["Multi-Source Trigger<br/>12 Hotspot Feeds / GitHub / Knowledge DAG / Daily Knowledge"] --> B["Deep Scraping & Fact Grounding<br/>Trafilatura Extraction + DuckDuckGo/Bing Live Search"]
+    B --> C["Dynamic Narrative & Tiered LLM Routing<br/>4 Archetypes × 4 Hooks · Flash Outline / Pro Writing"]
+    C --> D["Multimodal Visual Engine<br/>Qwen-Image-3.0 / Local SD / Pillow Fallback Cards<br/>Mermaid / HTML+KaTeX / Graphviz / Matplotlib"]
+    D --> E{"AI Critic Quality Gate<br/>(core/pipeline/critic.py)"}
+    E -- "Auto-Repaired & Passed" --> F["4-Layer Title Dedup<br/>Exact → Fuzzy → Keyword Overlap → AI Semantic"]
+    E -- "Gate Rejected (REJECTED)" --> G["Save fail_*.html & SQLite<br/>Queue in WebUI Audit Workbench"]
+    G -- "Human Approved" --> F
+    F -- "Unique Topic" --> H["Linear Modern Light Typesetting<br/>Push to WeChat Draft Box + QyWeChat Alert"]
 ```
 
 ---
 
-## ✨ Features
+## Key Engineering Capabilities
 
-**Multi-Source Hotspot Aggregation** — Parallel scraping from 12 platforms (Weibo, IT Home, 36Kr, Baidu, Zhihu, CSDN, RSS, Politics, Toutiao, The Paper, Huxiu, Douyin). Fully modularized via `PluginManager` with source-level health monitoring and automatic degradation.
+### 1. Live Fact Grounding & Dynamic Narrative Engine
+- **Full-Text Extraction & Fact Search**: [`core/hotspots/scraper.py`](core/hotspots/scraper.py) extracts primary article bodies using `trafilatura` with browser-header HTTP fallback; [`core/hotspots/searcher.py`](core/hotspots/searcher.py) queries DuckDuckGo (HTML/Lite) and Bing HTML search when `ENABLE_FACT_SEARCH=True` (default up to `MAX_FACT_SNIPPETS=4`) to ground articles in verifiable facts.
+- **Anti-Cliche Narrative Diversity**: [`core/hotspots/narrative.py`](core/hotspots/narrative.py) pairs 4 structural archetypes (`investigative_game`, `tech_deep_dive`, `business_war`, `narrative_human`) with 4 opening hooks (`counter_intuitive`, `cost_and_bill`, `critical_scene`, `cognitive_reversal`) to avoid repetitive AI prose.
 
-**🎓 AI Kepu (Knowledge Popularization)** — Systematic educational article generation driven by a predefined DAG (Directed Acyclic Graph) Skill Tree:
-- **Three-Phase Map-Reduce Prompt Self-Optimization** (🆕 v4.2): Specifically optimized for long-form educational articles (≥ 15,000 words). Outlining (Phase 1) → Prompt Self-Optimization (Phase 2, where LLM dynamically designs specific analogies, hooks, and forbidden overlaps for each section to prevent repetitive analogies across chapters) → Serial Generation & Context Passing (Phase 3, injecting the tail 500 words of the previous section to ensure smooth transitions).
-- **Skill Tree Integration**: 30 knowledge nodes covering Math -> Deep Learning -> Transformer -> LLM -> Agents, with strict prerequisites.
-- **Topological Selection**: Automatically selects hub nodes from unlocked prerequisites to ensure a step-by-step learning curve.
-- **Educational Persona**: Uses analogies, visual thinking, and a WHY -> HOW -> WHAT structure.
-- **Independent History Tracking**: Integrated with SQLite to record publication history and render them seamlessly inside the Web Console.
+### 2. AI Critic Quality Gate & HITL Audit Workbench
+- **Pre-Publish Evaluation & Auto-Repair**: [`core/pipeline/critic.py`](core/pipeline/critic.py) sanitizes common AI cliché phrases, auto-injects H2 section breaks if missing, enforces length and title punctuation rules, and scores drafts. Rejected articles are saved as `data/previews/fail_*.html` and persisted in [`data/auto_publish.sqlite`](core/db/manager.py) (SQLite WAL mode) with status `REJECTED`.
+- **Human-in-the-Loop Approval**: Editors inspect full rendered HTML previews in the WebUI `Audit` tab and trigger `/api/review/approve` to push approved drafts directly to WeChat.
 
-**AI Deep Creation** — DeepSeek-powered 2500-3500 word analysis articles.
-- **Personalized Writer Personas (v4.1)**: Both hotspot and GitHub writers have full personality profiles — background, thinking patterns, expression principles, worldview. No more "AI-style" writing.
-- **Tiered Bold Formatting**: Red bold (`**{{core conclusion}}`**, 3-5 per article) + black bold (key data/concepts, 1-2 per paragraph). Auto-fallback if LLM doesn't produce enough bold text.
-- **API Truncation Detection**: Auto-detects if the LLM API silently truncated the article (incomplete ending). Retries automatically, preventing broken articles from being published.
-- **Smart Retry**: When the first draft fails validation, passes it back to the LLM for targeted fixes (instead of rewriting from scratch), preserving good content.
-- **Active Title Dedup (v4.0)**: 4 strategies (exact/fuzzy/keyword/AI semantic) to prevent duplicates, combined with Dual-end checks (local SQLite database + WeChat Cloud Draft Box sync).
-- **Cloud Status Sync (v4.0)**: Auto-syncs local history with WeChat. Deleted cloud content releases local history.
-- **Three-Tier Topic Selection**: AI+Politics (High) → Hardcore AI (Medium) → Finance+Politics (Low).
-- **SQLite Database**: Migrated from JSON to a robust SQLite database for safe parallel writing and efficient querying.
+### 3. 100% AI Image Pipeline & 5-Mode Technical Diagram Engine
+- **Pure AI Covers & Illustrations (`utils/image_handler.py`)**: Bing web image scraping is disabled in `download_image` / `download_cover_image` in favor of a 3-tier generation chain:
+  1. **Primary**: Alibaba `Qwen-Image-3.0` (`1280*720` default, rate-limited with concurrency and interval guards); Image Studio redraw uses `qwen-image-3.0-pro`.
+  2. **Secondary**: Local `Stable Diffusion WebUI` (`SD_ENABLED` / `SD_API_URL`).
+  3. **Fallback**: Local Pillow **Linear Modern Light** vector card generator (`generate_default_cover`).
+- **Parallel Diagram & Formula Rendering (`utils/diagram_gen.py`)**: Renders up to `DIAGRAM_PARALLEL_WORKERS=5` charts concurrently with WeChat-safe opaque white backgrounds:
+  - **High-Fidelity**: `Mermaid` (`mermaid.ink` API with local [`utils/html_render.py`](utils/html_render.py) Selenium fallback) and `HTML + Tailwind + KaTeX` dashboards/formulas.
+  - **Lite Fallbacks**: `Graphviz DOT` ([`utils/lite_render.py`](utils/lite_render.py)) and `Matplotlib` structured cards (formula, comparison, and summary cards) unified under the Linear Modern Light palette (`#FFFFFF`, `#F8F9FB`, `#4F5BD5`).
 
-**Intelligent Image Selection** — Multi-source image retrieval (Pollinations AI generation -> Pexels free stock -> Bing/Baidu crawling). 
-- **LLM Keyword Optimization**: Uses LLM to transform abstract terms into visual search queries (e.g., "Regulation" -> "Tech Balance Scale") when standard searches fail.
-- **Fixed Branding Cover**: GitHub articles use a standardized 2.35:1 branding cover for consistent visual identity.
-- **Evaluation Engine**: 6-dimension scoring, perceptual hash dedup, and **Gemini Vision + Ollama local vision model** for AI-powered evaluation.
+### 4. Four-Layer WeChat Title Deduplication (`core/shared/publisher.py`)
+Fetches active WeChat Cloud Drafts, published titles, and local history, running 4 progressive checks:
+1. Normalized **exact string match**
+2. **Character-level fuzzy similarity** (`rapidfuzz` / `SequenceMatcher`)
+3. **Keyword n-gram overlap** (`>= 0.70`)
+4. **DeepSeek AI semantic deduplication** fallback
 
-**Efficient Parallel Architecture**
-- **GitHub images fully parallel**: 6 image sources run concurrently, stops when 3 collected (3-5x speedup)
-- **Cover + article parallel**: Cover SD generation runs alongside article writing
-- **Interruptible**: All long operations support user cancellation (Stop button responds in 0.5s)
+### 5. 5 Vertical Knowledge Packs & Zero-Interview Customization (`tools/`)
+- **Built-in Domain Graphs**: [`data/knowledge_trees/`](data/knowledge_trees) includes `aikepu.json` (30 nodes), `career.json` (10), `health.json` (8), `law.json` (10), and `tax.json` (6), paired with domain prompts in [`prompts/`](prompts) (`law_skill.md`, `tax_skill.md`, etc.).
+- **Automated Account Cloning**: [`tools/analyze_account.py`](tools/analyze_account.py) extracts writing style into custom skill prompts, and [`tools/build_knowledge_tree.py`](tools/build_knowledge_tree.py) builds and activates new vertical DAG trees.
 
-**Safety & Compliance** — 4-strategy title dedup (exact/fuzzy/keyword/AI semantic). Cross-topic internal dedup. Draft box audit to prevent duplicates.
-
-**Web Management UI** — Flask glassmorphism dark-theme dashboard:
-- **Console**: One-click control (Start/Pause/Resume/Stop) and real-time streaming logs.
-- **Image Studio** (🆕 v4.3): Extracts image placeholders from Markdown, generates configurable model Prompts (e.g. Imagen 3 / Midjourney v6 / FLUX.1), supports HTML5 drag-and-drop uploads, and provides high-fidelity mobile previews.
-- **Diagram Engine** (🆕 v4.3): Supports 5 hybrid rendering engines including Mermaid, LaTeX cards, Graphviz, Tailwind HTML, and **Archify / D2 system architecture diagrams** with smooth fallback.
-- **History Preview** (🆕 v4.2): Supports online and offline article previews. Click "Preview" next to any record to inspect draft style/content. Offline HTML cache files (saved under `data/previews/`) allow inspecting drafts even for failed tasks.
-- **Sources Health** (🆕 v4.2): Features 12 source status cards. When the tab is active, polls the health API every 3 seconds to keep status in sync with workflow progress.
-- **Settings**: Online configurations for API keys, models, **Image Gen Model** (`IMAGE_GEN_MODEL`), and **Diagram Parallel Workers** (`DIAGRAM_PARALLEL_WORKERS`).
-
-**WeChat Integration** — Auto-push notifications to WeChat group bots after publishing.
+### 6. Multi-Key Rotation Pool & Prompt Cache Telemetry
+- [`utils/key_pool.py`](utils/key_pool.py) parses comma-separated keys in `LLM_API_KEYS` and `DASHSCOPE_API_KEYS` for thread-safe round-robin rotation and error cooldowns (120s for 429 rate limits, 300s for auth errors).
+- [`core/shared/llm.py`](core/shared/llm.py) routes Flash vs. Pro models by task complexity and reports Prompt Cache hit rates, saved tokens, and CNY cost savings live in the UI.
 
 ---
 
-## 🛠️ Tech Stack
+## WebUI 5-Stage Console
 
-- **Language**: Python 3.8+
-- **LLM**: DeepSeek Chat / Reasoner
-- **Vision AI**: Gemini Flash 2.0 (cloud) + Gemma 3 4B via Ollama (local)
-- **Diagrams & Architecture**: Archify / D2 / Mermaid / Graphviz / LaTeX
-- **GitHub**: PyGithub (API), rich (directory tree rendering), diagrams (architecture diagrams), carbon (code screenshots)
-- **Crawling**: Requests, BeautifulSoup4, Selenium (Stealth Mode), icrawler
-- **Image**: Pillow, numpy, Pollinations.ai API, Pexels API
-- **Cache/Match**: requests-cache, RapidFuzz
-- **Logging**: Loguru
-- **Web**: Flask
-- **API**: WeChat Official Account Draft API
+Built as a zero-build native ES Module SPA ([`static/js/main.js`](static/js/main.js)) with a 3-sheet CSS token architecture ([`tokens.css`](static/css/tokens.css), [`components.css`](static/css/components.css), [`views.css`](static/css/views.css)) and a 4-layer CSS `.ambient-canvas`, the **Linear Modern Light** WebUI delivers responsive desktop + mobile bottom-dock navigation, instant ZH/EN switching, and optional `WEBUI_TOKEN` login protection ([`templates/login.html`](templates/login.html)).
+
+| View ID | Name | Capabilities |
+| :--- | :--- | :--- |
+| **`console`** | Console | 4-workflow tabs, Start/Pause/Resume/Stop, Preheat Cache, Prompt Cache telemetry strip, 4-phase pipeline stepper, Timeline Accordion vs. Raw logs, Knowledge Graph card & Live Pulse |
+| **`graph`** | Knowledge Graph | Interactive DAG explorer, Tier 1–4 filters, vertical pack switcher, custom JSON import, WeChat published sync, node inspector drawer (`Generate Now`, mark published/draft/reset) |
+| **`audit`** | Audit Workbench | HITL quality gate queue (`All / Pending / Approved / Drafted / Published`), HTML article preview modal, direct draft push (`/api/review/approve`), batch delete |
+| **`image`** | Image Studio | WeChat article URL scraping & compliant redraw (`Qwen-Image-3.0-Pro`), Markdown prompt extraction, HTML5 drag-and-drop upload, 1:1 mobile WeChat preview |
+| **`ops`** | Ops & Settings | 3 sub-tabs: **Sources** (12-feed health matrix & probe), **Schedule** (APScheduler cron config for 4 workflows), **Settings** (hot-reload WeChat, LLM, DashScope, SD & concurrency settings) |
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
-```
+```text
 wechat_auto_publish/
-├── main.py                    # CLI entry (supports --task hotspots/github)
-├── webui.py                   # Flask Web management UI (v3.0)
-├── config.py                  # Global configuration center
-├── requirements.txt           # Dependencies
-├── run.bat                    # CLI launch script
-├── run_gui.bat                # Web UI launch script
-├── data/                      # Database & runtime configuration directory
-│   ├── auto_publish.sqlite    # SQLite database for title deduplication and history
-│   ├── aikepu_skill_tree.json # AI science popularization skill tree configuration
-│   ├── aikepu_history.json    # AI science popularization publish history (auto-generated)
-│   └── hotspot_cache.sqlite   # Network hotspot request cache database (auto-generated)
+├── main.py                        # Headless CLI entrypoint (--task hotspots|github|aikepu|daily_knowledge)
+├── webui.py                       # Flask + SSE WebUI console & REST API server
+├── config.py                      # Central environment settings & verified defaults
+├── run.bat / run_gui.bat          # Windows quick-launch scripts for WebUI
+├── Dockerfile / docker-compose*.yml / render.yaml  # Container & cloud deployment manifests
+│
 ├── core/
-│   ├── engine.py              # Workflow dispatcher
-│   ├── hotspots/
-│   │   ├── collector.py       # 12-source hotspot engine
-│   │   ├── processor.py       # AI article generation engine
-│   │   └── workflow.py        # Hotspot publishing pipeline
-│   ├── github/
-│   │   ├── collector.py       # GitHub Trending (PyGithub + rich tree + diagrams + carbon)
-│   │   ├── processor.py       # GitHub article generation (WeChat formatting)
-│   │   └── workflow.py        # GitHub publishing pipeline
-│   └── shared/
-│       ├── llm.py             # DeepSeek API wrapper
-│       ├── publisher.py       # WeChat API + title dedup
-│       ├── article_utils.py   # Markdown->HTML + image embedding
-│       └── runtime.py         # Log initialization
-├── utils/
-│   ├── image_handler.py       # Multi-source image retrieval + AI generation
-│   ├── image_filter.py        # Image scoring / OCR / pHash dedup / Vision AI
-│   ├── http_client.py         # HTTP session + cache + retry
-│   └── spider.py              # Selenium browser launcher
-├── static/                    # Web UI frontend assets
-├── templates/                 # Web UI templates
-└── assets/                    # Auto-downloaded image assets
+│   ├── engine.py                  # Unified workflow dispatcher
+│   ├── db/                        # SQLAlchemy models & SQLite WAL audit DB (data/auto_publish.sqlite)
+│   ├── pipeline/                  # PipelineEngine, node contracts & AI Critic gate (critic.py)
+│   ├── hotspots/                  # Hotspot processor, Trafilatura scraper, DuckDuckGo/Bing searcher, narrative engine
+│   ├── github/                    # GitHub Trending / API collector & OSS deep-dive workflow
+│   ├── aikepu/                    # Knowledge DAG parser, outline/prompt optimizer & parallel Sub-Agent processor
+│   ├── plugins/                   # Source abstractions for 12 news feeds & GitHub
+│   └── shared/                    # Tiered LLM router, Linear Light WeChat typesetting & 4-layer dedup publisher
+│
+├── daily_knowledge/               # Standalone Daily Knowledge workflow, deduplicator & SQLite store
+├── tools/                         # Zero-interview style analyzer & knowledge tree builder scripts
+├── prompts/                       # Task & vertical domain writing skill prompts
+├── utils/                         # AI image handler, 5-mode diagram generator, key pool, HTTP & spider helpers
+├── templates/ & static/           # Linear Modern Light zero-build ES Module frontend
+├── data/                          # Knowledge trees, caches, fail_*.html previews & SQLite DB
+├── tests/                         # 13 Pytest unit, integration & WebUI interaction test suites
+└── docs/                          # Design specs & implementation plans
 ```
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
-### 1. Clone
+### 1. Prerequisites
+- **Python 3.11+** & **Git**
+- **Optional**: Chrome/Chromium (with Selenium/Playwright) for local `HTML+KaTeX` / `Mermaid` rendering and GitHub scraping fallback; system `Graphviz` (`dot`) for lightweight DOT diagrams.
+
+### 2. Installation
 
 ```bash
 git clone https://github.com/Chain813/wechat-automatic-publisher.git
 cd wechat-automatic-publisher
-```
-
-### 2. Install Dependencies
-
-```bash
-python -m venv venv
-venv\Scripts\activate
 pip install -r requirements.txt
+cp .env.example .env
 ```
 
-Or double-click `run.bat` for automatic setup.
+Edit `.env` with your **LLM API Key**, **DashScope Key**, and **WeChat `WECHAT_APP_ID` / `WECHAT_APP_SECRET`**.
 
-### 3. Configure
+> [!NOTE]
+> **WeChat IP Whitelist**: Add your server or local machine's public egress IP to the **API IP Whitelist** in the WeChat Official Account admin panel before pushing drafts.
 
-Copy `.env.example` to `.env` and fill in:
+### 3. Running AutoWeChat
 
-```env
-# Required
-WECHAT_APP_ID="your-wechat-appid"
-WECHAT_APP_SECRET="your-wechat-appsecret"
-LLM_API_KEY="your-deepseek-api-key"
-
-# Optional: LLM Model (default: deepseek-v4-pro, or deepseek-v4-flash)
-# 💡 Cost Tip: DeepSeek applies peak-offpeak pricing. Off-peak hours (0:00-9:00, 12:00-14:00, 18:00-24:00 UTC+8) feature a 50% discount!
-LLM_MODEL="deepseek-v4-pro"
-
-# Optional: GitHub API (for GitHub Trending articles, higher rate limit)
-GITHUB_TOKEN="your-github-personal-access-token"
-
-# Optional: Gemini Vision (cloud image evaluation)
-GEMINI_API_KEY="your-gemini-api-key"
-
-# Optional: WeChat group bot notification
-QYWECHAT_WEBHOOK=""
-
-# Optional: Ollama local vision model
-OLLAMA_DEFAULT_MODEL="gemma4:e2b-it-q4_K_M"
-OLLAMA_VISION_MODEL="gemma3:4b"
-
-# Optional: Stable Diffusion (local image generation)
-SD_ENABLED="True"
-SD_API_URL="http://127.0.0.1:7860"
-
-# Optional: Pexels free stock images
-PEXELS_API_KEY=""
-```
-
-### 4. Run
-
-**CLI mode:**
 ```bash
-python main.py                    # Hotspot publishing (default)
-python main.py --task github      # GitHub Trending publishing
-```
-
-**Web mode:**
-```bash
+# Option A: WebUI Console (auto-binds port 5001, falling back to 5002/5050/8080/8888)
 python webui.py
-```
-Visit http://127.0.0.1:5000
 
----
+# Option B: Headless CLI Workflows
+python main.py --task hotspots
+python main.py --task github
+python main.py --task aikepu
+python main.py --task daily_knowledge
 
-## 💻 Web UI (v3.0)
-
-The dark-themed dashboard provides:
-
-| Page | Features |
-|------|----------|
-| **Console** | One-click start/stop, real-time log streaming, task type selection |
-| **Image Studio** | **Drag-and-Drop Image Placement & Prompt Generator** (🆕 v4.3): Automatically parses image placeholders in Markdown, calls LLM to generate Imagen 3 English Prompts, supports HTML5 drag-and-drop image uploads and high-fidelity mobile WeChat draft previews. |
-| **History** | Published articles grouped by date with offline/online draft preview |
-| **Sources** | 12-source health status (green/yellow/red cards) with real-time polling |
-| **Settings** | API key configuration with secret masking |
-
----
-
-## 🖼️ Image Selection Strategy
-
-### Hotspot Articles (AI-first)
-
-1. **Pollinations.ai AI Generation** — Conceptual illustrations for current affairs (no stock photo matches specific events)
-2. **Pexels Free Stock** — High-quality copyright-free images
-3. **Bing Image Search** — Large landscape images filtered
-4. **Baidu Image Search** — Domestic fallback
-5. **Local Default** — Final fallback
-
-### GitHub Articles & Deep Analysis (v4.0)
-
-GitHub workflow has been upgraded to a **single-project deep-dive mode**. It automatically fetches and merges English/Chinese READMEs and reference docs, applying deep translation and polishing, and generates/retrieves at least 3 deep image assets:
-
-| Priority | Source | Description |
-|----------|--------|-------------|
-| 1 | **README Screenshot** | **(NEW)** Headless Chrome screenshots the README rendering, automatically cropped to 2.35:1 WeChat aspect ratio. |
-| 2 | **Live UI Screenshot** | **(NEW)** Headless Chrome screenshots the project's Homepage or Demo URL directly, bypassing local deployment issues. |
-| 3 | **SD Art Illustration** | Local Stable Diffusion WebUI generates custom geek-style illustrations based on DeepSeek prompts. |
-| 4 | **README Images** | Extracts existing illustrations/flowcharts directly from README files. |
-| 5 | **Code Screenshot** | Carbon API renders main entry file code with high-quality styling. |
-| 6 | **Directory Tree & Diagrams** | Renders file directory trees with rich, or system architecture diagrams via diagrams. |
-
-Each image is evaluated on 6 dimensions, then optionally re-evaluated by vision AI:
-
-```mermaid
-graph TD
-    classDef pool fill:#2980B9,stroke:#3498DB,stroke-width:2px,color:#fff,rx:5px
-    classDef scoring fill:#8E44AD,stroke:#9B59B6,stroke-width:2px,color:#fff,rx:5px
-    classDef ai fill:#D35400,stroke:#E67E22,stroke-width:2px,color:#fff,rx:5px
-    classDef process fill:#27AE60,stroke:#2ECC71,stroke-width:2px,color:#fff,rx:5px
-    classDef final fill:#16A085,stroke:#1ABC9C,stroke-width:3px,color:#fff,rx:15px
-
-    subgraph Phase1 ["Phase 1: Candidate Pool"]
-        A["🖼️ Raw Image Candidates"]:::pool
-    end
-
-    subgraph Phase2 ["Phase 2: CV 6-Dim Scoring"]
-        B{"📊 Base CV Evaluation\nResolution | Aspect Ratio | Clarity\nOCR Density | Color | Size"}:::scoring
-    end
-
-    subgraph Phase3 ["Phase 3: Vision AI (Top 3)"]
-        C{"🤖 AI Selection Engine"}:::ai
-        D["☁️ Gemini Flash 2.0 (Cloud)"]:::ai
-        E["🖥️ Gemma 3 4B (Local)"]:::ai
-        F["📉 Pure CV Fallback"]:::scoring
-    end
-
-    subgraph Phase4 ["Phase 4: Formatting & Dedup"]
-        G["✂️ Smart Cropping\n(900x383 / 900x500)"]:::process
-        H["🔍 pHash Perceptual Hash\n(Duplicate Prevention)"]:::process
-    end
-
-    I(("📤 Upload to WeChat Media")):::final
-
-    A --> B
-    B -->|Top 3 Pass| C
-    C -->|Preferred| D
-    C -->|Secondary| E
-    C -->|Unavailable| F
-    
-    D --> G
-    E --> G
-    F --> G
-    
-    G --> H
-    H --> I
+# Option C: Zero-Interview Customization Tools
+python tools/analyze_account.py
+python tools/build_knowledge_tree.py
 ```
 
 ---
 
-## ⚙️ Core Configuration
+## Environment Variables
 
-Adjustable in `config.py` or `.env`:
+All settings are defined in [`config.py`](config.py):
 
-| Config | Description | Default |
-|--------|-------------|---------|
-| `BRAND_NAME` | Brand name | AutoWeChat |
-| `NEWS_SOURCES` | Enabled sources | 12 platforms |
-| `FILTER_CATEGORIES` | Priority filter keywords | 79 terms |
-| `LLM_MODEL` | LLM model | `deepseek-v4-pro` |
-| `LLM_TIMEOUT` | LLM API timeout (seconds) | 180 |
-| `LLM_TEMPERATURE` | Generation randomness | 0.75 |
-| `IMAGE_DEFAULT_CANDIDATES` | Image candidates per search | 5 |
-| `OLLAMA_VISION_MODEL` | Local vision model | gemma3:4b |
-| `GITHUB_TOKEN` | GitHub API token (optional) | token-based |
-| `SD_ENABLED` | Enable local Stable Diffusion | `True` |
-| `SD_API_URL` | SD WebUI API address | `http://127.0.0.1:7860` |
-| `DIAGRAM_PARALLEL_WORKERS` | Parallel diagram generation threads (Chrome + Graphviz) | 5 |
-
----
-
-## 📚 Glossary
-
-Detailed explanations of technical terms, tool names, and concepts used in this project: **[GLOSSARY_EN.md](GLOSSARY_EN.md)**
-
-Covers: Technical Terms | Image Terms | GitHub Terms | WeChat Terms
-
----
-
-## 👨‍💻 Development Docs
-
-| Document | Description |
-|----------|-------------|
-| **[DEVELOPMENT.md](DEVELOPMENT.md)** | Development workflow: environment setup, coding standards, testing, release process, debugging tips, troubleshooting |
-| **[CLAUDE.md](CLAUDE.md)** | Claude Code project guide: architecture overview, core modules, coding conventions, common development tasks |
+| Variable | Description | Code Default |
+| :--- | :--- | :--- |
+| `WECHAT_APP_ID` / `WECHAT_APP_SECRET` | WeChat Official Account credentials | `""` |
+| `LLM_API_KEY` / `LLM_API_KEYS` | Single LLM key or comma-separated pool for automatic rotation | `""` |
+| `LLM_BASE_URL` | OpenAI-compatible API endpoint | `https://api.deepseek.com` |
+| `LLM_MODEL` | Default LLM model | `deepseek-v4-flash` |
+| `LLM_TEMPERATURE` / `LLM_MAX_TOKENS` | Sampling temperature & max token budget | `0.75` / `8192` |
+| `DASHSCOPE_API_KEY` / `DASHSCOPE_API_KEYS` | Single DashScope key or comma-separated rotation pool | `""` |
+| `IMAGE_GEN_MODEL` / `QWEN_IMAGE_MODEL` | Default AI image generation model | `qwen-image-3.0` |
+| `QWEN_IMAGE_REDRAW_MODEL` | Image Studio redraw model | `qwen-image-3.0-pro` |
+| `QWEN_VL_MODEL` | Vision-language analysis model | `qwen-vl-max` |
+| `SD_ENABLED` / `SD_API_URL` | Local Stable Diffusion WebUI fallback toggle & URL | `True` / `http://127.0.0.1:7860` |
+| `DIAGRAM_PARALLEL_WORKERS` | Concurrent technical diagram rendering threads | `5` |
+| `ENABLE_FACT_SEARCH` / `MAX_FACT_SNIPPETS` | Live web fact grounding toggle & snippet limit | `True` / `4` |
+| `HOTSPOT_CACHE_TTL_SECONDS` | Hotspot source cache TTL (seconds) | `60` |
+| `MAX_TOPICS_PER_RUN` / `MAX_AIKEPU_PER_RUN` | Max generated articles per run | `3` / `1` |
+| `KNOWLEDGE_TREE` | Default tree pack (`_active.txt` takes precedence if present) | `aikepu` |
+| `GITHUB_TOKEN` | Optional GitHub token for higher API rate limits | `""` |
+| `QYWECHAT_WEBHOOK` | Enterprise WeChat group alert webhook URL | `""` |
+| `BRAND_NAME` / `ARTICLE_AUTHOR` | Official account brand & author signature | `智界洞察社` |
+| `WEBUI_TOKEN` | Optional WebUI access password/token | `""` |
+| `CLOUD_MODE` | Stateless cloud guard (`"1"` enables cloud-first sync to avoid local overwrite) | `""` (`False`) |
 
 ---
 
-## 📋 Requirements
+## Cloud Deployment & Scheduling
 
-- Python 3.8+
-- [Graphviz](https://graphviz.org/download/) (for architecture diagram generation. On Windows, if installed at the default `C:\Program Files\Graphviz` path, the system will automatically inject it into the PATH environment variable without manual setup; otherwise, add it to system PATH manually)
-- Chrome browser (for Selenium fallback scraping)
-- Optional: [Ollama](https://ollama.com) for local vision AI
-- Optional: [Stable Diffusion](https://github.com/AUTOMATIC1111/stable-diffusion-webui) (WebUI with `--api` enabled)
-- Optional: EasyOCR for text detection (requires PyTorch ~2GB)
+- **GitHub Actions**: [`.github/workflows/trigger.yml`](.github/workflows/trigger.yml) supports scheduled cron runs and manual `workflow_dispatch` task selection.
+- **Docker Compose**: Run `docker compose up -d --build` to launch the containerized WebUI with headless Chromium, Chinese fonts, and persistent `./data` & `./.env` mounts.
+- **Render**: [`render.yaml`](render.yaml) provides a starter blueprint with `CLOUD_MODE` and generated `WEBUI_TOKEN`; verify that your Render dashboard defines `DASHSCOPE_API_KEY`, `LLM_API_KEY`, and `WECHAT_*` matching `.env.example`.
 
 ---
 
-## 📄 License
+## Testing & Companion Docs
 
-[MIT License](LICENSE)
+```bash
+# Core unit & API integration suite
+python -m pytest tests/ -q --ignore=tests/test_webui_e2e_interactions.py
+
+# Full suite including Playwright browser E2E tests
+python -m pytest tests/ -q
+```
+
+- [README.md](README.md) — Simplified Chinese Documentation
+- [DEVELOPMENT.md](DEVELOPMENT.md) — Architecture & Contributor Guide
+- [CLAUDE.md](CLAUDE.md) — AI Engineering Rules & Conventions
+- [CHANGELOG.md](CHANGELOG.md) — Release History & Unreleased Changes
+- [GLOSSARY.md](GLOSSARY.md) / [GLOSSARY_EN.md](GLOSSARY_EN.md) — Project Glossary
 
 ---
 
-## ⚠️ Disclaimer
+## Disclaimer
 
-This tool is for technical research and content creation assistance only. Please comply with WeChat official account operating guidelines and relevant laws. AI-generated content should be reviewed by a human before publishing.
+This project is intended for research, productivity enhancement, and compliant assisted publishing. Always review drafts in the **Audit Workbench** prior to publication and comply with WeChat Official Account platform guidelines and local regulations.

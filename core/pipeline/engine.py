@@ -1,7 +1,7 @@
 from typing import List, Dict, Any
 from loguru import logger
 from core.pipeline.nodes import BaseNode
-from core.shared.runtime import check_cancelled
+from core.shared.runtime import check_cancelled, WorkflowCancelled
 
 class PipelineEngine:
     """
@@ -31,6 +31,9 @@ class PipelineEngine:
                 if not success:
                     logger.warning(f"⚠️ 流水线在节点 {node.name} 中止。")
                     return False
+            except WorkflowCancelled:
+                logger.warning(f"⛔ 节点 {node.name} 执行被用户中断。")
+                raise
             except Exception as e:
                 logger.error(f"❌ 节点 {node.name} 执行发生未捕获异常: {e}")
                 self.context["error"] = str(e)

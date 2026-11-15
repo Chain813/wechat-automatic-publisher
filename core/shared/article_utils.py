@@ -59,16 +59,20 @@ def _optimize_image_keyword_with_llm(original_keyword):
     return ""
 
 
-def _download_and_upload(keyword, publisher, use_ai_first=False):
+def _download_and_upload(keyword, publisher, use_ai_first=False, slot_idx=0):
     """下载图片并立即上传到微信，合并为单步操作（供并行调用）"""
     keyword = keyword.strip()
     if not keyword:
-        return keyword, None
+        return slot_idx, None
 
     from utils.image_handler import download_image as _dl
 
-    logger.info("正在为段落关键词 '{}' 搜寻最佳配图...", keyword)
-    image_path = _dl(keyword)
+    search_kw = f"{keyword} 画面{slot_idx+1}" if slot_idx > 0 else keyword
+    logger.info("正在为段落关键词 '{}' (槽位 #{}) 搜寻最佳配图...", keyword, slot_idx + 1)
+    image_path = _dl(search_kw)
+
+    if not image_path and search_kw != keyword:
+        image_path = _dl(keyword)
 
     # 降级：简化关键词重试
     if not image_path:
@@ -83,25 +87,24 @@ def _download_and_upload(keyword, publisher, use_ai_first=False):
             image_path = _dl(optimized)
 
     if not image_path:
-        return keyword, None
+        return slot_idx, None
 
     image_url = publisher.upload_news_image(image_path)
-    return keyword, image_url
+    return slot_idx, image_url
+
 
 def _extract_image_placeholders(article_text):
+    """提取文章中按顺序排列的所有配图占位符关键词（保留位置与重复项）"""
     placeholders = []
-    seen = set()
     for match in PLACEHOLDER_PATTERN.findall(article_text or ""):
-        keyword = match.strip()
-        if keyword and keyword not in seen:
-            seen.add(keyword)
-            placeholders.append(keyword)
+        placeholders.append(match.strip())
     return placeholders
 
+
 def _replace_placeholder(html_body, keyword, replacement):
-    # 使用正则表达式进行不区分空格的替换
+    # 替换单个占位符（首个匹配项）
     pattern = re.compile(rf"【\s*此处插入配图\s*[：:]\s*{re.escape(keyword)}\s*】")
-    return pattern.sub(replacement, html_body)
+    return pattern.sub(replacement, html_body, count=1)
 
 def _clean_latex_math(text: str) -> str:
     """清理并转换文章中未渲染的原生 LaTeX 数学符号及 $...$ 标记为普通可读字符"""
@@ -208,6 +211,169 @@ def _clean_latex_math(text: str) -> str:
 
     text = re.sub(r'(?<!\\)\$([^\$\n]+?)(?<!\\)\$', _strip_dollar_math, text)
     return text
+
+
+CALLOUT_PATTERN = re.compile(
+    r'^\s*(?:<p[^>]*>\s*)?'
+    r'(?:(⚠️|💡|📌)\s*)?'
+    r'(?:<strong>|\*\*)?\s*'
+    r'(避坑指南(?:\s*/\s*风险预警)?|风险预警|风险提示|核心洞察|核心观点|深度洞察|行动清单|实操清单|行动指南|落地清单)'
+    r'\s*(?:</strong>|\*\*)?\s*[:：]?(?:\s*</p>)?',
+    flags=re.IGNORECASE
+)
+
+
+def _determine_callout_type(title_text: str, icon: str = None) -> str:
+    """根据标题文本或图标判断微光卡片类型"""
+    if any(k in title_text for k in ["避坑", "风险"]) or icon == "⚠️":
+        return "warning"
+    elif any(k in title_text for k in ["洞察", "观点"]) or icon == "💡":
+        return "insight"
+    elif any(k in title_text for k in ["清单", "行动", "实操", "落地"]) or icon == "📌":
+        return "action"
+    return "warning"
+
+
+def _build_callout_card(callout_type: str, icon: str, title: str, body: str) -> str:
+    """构建微光卡片 HTML"""
+    configs = {
+        "warning": {
+            "border_color": "#ef4444",
+            "bg_color": "#fef2f2",
+            "border_outer": "#fee2e2",
+            "default_icon": "⚠️",
+            "default_title": "避坑指南 / 风险预警",
+        },
+        "insight": {
+            "border_color": "#3b82f6",
+            "bg_color": "#eff6ff",
+            "border_outer": "#dbeafe",
+            "default_icon": "💡",
+            "default_title": "核心洞察",
+        },
+        "action": {
+            "border_color": "#10b981",
+            "bg_color": "#f0fdf4",
+            "border_outer": "#d1fae5",
+            "default_icon": "📌",
+            "default_title": "行动清单",
+        },
+    }
+    cfg = configs.get(callout_type, configs["warning"])
+    b_color = cfg["border_color"]
+    bg = cfg["bg_color"]
+    border_outer = cfg["border_outer"]
+    use_icon = icon or cfg["default_icon"]
+    use_title = title or cfg["default_title"]
+
+    if body and not body.startswith("<p") and not body.startswith("<ol") and not body.startswith("<ul"):
+        body_html = f'<div style="font-size: 14.5px; color: #334155; line-height: 1.75;">{body}</div>'
+    else:
+        body_html = f'<div style="font-size: 14.5px; color: #334155; line-height: 1.75;">{body}</div>' if body else ''
+
+    return (
+        f'<section style="margin: 22px 0; padding: 16px 20px; background-color: {bg}; '
+        f'border: 1px solid {border_outer}; border-left: 4px solid {b_color}; border-radius: 10px; '
+        f'font-size: 15px; line-height: 1.75; color: #334155; box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px rgba(15,23,42,0.04);">'
+        f'<div style="font-size: 14.5px; color: {b_color}; font-weight: bold; margin-bottom: 8px; '
+        f'display: flex; align-items: center; gap: 6px;">'
+        f'<span>{use_icon}</span> <span>{use_title}</span>'
+        f'</div>'
+        f'{body_html}'
+        f'</section>'
+    )
+
+
+def _render_custom_callouts(text: str) -> str:
+    """
+    微光引用容器语法映射：
+    - > ⚠️ **避坑指南 / 风险预警**：-> 渲染为琥珀红告警卡片（#ef4444 / 浅红底 #fef2f2）
+    - > 💡 **核心洞察**：-> 渲染为微光极客蓝卡片（#3b82f6 / 浅蓝底 #eff6ff）
+    - > 📌 **行动清单**：-> 渲染为墨绿徽章卡片（#10b981 / 浅绿底 #f0fdf4）
+    支持 Markdown 原文与解析后的 HTML <blockquote> 容器。
+    """
+    if not text:
+        return text
+
+    # 若输入为纯 Markdown 引用语法且尚未被 blockquote 包装，先转为 HTML
+    if re.search(r'(?:^|\n)\s*>\s*', text) and not re.search(r'</?(?:blockquote|section)\b', text, re.I):
+        text = markdown.markdown(text, extensions=["fenced_code", "tables", "sane_lists"])
+
+    def _replace_callout(match):
+        content = match.group(1).strip()
+        m = CALLOUT_PATTERN.search(content)
+        if not m:
+            return match.group(0)
+
+        icon = m.group(1)
+        title = m.group(2)
+        callout_type = _determine_callout_type(title, icon)
+        body = content[m.end():].strip()
+        if body.endswith("</p>") and not body.startswith("<p"):
+            body = body[:-4].strip()
+        if body.startswith("<p>") and body.endswith("</p>") and body.count("<p>") == 1:
+            body = body[3:-4].strip()
+        if body.startswith("：") or body.startswith(":"):
+            body = body[1:].strip()
+        if "<p>" not in body and "<ol>" not in body and "<ul>" not in body:
+            body = body.replace("\n", "<br>")
+
+        return _build_callout_card(callout_type, icon, title, body)
+
+    return re.sub(r'<blockquote[^>]*>(.*?)</blockquote>', _replace_callout, text, flags=re.DOTALL)
+
+
+def _format_markdown_tables(html_body: str) -> str:
+    """为 markdown 生成的 <table> 注入微信兼容的 Linear Modern Light 行内样式与横向滚动保护"""
+    if "<table" not in html_body:
+        return html_body
+
+    table_style = (
+        "border-collapse: collapse; width: 100%; margin: 0; font-size: 14px; "
+        "border: 1px solid #E2E8F0; border-radius: 8px; overflow: hidden; "
+        "background-color: #FFFFFF;"
+    )
+    th_base_style = (
+        "background-color: #F8F9FB; color: #0C0D0E; font-weight: 600; "
+        "padding: 10px 14px; border-bottom: 1px solid #E2E8F0;"
+    )
+    td_base_style = (
+        "padding: 10px 14px; border-bottom: 1px solid #F1F3F7; color: #334155; "
+        "line-height: 1.6;"
+    )
+
+    def _merge_style(tag_attrs: str, new_style: str) -> str:
+        m = re.search(r'style="([^"]*)"', tag_attrs)
+        if m:
+            existing = m.group(1).strip()
+            if existing and not existing.endswith(';'):
+                existing += ';'
+            merged = f"{existing} {new_style}".strip()
+            return tag_attrs[:m.start()] + f'style="{merged}"' + tag_attrs[m.end():]
+        else:
+            return f'{tag_attrs} style="{new_style}"'
+
+    def _replace_table(match):
+        table_content = match.group(0)
+        table_content = re.sub(
+            r'<th\b([^>]*)>',
+            lambda m: f"<th{_merge_style(m.group(1), th_base_style)}>",
+            table_content
+        )
+        table_content = re.sub(
+            r'<td\b([^>]*)>',
+            lambda m: f"<td{_merge_style(m.group(1), td_base_style)}>",
+            table_content
+        )
+        table_content = re.sub(
+            r'<table\b([^>]*)>',
+            lambda m: f"<table{_merge_style(m.group(1), table_style)}>",
+            table_content,
+            count=1
+        )
+        return f'<section style="width: 100%; margin: 22px 0; overflow-x: auto; box-sizing: border-box;">{table_content}</section>'
+
+    return re.sub(r'<table\b[^>]*>.*?</table>', _replace_table, html_body, flags=re.DOTALL)
 
 
 def process_article_content(article_text, publisher, use_ai_first=False, skip_photo_images=False, generate_diagrams=False):
@@ -319,32 +485,53 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
     image_results = {}
     if placeholders:
         check_cancelled()
-        logger.info("启动并行图片下载+上传引擎 ({} 张)...", len(placeholders))
-        with ThreadPoolExecutor(max_workers=min(3, len(placeholders))) as executor:
-            futures = {executor.submit(_download_and_upload, kw, publisher, use_ai_first): kw for kw in placeholders}
+
+        # ---- 逐图生图管线：每张图独立发起一次 AI API 请求 ----
+        pending = [(idx, kw) for idx, kw in enumerate(placeholders)]
+        logger.info("启动逐图 AI 生图 + 上传引擎 ({} 张图，每张图独立发起 API 生图请求)...", len(pending))
+        with ThreadPoolExecutor(max_workers=min(3, len(pending))) as executor:
+            futures = {
+                executor.submit(_download_and_upload, kw, publisher, use_ai_first, idx): idx
+                for idx, kw in pending
+            }
             for future in as_completed(futures):
+                slot_idx = futures[future]
                 try:
-                    keyword, image_url = future.result()
-                    image_results[keyword] = image_url
+                    _, image_url = future.result()
+                    if image_url:
+                        image_results[slot_idx] = image_url
                 except Exception as exc:
-                    logger.warning("  并行图片处理异常: {}", exc)
+                    logger.warning("  逐图 AI 配图处理异常 (槽位 #{}): {}", slot_idx + 1, exc)
 
     image_count = 0
-    for keyword in placeholders:
-        image_url = image_results.get(keyword)
+    slot_cursor = 0
+    pattern_placeholder = re.compile(
+        r'(?:<p[^>]*>\s*)?【\s*此处插入配图\s*[：:]\s*.*?】(?:\s*</p>)?',
+        flags=re.DOTALL
+    )
+
+    def _replace_next_placeholder(match):
+        nonlocal image_count, slot_cursor
+        current_idx = slot_cursor
+        slot_cursor += 1
+        image_url = image_results.get(current_idx)
         if image_url:
-            image_html = (
+            image_count += 1
+            logger.info("  配图 #{} 已成功嵌入文章", current_idx + 1)
+            return (
                 '<p style="text-align:center;margin: 20px 0;">'
                 f'<img src="{image_url}" style="width:100%;max-width:600px;border-radius:12px;'
-                'box-shadow: 0 4px 12px rgba(0,0,0,0.1);">'
-                "</p>"
+                'box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px rgba(15,23,42,0.06);">'
+                '</p>'
             )
-            html_body = _replace_placeholder(html_body, keyword, image_html)
-            image_count += 1
-            logger.info("  配图已成功嵌入文章")
         else:
-            html_body = _replace_placeholder(html_body, keyword, "")
-            logger.info("  最终未匹配到合适配图，已移除占位符")
+            logger.info("  最终未匹配到合适配图，已平滑移除占位符 #{}", current_idx + 1)
+            return ""
+
+    html_body = pattern_placeholder.sub(_replace_next_placeholder, html_body)
+    # 平滑消除可能残留的空段落与换行断层
+    html_body = re.sub(r'<p[^>]*>\s*(?:&nbsp;|<br\s*/?>)?\s*</p>\s*', '', html_body)
+    html_body = re.sub(r'\n{3,}', '\n\n', html_body)
 
     # GitHub 配图并行下载上传
     if github_images:
@@ -380,7 +567,7 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
                 image_html = (
                     '<p style="text-align:center;margin: 20px 0;">'
                     f'<img src="{image_url}" style="width:100%;max-width:600px;border-radius:12px;'
-                    'box-shadow: 0 4px 12px rgba(0,0,0,0.1);">'
+                    'box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px rgba(15,23,42,0.06);">'
                     "</p>"
                 )
                 html_body = pattern.sub(lambda m: image_html, html_body)
@@ -402,40 +589,68 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
         except Exception as e:
             logger.warning("  图表生成失败: {}", e)
     else:
-        # 当关闭自动代码绘图时，将【此处绘制图表：...】及变体直接转为合规精致的「AI 绘图提示词卡片」（零 Token 消耗、零浏览器启动）
-        card_matches = re.findall(CARD_REGEX_PATTERN, html_body, flags=re.DOTALL)
+        # 当关闭自动代码绘图时，将【此处绘制图表：...】及变体转为优雅的「高亮分析卡片」
+        DIAGRAM_CARD_PATTERN = re.compile(
+            r'[【\[]\s*(?:此处绘制图表|此处绘制架构图|此处绘制流程图|此处绘制示意图|此处绘制逻辑图|此处绘制|图表|架构图|流程图|Chart|Diagram)[^：:\n\]】]*[：:]?\s*(.*?)\s*[】\]]',
+            flags=re.DOTALL
+        )
+        card_matches = DIAGRAM_CARD_PATTERN.findall(html_body)
         if card_matches:
-            image_count += len(card_matches)
+            logger.info("  已将 {} 个图表占位符替换为微光高亮分析卡片", len(card_matches))
 
         def _format_diagram_card(match):
+            full_tag = match.group(0)
             desc = match.group(1).strip()
+            if "流程" in full_tag:
+                title = "📊 核心业务流程拆解"
+            elif "架构" in full_tag:
+                title = "📊 核心架构与逻辑拆解"
+            elif "示意" in full_tag or "图解" in full_tag:
+                title = "📊 原理图解与深度分析"
+            else:
+                title = "📊 核心逻辑与架构解析"
+
             return (
-                '<section style="margin: 24px 0; padding: 14px 18px; background-color: #f8fafc; '
-                'border-left: 4px solid #2563eb; border-radius: 8px; border: 1px solid #e2e8f0; border-left: 4px solid #2563eb;">'
-                '<div style="font-size: 13.5px; color: #2563eb; font-weight: bold; margin-bottom: 6px;">'
-                '🎨 AI 配图提示词卡片（待网页端生图人工替换）</div>'
-                f'<div style="font-size: 13px; color: #475569; line-height: 1.6;">{desc}</div>'
+                '<section style="margin: 24px 0; padding: 18px 20px; background-color: #f8fafc; '
+                'border: 1px solid #e2e8f0; border-left: 4px solid #2563eb; border-radius: 10px; '
+                'box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px rgba(15,23,42,0.04);">'
+                f'<div style="font-size: 14.5px; color: #2563eb; font-weight: bold; margin-bottom: 8px; '
+                'display: flex; align-items: center; gap: 6px;">'
+                f'<span>{title}</span>'
+                '</div>'
+                f'<div style="font-size: 14px; color: #334155; line-height: 1.75; text-align: justify;">{desc}</div>'
                 '</section>'
             )
 
+        html_body = DIAGRAM_CARD_PATTERN.sub(_format_diagram_card, html_body)
+
+        # 彻底清理可能残留的遗留旧草稿提示词文本
         html_body = re.sub(
-            r'【\s*(?:此处绘制图表|此处插入配图|此处绘制架构图|此处绘制流程图|配图|图表)\s*[：:]\s*(.*?)\s*】',
-            _format_diagram_card,
-            html_body,
-            flags=re.DOTALL
+            r'🎨\s*AI\s*配图提示词卡片[（(]待网页端生图人工替换[）)]',
+            '📊 核心逻辑与架构解析',
+            html_body
         )
+
+    # 渲染微光自定义引用卡片（避坑指南、核心洞察、行动清单）
+    html_body = _render_custom_callouts(html_body)
+
+    # 统一渲染 Markdown 表格行内样式与移动端防溢出保护
+    html_body = _format_markdown_tables(html_body)
 
     # 统一增加段落缩进和间距 (统一设计系统：高清深灰文本)
     html_body = html_body.replace(
         '<p>', 
         '<p style="margin-bottom: 16px; line-height: 1.85; text-align: justify; font-size: 16px; color: #334155;">'
     )
+    # 平滑消除可能残留的空段落（避免微信排版出现突兀的空行断层）
+    html_body = re.sub(r'<p style="[^"]*">\s*(?:&nbsp;|<br\s*/?>)?\s*</p>\s*', '', html_body)
+    html_body = re.sub(r'<p[^>]*>\s*(?:&nbsp;|<br\s*/?>)?\s*</p>\s*', '', html_body)
     
-    # 统一引用块样式 (科技蓝轻量阴影卡片)，并防止单次引用超过 220 字（微信单次引用不能超过 300 字限制）
+    # 统一引用块样式 (Linear Light 浅灰微光卡片)，并防止单次引用超过 220 字（微信单次引用不能超过 300 字限制）
     bq_style = (
-        'margin: 22px 0; padding: 16px 20px; border-left: 4px solid #2563eb; '
-        'background-color: #f8fafc; color: #475569; border-radius: 8px; font-size: 15px; '
-        'line-height: 1.75; border: 1px solid #e2e8f0; border-left: 4px solid #2563eb;'
+        'margin: 22px 0; padding: 16px 20px; border: 1px solid rgba(0,0,0,0.06); '
+        'border-left: 4px solid #4F5BD5; background-color: #F8F9FB; color: #5E6470; '
+        'border-radius: 8px; font-size: 15px; line-height: 1.75; box-shadow: 0 1px 2px rgba(0,0,0,0.02);'
     )
     def _format_blockquote(match):
         content = match.group(1).strip()
@@ -468,24 +683,46 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
         flags=re.DOTALL
     )
 
-    # 统一 H2 标题样式 (左侧蓝条 + 渐变微光底色)
+    # 统一 H1 标题样式 (Linear Modern Light: 墨黑字体 + 底边淡灰精致分隔)
+    html_body = re.sub(
+        r'<h1>(.*?)</h1>',
+        r'<h1 style="margin-top: 40px; margin-bottom: 24px; font-size: 24px; color: #0C0D0E; font-weight: 700; line-height: 1.4; letter-spacing: -0.02em; border-bottom: 1px solid #E2E8F0; padding-bottom: 12px;">\1</h1>',
+        html_body
+    )
+
+    # 统一 H2 标题样式 (Linear Modern Light: Indigo 左侧条 + 渐变微光底色 + 墨黑字体)
     html_body = re.sub(
         r'<h2>(.*?)</h2>',
-        r'<h2 style="margin-top: 38px; margin-bottom: 22px; padding: 8px 14px; border-left: 5px solid #2563eb; background: linear-gradient(90deg, rgba(37,99,235,0.08) 0%, rgba(255,255,255,0) 100%); border-radius: 4px; font-size: 21px; color: #1e293b; font-weight: bold;">\1</h2>',
+        r'<h2 style="margin-top: 38px; margin-bottom: 22px; padding: 10px 16px; border-left: 4px solid #4F5BD5; background: linear-gradient(90deg, rgba(79,91,213,0.08) 0%, rgba(248,249,251,0) 100%); border-radius: 6px; font-size: 20px; color: #0C0D0E; font-weight: 700; letter-spacing: -0.01em;">\1</h2>',
         html_body
     )
 
-    # 统一 H3 标题样式
+    # 统一 H3 标题样式 (Linear Indigo 子标题)
     html_body = re.sub(
         r'<h3>(.*?)</h3>',
-        r'<h3 style="margin-top: 28px; margin-bottom: 16px; font-size: 17.5px; color: #2563eb; font-weight: bold; border-left: 3px solid #3b82f6; padding-left: 10px;">\1</h3>',
+        r'<h3 style="margin-top: 28px; margin-bottom: 16px; font-size: 17px; color: #0C0D0E; font-weight: 600; border-left: 3px solid #4F5BD5; padding-left: 10px;">\1</h3>',
         html_body
     )
 
-    # 统一无序列表样式
+    # 统一列表样式 (包含 ul, ol 以及 li 单项间距与墨深颜色)
     html_body = html_body.replace(
         '<ul>',
-        '<ul style="margin-bottom: 20px; padding-left: 25px; line-height: 1.85; color: #334155;">'
+        '<ul style="margin-bottom: 20px; padding-left: 22px; line-height: 1.85; color: #334155;">'
+    )
+    html_body = html_body.replace(
+        '<ol>',
+        '<ol style="margin-bottom: 20px; padding-left: 22px; line-height: 1.85; color: #334155;">'
+    )
+    html_body = html_body.replace(
+        '<li>',
+        '<li style="margin-bottom: 8px; line-height: 1.85; color: #334155;">'
+    )
+
+    # 统一分隔线样式 (Linear Modern Light 淡灰细线)
+    html_body = re.sub(
+        r'<hr\s*/?>',
+        '<hr style="border: none; border-top: 1px solid #E2E8F0; margin: 32px 0;">',
+        html_body
     )
 
     # 重点分级样式：红色加粗微光卡片（最核心顿悟时刻） → 黑色加粗徽章（重要术语）
@@ -496,23 +733,32 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
     )
     html_body = re.sub(
         r'<strong>(.*?)</strong>',
-        r'<strong style="color: #0f172a; font-weight: bold; background-color: rgba(241,245,249,0.8); padding: 1px 4px; border-radius: 3px;">\1</strong>',
+        r'<strong style="color: #0C0D0E; font-weight: 700; background-color: rgba(79,91,213,0.06); padding: 1px 4px; border-radius: 3px;">\1</strong>',
         html_body
     )
 
-    # 优化多行代码块 (<pre><code>) 样式：渲染为 Mac 终端暗黑高档风格 (微信防剥离双重防护)
-    mac_dots = '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;"><span style="width:10px;height:10px;border-radius:50%;background:#ef4444;display:inline-block;"></span><span style="width:10px;height:10px;border-radius:50%;background:#f59e0b;display:inline-block;"></span><span style="width:10px;height:10px;border-radius:50%;background:#10b981;display:inline-block;"></span></div>'
-    
+    # 优化多行代码块 (<pre><code>) 样式：渲染为 Linear Modern Light Sunken Code Card (微信防剥离多层容器防护)
+    code_header = (
+        '<div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; background-color: #F1F3F7; border-bottom: 1px solid #E2E8F0;">'
+        '<div style="display: flex; align-items: center; gap: 6px;">'
+        '<span style="width: 10px; height: 10px; border-radius: 50%; background: #EF4444; display: inline-block;"></span>'
+        '<span style="width: 10px; height: 10px; border-radius: 50%; background: #F59E0B; display: inline-block;"></span>'
+        '<span style="width: 10px; height: 10px; border-radius: 50%; background: #10B981; display: inline-block;"></span>'
+        '</div>'
+        '<span style="font-size: 11px; font-weight: 600; color: #5E6470; letter-spacing: 0.05em; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">CODE</span>'
+        '</div>'
+    )
+
     def _format_code_block(match):
         code_content = match.group(1)
         return (
-            '<section style="margin: 20px 0; padding: 16px 18px; background-color: #1e293b; color: #f8fafc; '
-            'border-radius: 12px; font-family: Consolas, Monaco, \'Courier New\', monospace; '
-            'font-size: 13.5px; line-height: 1.65; overflow-x: auto; box-shadow: 0 6px 18px rgba(0,0,0,0.25); display: block;">'
-            f'{mac_dots}'
-            f'<pre style="margin: 0; padding: 0; background-color: #1e293b; color: #f8fafc; '
+            '<section style="margin: 22px 0; border: 1px solid #E2E8F0; border-radius: 10px; '
+            'background-color: #F8F9FB; box-shadow: 0 1px 2px rgba(0,0,0,0.03), inset 0 1px 0 rgba(255,255,255,1); '
+            'overflow: hidden; display: block;">'
+            f'{code_header}'
+            f'<pre style="margin: 0; padding: 14px 18px; background-color: #F8F9FB; color: #0C0D0E; '
             f'font-family: Consolas, Monaco, \'Courier New\', monospace; font-size: 13.5px; line-height: 1.65; '
-            f'white-space: pre-wrap; word-break: break-all; border: none; background: #1e293b; display: block;">{code_content}</pre>'
+            f'white-space: pre-wrap; word-break: break-all; border: none; overflow-x: auto; display: block;">{code_content}</pre>'
             '</section>'
         )
 
@@ -523,11 +769,10 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
         flags=re.DOTALL
     )
 
-    # 统一行内代码（英文字体）样式：由于多行代码块已替换为 <pre>，剩下的 <code> 均为行内代码
-    font_stack = "-apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif"
+    # 统一行内代码样式：由于多行代码块已替换为 <pre>，剩下的 <code> 均为行内代码
     html_body = re.sub(
         r'<code>(.*?)</code>',
-        f'<code style="font-family: {font_stack}; background-color: #f1f5f9; padding: 2px 5px; border-radius: 4px; color: #2563eb; font-size: 0.95em;">\\1</code>',
+        r'<code style="font-family: Consolas, Monaco, \'Courier New\', monospace; background-color: #F1F3F7; padding: 2px 6px; border-radius: 4px; color: #4F5BD5; border: 1px solid rgba(79,91,213,0.15); font-size: 0.92em;">\1</code>',
         html_body
     )
 
@@ -596,9 +841,9 @@ def _print_review_report(title, word_count, image_count, sensitive_words, cover_
     if ignore_word_count:
         wc_ok = True
     elif is_long_article:
-        wc_ok = word_count >= 15000
+        wc_ok = word_count >= 1500
     else:
-        wc_ok = 2000 <= word_count <= 4000
+        wc_ok = word_count >= 800
     wc_icon = "✅" if wc_ok else "⚠️"
     print(f"  字数：{word_count:,} 字 ({wc_icon})")
 
@@ -607,7 +852,7 @@ def _print_review_report(title, word_count, image_count, sensitive_words, cover_
     if html_bytes > 0:
         print(f"  正文体积：{html_bytes / (1024 * 1024):.2f} MB ({bytes_icon} ≤10MB)")
 
-    image_icon = "✅" if image_count >= 3 else "⚠️"
+    image_icon = "✅" if image_count >= 1 else "⚠️"
     print(f"  配图：{image_count} 张 ({image_icon})")
 
     sensitive_icon = "❌" if sensitive_words else "✅"
@@ -620,8 +865,9 @@ def _print_review_report(title, word_count, image_count, sensitive_words, cover_
     if digest:
         print(f"  摘要：{digest[:80]}{'...' if len(digest) > 80 else ''}")
 
-    all_ok = title_ok and wc_ok and bytes_ok and image_count >= 3 and not sensitive_words and cover_ok
+    # 底线硬性指标：标题不超长、正文不超过10MB、无敏感词、封面图已上传
+    all_ok = title_ok and bytes_ok and not sensitive_words and cover_ok
     print(f"{'─' * 50}")
-    print("  🎉 审核通过，可以发布！" if all_ok else "  ⚠️ 存在警告项，请手动检查后再发布。")
+    print("  🎉 格式校验通过，准予进入门禁审核！" if all_ok else "  ⚠️ 存在严重合规/格式问题，已拦截。")
     print(f"{'─' * 50}\n")
     return all_ok

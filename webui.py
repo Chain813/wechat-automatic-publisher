@@ -1,7 +1,9 @@
 import os
 import re
+import hmac
 import threading
-from flask import Flask, render_template, jsonify, request
+from urllib.parse import unquote
+from flask import Flask, render_template, jsonify, request, redirect
 from core.shared.runtime import configure_runtime, log_queue
 from core.engine import run_main
 import queue
@@ -42,6 +44,37 @@ CLOUD_MODE = os.getenv("CLOUD_MODE", "").strip() == "1"
 WEBUI_TOKEN = os.getenv("WEBUI_TOKEN", "").strip()
 
 
+def _extract_request_token() -> str:
+    raw_cookie = request.cookies.get("aw_token", "")
+    if raw_cookie:
+        return raw_cookie
+    auth_header = request.headers.get("Authorization", "")
+    return auth_header.replace("Bearer ", "").strip()
+
+
+def _token_matches(candidate: str) -> bool:
+    if not WEBUI_TOKEN or not candidate:
+        return False
+    decoded = unquote(candidate)
+    return hmac.compare_digest(candidate, WEBUI_TOKEN) or hmac.compare_digest(decoded, WEBUI_TOKEN)
+
+
+def _render_login_page():
+    if os.path.exists("templates/login.html"):
+        return render_template("login.html")
+    return ("[Security] AutoWeChat Cloud — 需要 token 认证", 401)
+
+
+@app.after_request
+def _apply_cache_headers(response):
+    mimetype = (response.mimetype or "").lower()
+    if request.path in ("/", "/login") or request.path.startswith("/api/") or mimetype == "text/html":
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
 # ---- Token 认证中间件（云端模式） ----
 @app.before_request
 def _check_auth():
@@ -53,21 +86,23 @@ def _check_auth():
     if request.path == "/api/status":
         return None
 
+    # 静态资源与登录页本身无需认证
+    if request.path.startswith("/static/"):
+        return None
+    if request.path == "/login" and request.method in ("GET", "HEAD"):
+        return None
+
     # /api/start 允许通过 ?token=xxx 参数验证（GitHub Actions curl 用）
     if request.path == "/api/start" and request.method == "POST":
         token = request.args.get("token", "")
-        if token == WEBUI_TOKEN:
+        if _token_matches(token):
             return None
 
     # 其他页面检查 Cookie 或 Authorization header
-    token = request.cookies.get("aw_token", "")
-    if not token:
-        token = request.headers.get("Authorization", "").replace("Bearer ", "")
-
-    if token != WEBUI_TOKEN:
+    if not _token_matches(_extract_request_token()):
         # 如果是浏览器请求 / 且无 token，显示登录页
-        if request.path == "/" and request.method == "GET":
-            return render_template("login.html") if os.path.exists("templates/login.html") else ("🔒 AutoWeChat Cloud — 需要 token 认证", 401)
+        if request.path == "/" and request.method in ("GET", "HEAD"):
+            return _render_login_page()
         return jsonify({"status": "error", "message": "Unauthorized"}), 401
 
     return None
@@ -127,7 +162,7 @@ def run_workflow_thread(task_type="hotspots"):
         run_main(task_type=task_type)
     except WorkflowCancelled:
         try:
-            log_queue.put_nowait("SYSTEM | ⛔ 任务已被用户中断。\n")
+            log_queue.put_nowait("SYSTEM | [ABORT] 任务已被用户中断。\n")
         except queue.Full:
             logger.warning("日志队列已满，丢弃消息")
     except Exception as e:
@@ -156,6 +191,13 @@ def _mask_secret(value):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
+@app.route('/login', methods=['GET', 'HEAD'])
+def login_page():
+    if not CLOUD_MODE or not WEBUI_TOKEN or _token_matches(_extract_request_token()):
+        return redirect('/')
+    return _render_login_page()
 
 
 # ---- 定时调度 API ----
@@ -272,7 +314,7 @@ def pause_process():
     pause_event.clear()  # 设为暂停状态
     ProcessState.set_paused(True)
     try:
-        log_queue.put_nowait("SYSTEM | ⏸️ User requested pause...\n")
+        log_queue.put_nowait("SYSTEM | [PAUSE] User requested pause...\n")
     except queue.Full:
         logger.warning("日志队列已满，丢弃消息")
     return jsonify({"status": "success", "message": "Paused"})
@@ -286,7 +328,7 @@ def resume_process():
     pause_event.set()  # 恢复运行
     ProcessState.set_paused(False)
     try:
-        log_queue.put_nowait("SYSTEM | ▶️ User requested resume...\n")
+        log_queue.put_nowait("SYSTEM | [RESUME] User requested resume...\n")
     except queue.Full:
         logger.warning("日志队列已满，丢弃消息")
     return jsonify({"status": "success", "message": "Resumed"})
@@ -332,9 +374,11 @@ def handle_config():
             "WECHAT_APP_SECRET": _mask_secret(os.getenv("WECHAT_APP_SECRET", "")),
             "LLM_API_KEY": _mask_secret(os.getenv("LLM_API_KEY", "")),
             "QYWECHAT_WEBHOOK": os.getenv("QYWECHAT_WEBHOOK", ""),
-            "LLM_MODEL": os.getenv("LLM_MODEL", "deepseek-v4-pro"),
-            "GEMINI_API_KEY": _mask_secret(os.getenv("GEMINI_API_KEY", "")),
-            "IMAGE_GEN_MODEL": os.getenv("IMAGE_GEN_MODEL", "Google Gemini Imagen 3"),
+            "LLM_MODEL": os.getenv("LLM_MODEL", "deepseek-v4-flash"),
+            "DASHSCOPE_API_KEY": _mask_secret(os.getenv("DASHSCOPE_API_KEY", "")),
+            "QWEN_IMAGE_MODEL": os.getenv("QWEN_IMAGE_MODEL", "qwen-image-3.0"),
+            "QWEN_VL_MODEL": os.getenv("QWEN_VL_MODEL", "qwen-vl-max"),
+            "IMAGE_GEN_MODEL": os.getenv("IMAGE_GEN_MODEL", "qwen-image-3.0"),
             "DIAGRAM_PARALLEL_WORKERS": os.getenv("DIAGRAM_PARALLEL_WORKERS", "5"),
         })
     else:
@@ -345,8 +389,10 @@ def handle_config():
             import pathlib
             pathlib.Path(env_file).touch()
         for key in ["WECHAT_APP_ID", "WECHAT_APP_SECRET", "LLM_API_KEY",
-                     "QYWECHAT_WEBHOOK", "LLM_MODEL", "GEMINI_API_KEY",
-                     "IMAGE_GEN_MODEL", "DIAGRAM_PARALLEL_WORKERS"]:
+                     "QYWECHAT_WEBHOOK", "LLM_MODEL", "DASHSCOPE_API_KEY",
+                     "QWEN_IMAGE_MODEL", "QWEN_IMAGE_REDRAW_MODEL", "QWEN_VL_MODEL",
+                     "IMAGE_GEN_MODEL", "DIAGRAM_PARALLEL_WORKERS",
+                     "GITHUB_TOKEN", "LLM_BASE_URL", "ENABLE_FACT_SEARCH"]:
             if key in data and "*" not in str(data[key]):
                 value = str(data[key]).strip()
                 if len(value) > 500 or '\n' in value or '\r' in value:
@@ -363,10 +409,17 @@ def handle_config():
             config.WECHAT_APP_ID = os.getenv("WECHAT_APP_ID", "")
             config.WECHAT_APP_SECRET = os.getenv("WECHAT_APP_SECRET", "")
             config.LLM_API_KEY = os.getenv("LLM_API_KEY", "")
-            config.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+            config.DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
+            config.QWEN_IMAGE_MODEL = os.getenv("QWEN_IMAGE_MODEL", "qwen-image-3.0")
+            config.QWEN_VL_MODEL = os.getenv("QWEN_VL_MODEL", "qwen-vl-max")
+            config.QWEN_IMAGE_REDRAW_MODEL = os.getenv("QWEN_IMAGE_REDRAW_MODEL", "qwen-image-3.0-pro")
             config.QYWECHAT_WEBHOOK = os.getenv("QYWECHAT_WEBHOOK", "")
-            config.LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-v4-pro")
-            config.IMAGE_GEN_MODEL = os.getenv("IMAGE_GEN_MODEL", "Google Gemini Imagen 3")
+            config.LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-v4-flash")
+            config.IMAGE_GEN_MODEL = os.getenv("IMAGE_GEN_MODEL", "qwen-image-3.0")
+            config.LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.deepseek.com")
+            config.ENABLE_FACT_SEARCH = os.getenv("ENABLE_FACT_SEARCH", "True").lower() == "true"
+            if hasattr(config, "GITHUB_TOKEN"):
+                config.GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
             
             from core.aikepu.skill_tree import invalidate_published_ids_cache, reset_tree_cache
             invalidate_published_ids_cache()
@@ -392,18 +445,19 @@ def get_history():
         try:
             pub = _get_publisher()
             if pub and pub.access_token:
-                published_titles = pub.get_published_titles(count=100)
+                published_titles = pub.get_published_titles(count=100) or []
         except Exception as e:
             logger.warning("获取已发表标题失败: {}", e)
 
         def clean_t(t):
             return re.sub(r'[^\w\u4e00-\u9fff]', '', t).lower() if t else ""
 
-        published_titles_clean = {clean_t(pt) for pt in published_titles if pt}
+        published_titles_clean = {clean_t(pt) for pt in (published_titles or []) if pt}
         
         sent_list = []
         unsent_list = []
         
+        history_dict = {}
         for r in records:
             is_published = bool(getattr(r, 'is_published', False))
             if not is_published and r.success_status and r.title:
@@ -422,6 +476,10 @@ def get_history():
                 "preview_id": preview_id,
                 "error": r.error_log,
                 "source_type": r.source_type,
+                "source_url": getattr(r, 'source_url', None),
+                "quality_score": float(getattr(r, 'quality_score', 0.0) or 0.0),
+                "status": getattr(r, 'status', 'PENDING_REVIEW') or 'PENDING_REVIEW',
+                "fact_check_result": getattr(r, 'fact_check_result', None),
                 "date": r.publish_date,
                 "time": r.created_at.strftime("%H:%M:%S") if r.created_at else ""
             }
@@ -430,11 +488,18 @@ def get_history():
                 sent_list.append(item_data)
             else:
                 unsent_list.append(item_data)
+
+            date_str = r.publish_date
+            if date_str not in history_dict:
+                history_dict[date_str] = {"topics": [], "results": []}
+            if r.title not in history_dict[date_str]["topics"]:
+                history_dict[date_str]["topics"].append(r.title)
+            history_dict[date_str]["results"].append(item_data)
         
-        return jsonify({"sent": sent_list, "unsent": unsent_list})
+        return jsonify({"sent": sent_list, "unsent": unsent_list, "history": history_dict})
     except Exception as e:
         logger.exception("获取历史记录失败: {}", e)
-        return jsonify({"sent": [], "unsent": [], "error": str(e)})
+        return jsonify({"sent": [], "unsent": [], "history": {}, "error": str(e)})
     finally:
         db_manager.remove_session()
 
@@ -461,6 +526,97 @@ def mark_published():
         db_manager.remove_session()
 
 
+@app.route('/api/review/approve', methods=['POST'])
+def review_approve():
+    data = request.json or {}
+    record_id = data.get("id") or data.get("article_id")
+    if not record_id:
+        return jsonify({"status": "error", "message": "缺少文章 ID"}), 400
+    try:
+        from core.db.models import ArticleHistory
+        import hashlib
+        session = db_manager.get_session()
+        record = session.query(ArticleHistory).filter(ArticleHistory.id == record_id).first()
+        if not record:
+            return jsonify({"status": "error", "message": "记录不存在"}), 404
+
+        draft_pushed = False
+        media_id = record.media_id
+
+        # 尝试读取本地预览或草稿 HTML 内容
+        title_hash = hashlib.md5(record.title.encode('utf-8')).hexdigest() if record.title else ""
+        candidate_paths = [
+            os.path.join("data", "previews", f"{record.media_id}.html") if record.media_id else None,
+            os.path.join("data", "previews", f"fail_{title_hash}.html") if title_hash else None,
+            os.path.join("data", "previews", f"{record.id}.html"),
+        ]
+        html_content = ""
+        for path in candidate_paths:
+            if path and os.path.exists(path):
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        html_content = f.read()
+                    if html_content:
+                        break
+                except Exception:
+                    pass
+
+        try:
+            pub = _get_publisher()
+            if pub and pub.access_token and html_content:
+                thumb_media_id = getattr(record, 'thumb_media_id', None) or ""
+                if not thumb_media_id:
+                    cover_candidates = [
+                        os.path.abspath(os.path.join("assets", "default_aikepu_cover.png")),
+                        os.path.abspath(os.path.join("assets", "default_daily_cover.png")),
+                        os.path.abspath(os.path.join("static", "images", "github_fixed_cover.png")),
+                    ]
+                    for c_path in cover_candidates:
+                        if os.path.exists(c_path):
+                            uploaded_id = pub.upload_image(c_path)
+                            if uploaded_id:
+                                thumb_media_id = uploaded_id
+                                record.thumb_media_id = uploaded_id
+                                break
+
+                ok, res = pub.publish_and_notify(record.title, html_content, thumb_media_id)
+                if ok and isinstance(res, dict) and "media_id" in res:
+                    media_id = res["media_id"]
+                    draft_pushed = True
+        except Exception as pe:
+            logger.warning("人工核准推送至微信草稿箱异常: {}", pe)
+
+        if record.source_type == "aikepu" and record.source_url and "node/" in record.source_url:
+            try:
+                from core.aikepu.skill_tree import mark_published
+                node_id = record.source_url.split("node/")[-1]
+                if node_id:
+                    mark_published(node_id, record.title, draft_id=media_id, status="published" if draft_pushed else "draft")
+            except Exception as se:
+                logger.debug("同步技能树状态异常: {}", se)
+
+        # 更新状态为核准通过
+        record.status = "APPROVED"
+        record.success_status = True
+        if media_id:
+            record.media_id = media_id
+        session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "文章已人工核准" + ("并成功推送至微信草稿箱" if draft_pushed else ""),
+            "draft_pushed": draft_pushed,
+            "media_id": record.media_id,
+            "review_status": record.status,
+            "article_id": record.id
+        })
+    except Exception as e:
+        logger.exception("核准审核失败: {}", e)
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        db_manager.remove_session()
+
+
 @app.route('/api/system/llm_cache_stats', methods=['GET'])
 def get_llm_cache_stats():
     try:
@@ -478,6 +634,78 @@ def trigger_warmup():
         return jsonify({"status": "success" if success else "error"})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
+
+
+# ---- 知识体系连载（原 AI 科普技能树）主题包管理 ----
+@app.route('/api/kepu/trees', methods=['GET'])
+def list_kepu_trees():
+    """列出全部知识体系主题包"""
+    try:
+        from core.aikepu.skill_tree import list_knowledge_trees, get_active_tree_name
+        packs = list_knowledge_trees()
+        return jsonify({"status": "success", "active": get_active_tree_name(), "trees": packs})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/kepu/active', methods=['GET', 'POST'])
+def kepu_active_tree():
+    """查询/切换当前激活的知识主题包（切换后持久化）"""
+    try:
+        from core.aikepu.skill_tree import get_active_tree_name, set_active_tree, load_skill_tree
+        if request.method == 'POST':
+            data = request.get_json(silent=True) or {}
+            name = str(data.get("name", "")).strip()
+            if not name:
+                return jsonify({"status": "error", "message": "缺少 name 参数"}), 400
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name):
+                return jsonify({"status": "error", "message": "非法主题包名"}), 400
+            set_active_tree(name)
+        active = get_active_tree_name()
+        tree = load_skill_tree()
+        meta = tree.get("meta") or {}
+        return jsonify({
+            "status": "success",
+            "active": active,
+            "title": meta.get("column_name") or meta.get("name") or active,
+            "node_count": len(tree.get("nodes", [])),
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/kepu/import', methods=['POST'])
+def import_kepu_tree():
+    """导入用户自定义知识库 JSON（nodes DAG 结构，校验后保存并激活）"""
+    try:
+        import json
+        from core.aikepu.skill_tree import validate_tree_structure, TREES_DIR, set_active_tree
+        file = request.files.get("file")
+        if not file:
+            return jsonify({"status": "error", "message": "缺少 file 字段（multipart 表单）"}), 400
+        raw = file.read().decode("utf-8", errors="replace")
+        try:
+            data = json.loads(raw)
+        except Exception as e:
+            return jsonify({"status": "error", "message": f"JSON 解析失败: {e}"}), 400
+        ok, err = validate_tree_structure(data)
+        if not ok:
+            return jsonify({"status": "error", "message": err}), 400
+        name = str(request.form.get("name") or "").strip()
+        if not name:
+            meta = data.get("meta") or {}
+            name = str(meta.get("id") or "").strip() or "custom"
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name):
+            return jsonify({"status": "error", "message": "主题包名只能包含字母/数字/下划线/连字符"}), 400
+        os.makedirs(TREES_DIR, exist_ok=True)
+        path = os.path.join(TREES_DIR, f"{name}.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        set_active_tree(name)
+        logger.info("已导入知识主题包 [{}]: {} 个节点", name, len(data.get("nodes", [])))
+        return jsonify({"status": "success", "name": name, "node_count": len(data.get("nodes", []))})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route('/api/aikepu/tree_stats', methods=['GET'])
@@ -646,7 +874,7 @@ def delete_history():
                                 md_file_path = os.path.join(markdown_dir, fname)
                                 if os.path.exists(md_file_path):
                                     os.remove(md_file_path)
-                                    logger.info("  📄 成功同步删除 data/markdown 关联文档: {}", fname)
+                                    logger.info("  [File] 成功同步删除 data/markdown 关联文档: {}", fname)
             except Exception as md_del_err:
                 logger.warning("删除关联 Markdown 文件异常: {}", md_del_err)
             
@@ -671,8 +899,13 @@ def delete_history():
 
 @app.route('/api/preview/<preview_id>', methods=['GET'])
 def preview_draft(preview_id):
+    # 安全校验：仅允许合法字符，杜绝目录穿越漏洞
+    safe_preview_id = re.sub(r'[^a-zA-Z0-9_\-]', '', preview_id)
+    if not safe_preview_id:
+        return "Invalid preview_id", 400
+
     # 1. 尝试从本地 previews 文件夹读取
-    local_path = os.path.join("data", "previews", f"{preview_id}.html")
+    local_path = os.path.join("data", "previews", f"{safe_preview_id}.html")
     if os.path.exists(local_path):
         try:
             with open(local_path, "r", encoding="utf-8") as f:
@@ -745,59 +978,85 @@ def preview_draft(preview_id):
 
     fallback_html = """
     <!DOCTYPE html>
-    <html>
+    <html lang="zh-CN">
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>草稿预览说明</title>
         <style>
-            body {{
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                background-color: #0f172a;
-                color: #f8fafc;
-                padding: 40px 20px;
-                text-align: center;
+            *, *::before, *::after {
+                box-sizing: border-box;
                 margin: 0;
-            }}
-            .card {{
-                max-width: 500px;
+                padding: 0;
+            }
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+                background-color: #F8F9FB;
+                color: #0C0D0E;
+                padding: 48px 20px;
+                text-align: center;
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .card {
+                max-width: 480px;
+                width: 100%;
                 margin: 0 auto;
-                background: rgba(30, 41, 59, 0.7);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 16px;
-                padding: 30px;
-                box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
-                backdrop-filter: blur(10px);
-            }}
-            .icon {{
-                font-size: 48px;
-                margin-bottom: 16px;
-            }}
-            h3 {{
-                margin-top: 0;
-                color: #38bdf8;
-                font-size: 20px;
-            }}
-            p {{
-                color: #94a3b8;
-                font-size: 14px;
+                background: #FFFFFF;
+                border: 1px solid rgba(0, 0, 0, 0.06);
+                border-radius: 14px;
+                padding: 36px 28px;
+                box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 8px 24px rgba(15, 23, 42, 0.05), inset 0 1px 0 0 #FFFFFF;
+            }
+            .icon-wrapper {
+                width: 48px;
+                height: 48px;
+                border-radius: 12px;
+                background: rgba(79, 91, 213, 0.08);
+                color: #4F5BD5;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                margin-bottom: 18px;
+            }
+            h3 {
+                margin: 0 0 10px;
+                color: #0C0D0E;
+                font-size: 17px;
+                font-weight: 600;
+                letter-spacing: -0.01em;
+            }
+            p {
+                color: #5E6470;
+                font-size: 13px;
                 line-height: 1.6;
-            }}
-            .badge {{
+                margin: 6px 0;
+            }
+            .badge {
                 display: inline-block;
-                background: rgba(56, 189, 248, 0.15);
-                color: #38bdf8;
-                padding: 4px 12px;
-                border-radius: 20px;
+                background: rgba(79, 91, 213, 0.08);
+                color: #4F5BD5;
+                padding: 4px 14px;
+                border-radius: 9999px;
                 font-size: 12px;
-                margin-top: 15px;
-                border: 1px solid rgba(56, 189, 248, 0.3);
-            }}
+                font-weight: 500;
+                margin-top: 20px;
+                border: 1px solid rgba(79, 91, 213, 0.25);
+            }
         </style>
     </head>
     <body>
         <div class="card">
-            <div class="icon">📰</div>
+            <div class="icon-wrapper">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                </svg>
+            </div>
             <h3>微信远端草稿提示</h3>
             <p>该文章记录创建时间较早，或对应微信草稿已被发布/删除/转移。</p>
             <p>系统出于安全保护，未在本地留下额外静态缓存。</p>
@@ -851,8 +1110,8 @@ def test_sources():
 @app.route('/api/system/sd_status', methods=['GET'])
 def get_sd_status():
     try:
-        from utils.image_handler import detect_sd_api_url
-        sd_url = detect_sd_api_url()
+        from utils.image_handler import get_sd_api_url
+        sd_url = get_sd_api_url()
         if sd_url:
             return jsonify({
                 "connected": True,
@@ -928,6 +1187,50 @@ def upload_studio_image():
     })
 
 
+@app.route('/api/image-studio/redraw', methods=['POST'])
+def redraw_article_images():
+    """从公众号文章链接抓取参考图，用 Qwen-Image Pro 重绘为全新原创配图（合规二次创作）"""
+    data = request.get_json(silent=True) or {}
+    article_url = str(data.get("article_url", "")).strip()
+    try:
+        count = int(data.get("count", 4))
+    except (TypeError, ValueError):
+        count = 4
+    count = max(1, min(count, 6))
+    if not article_url.startswith(("http://", "https://")):
+        return jsonify({"status": "error", "message": "请提供有效的文章链接（http/https）"}), 400
+
+    try:
+        from utils.image_handler import scrape_article_images, _save_image_from_url, _try_qwen_image_redraw
+        refs = scrape_article_images(article_url, limit=count)
+        if not refs:
+            return jsonify({"status": "error", "message": "未能从文章中抓取到图片（文章可能已删除或需登录访问）"}), 404
+
+        out_dir = os.path.join("assets", "manual_images")
+        tmp_dir = os.path.join(out_dir, "_refs")
+        os.makedirs(out_dir, exist_ok=True)
+        os.makedirs(tmp_dir, exist_ok=True)
+
+        results = []
+        for i, ref_url in enumerate(refs[:count]):
+            ref_path = _save_image_from_url(ref_url, tmp_dir, prefix=f"ref_{i}", timeout=20)
+            if not ref_path:
+                continue
+            out = _try_qwen_image_redraw(ref_path, "重绘为微信公众号配图", out_dir, width=900, height=500)
+            if out:
+                results.append({"index": len(results) + 1, "url": f"/static_assets/{os.path.basename(out)}"})
+
+        if not results:
+            return jsonify({
+                "status": "error",
+                "message": "重绘失败：请检查 DASHSCOPE_API_KEY 与 QWEN_IMAGE_REDRAW_MODEL 配置",
+            }), 500
+        return jsonify({"status": "success", "count": len(results), "images": results})
+    except Exception as e:
+        logger.exception("参考图重绘失败")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @app.route('/api/image-studio/preview', methods=['POST'])
 def generate_studio_preview():
     """接收文章文本 + 图片映射关系，返回渲染后的 HTML 预览"""
@@ -960,17 +1263,33 @@ if __name__ == '__main__':
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
 
-    # 云端模式：绑 0.0.0.0 + 使用 $PORT
     if CLOUD_MODE:
         host = "0.0.0.0"
         port = int(os.getenv("PORT", "5000"))
-        print("☁️  AutoWeChat Cloud Mode")
+        print("[Cloud]  AutoWeChat Cloud Mode")
         print(f"   Listening on: http://0.0.0.0:{port}")
         if WEBUI_TOKEN:
             print("   Token auth: enabled")
     else:
         host = "127.0.0.1"
-        port = 5000
+        target_port = int(os.getenv("PORT", "5000"))
+
+        def is_port_available(h, p):
+            import socket
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                try:
+                    sock.bind((h, p))
+                    return True
+                except Exception:
+                    return False
+
+        port = target_port
+        if not is_port_available(host, port):
+            for fallback in [5001, 5002, 5050, 8080, 8888]:
+                if is_port_available(host, fallback):
+                    port = fallback
+                    break
+
         print(f"Web UI started: http://127.0.0.1:{port}")
 
         # 本地模式：自动打开浏览器
@@ -979,3 +1298,4 @@ if __name__ == '__main__':
         Timer(1.0, lambda: webbrowser.open(f"http://127.0.0.1:{port}")).start()
 
     app.run(host=host, port=port, debug=False)
+

@@ -1,10 +1,11 @@
 import json
 import re
+import urllib.parse
 from bs4 import BeautifulSoup
 from loguru import logger
-from typing import List
+from typing import List, Any
 
-from core.plugins.base import BaseSourcePlugin
+from core.plugins.base import BaseSourcePlugin, HotspotItem
 from config import NEWS_MAX_PER_SOURCE, API_60S_BASE, RSS_FEEDS
 from core.plugins.utils import (
     _is_source_disabled,
@@ -25,7 +26,7 @@ class ITHomePlugin(BaseSourcePlugin):
     def display_name(self) -> str:
         return "IT之家科技热点"
 
-    def fetch_data(self) -> List[str]:
+    def fetch_data(self) -> List[Any]:
         if _is_source_disabled(self.source_id):
             return []
         logger.info(f"  正在同步 {self.display_name}...")
@@ -39,7 +40,17 @@ class ITHomePlugin(BaseSourcePlugin):
                 for entry in feed.entries[:15]:
                     title = entry.get("title", "").strip()
                     if title and len(title) > 3 and _is_entry_fresh(entry) and _is_title_fresh(title):
-                        topics.append(title)
+                        url = entry.get("link", "").strip()
+                        summary = entry.get("summary", "") or entry.get("description", "")
+                        pub_time = entry.get("published", "") or entry.get("updated", "")
+                        topics.append(HotspotItem(
+                            title=title,
+                            url=url,
+                            source_id=self.source_id,
+                            summary=summary.strip(),
+                            publish_time=pub_time,
+                            tier=1
+                        ))
                 if topics:
                     _mark_source_success(self.source_id)
                     return topics[:NEWS_MAX_PER_SOURCE]
@@ -52,7 +63,18 @@ class ITHomePlugin(BaseSourcePlugin):
             res.encoding = 'utf-8'
             soup = BeautifulSoup(res.text, "html.parser")
             items = soup.select(".rt ul li a, .hot-list a, .sidebar-hot a")
-            topics = [item.get_text(strip=True) for item in items if len(item.get_text(strip=True)) > 3]
+            topics = []
+            for item in items:
+                text = item.get_text(strip=True)
+                if len(text) > 3 and _is_title_fresh(text):
+                    href = item.get("href", "").strip()
+                    url = urllib.parse.urljoin("https://www.ithome.com/", href) if href else ""
+                    topics.append(HotspotItem(
+                        title=text,
+                        url=url,
+                        source_id=self.source_id,
+                        tier=1
+                    ))
             if topics:
                 _mark_source_success(self.source_id)
             else:
@@ -72,7 +94,7 @@ class ThirtySixKrPlugin(BaseSourcePlugin):
     def display_name(self) -> str:
         return "36氪商业与AI动态"
 
-    def fetch_data(self) -> List[str]:
+    def fetch_data(self) -> List[Any]:
         if _is_source_disabled(self.source_id):
             return []
         logger.info(f"  正在同步 {self.display_name}...")
@@ -86,7 +108,17 @@ class ThirtySixKrPlugin(BaseSourcePlugin):
                 for entry in feed.entries[:15]:
                     title = entry.get("title", "").strip()
                     if title and len(title) > 4 and _is_entry_fresh(entry) and _is_title_fresh(title):
-                        topics.append(title)
+                        url = entry.get("link", "").strip()
+                        summary = entry.get("summary", "") or entry.get("description", "")
+                        pub_time = entry.get("published", "") or entry.get("updated", "")
+                        topics.append(HotspotItem(
+                            title=title,
+                            url=url,
+                            source_id=self.source_id,
+                            summary=summary.strip(),
+                            publish_time=pub_time,
+                            tier=1
+                        ))
                 if topics:
                     _mark_source_success(self.source_id)
                     return topics[:NEWS_MAX_PER_SOURCE]
@@ -98,7 +130,18 @@ class ThirtySixKrPlugin(BaseSourcePlugin):
             res.raise_for_status()
             soup = BeautifulSoup(res.text, "html.parser")
             items = soup.select(".item-title, .newsflash-title, [class*='title']")
-            topics = [item.get_text(strip=True) for item in items if len(item.get_text(strip=True)) > 4]
+            topics = []
+            for item in items:
+                text = item.get_text(strip=True)
+                if len(text) > 4 and _is_title_fresh(text):
+                    href = item.get("href", "").strip() or (item.find_parent("a").get("href", "").strip() if item.find_parent("a") else "")
+                    url = urllib.parse.urljoin("https://36kr.com", href) if href else ""
+                    topics.append(HotspotItem(
+                        title=text,
+                        url=url,
+                        source_id=self.source_id,
+                        tier=1
+                    ))
             if topics:
                 _mark_source_success(self.source_id)
             else:
@@ -118,7 +161,7 @@ class BaiduPlugin(BaseSourcePlugin):
     def display_name(self) -> str:
         return "百度实时热搜"
 
-    def fetch_data(self) -> List[str]:
+    def fetch_data(self) -> List[Any]:
         if _is_source_disabled(self.source_id):
             return []
         logger.info(f"  正在同步 {self.display_name}...")
@@ -137,8 +180,16 @@ class BaiduPlugin(BaseSourcePlugin):
                 for card in cards:
                     for item in card.get("content", []):
                         word = item.get("word", "") or item.get("query", "")
+                        raw_url = item.get("rawUrl", "") or item.get("url", "")
+                        desc = item.get("desc", "")
                         if word and len(word) > 1:
-                            topics.append(word)
+                            topics.append(HotspotItem(
+                                title=word,
+                                url=raw_url,
+                                source_id=self.source_id,
+                                summary=desc,
+                                tier=2
+                            ))
                 if topics:
                     _mark_source_success(self.source_id)
                     return topics[:NEWS_MAX_PER_SOURCE]
@@ -154,7 +205,13 @@ class BaiduPlugin(BaseSourcePlugin):
             for item in items:
                 text = item.get_text(strip=True)
                 if text and len(text) > 1:
-                    topics.append(text)
+                    href = item.get("href", "") or (item.find_parent("a").get("href", "") if item.find_parent("a") else "")
+                    topics.append(HotspotItem(
+                        title=text,
+                        url=href,
+                        source_id=self.source_id,
+                        tier=2
+                    ))
             if topics:
                 _mark_source_success(self.source_id)
             else:
@@ -174,7 +231,7 @@ class ZhihuPlugin(BaseSourcePlugin):
     def display_name(self) -> str:
         return "知乎热榜"
 
-    def fetch_data(self) -> List[str]:
+    def fetch_data(self) -> List[Any]:
         if _is_source_disabled(self.source_id):
             return []
         logger.info(f"  正在同步 {self.display_name}...")
@@ -187,8 +244,18 @@ class ZhihuPlugin(BaseSourcePlugin):
             for item in data.get("data", []):
                 target = item.get("target", {})
                 title = target.get("title", "")
+                link = target.get("url", "")
+                if not link and target.get("id"):
+                    link = f"https://www.zhihu.com/question/{target.get('id')}"
+                excerpt = target.get("excerpt", "")
                 if title and len(title) > 1:
-                    topics.append(title)
+                    topics.append(HotspotItem(
+                        title=title,
+                        url=link,
+                        source_id=self.source_id,
+                        summary=excerpt,
+                        tier=2
+                    ))
             if topics:
                 _mark_source_success(self.source_id)
                 return topics[:NEWS_MAX_PER_SOURCE]
@@ -202,15 +269,20 @@ class ZhihuPlugin(BaseSourcePlugin):
             if data.get("code") == 200:
                 for item in data.get("data", []):
                     title = item.get("title", "").strip()
+                    link = item.get("url", "").strip()
                     if title and len(title) > 1:
-                        topics.append(title)
+                        topics.append(HotspotItem(
+                            title=title,
+                            url=link,
+                            source_id=self.source_id,
+                            tier=2
+                        ))
                 if topics:
                     _mark_source_success(self.source_id)
                     return topics[:NEWS_MAX_PER_SOURCE]
         except Exception as e:
             logger.warning(f"  {self.display_name} 60s API 也失败: {e}")
             
-        # Optional: Selenium fallback could be added here
         return topics[:NEWS_MAX_PER_SOURCE]
 
 
@@ -223,7 +295,7 @@ class CsdnPlugin(BaseSourcePlugin):
     def display_name(self) -> str:
         return "CSDN全站热榜"
 
-    def fetch_data(self) -> List[str]:
+    def fetch_data(self) -> List[Any]:
         if _is_source_disabled(self.source_id):
             return []
         logger.info(f"  正在同步 {self.display_name}...")
@@ -235,8 +307,16 @@ class CsdnPlugin(BaseSourcePlugin):
             data = res.json()
             for item in data.get("data", []):
                 title = item.get("articleTitle", "").strip()
+                link = item.get("articleDetailUrl", "").strip()
+                desc = item.get("description", "").strip()
                 if title:
-                    topics.append(title)
+                    topics.append(HotspotItem(
+                        title=title,
+                        url=link,
+                        source_id=self.source_id,
+                        summary=desc,
+                        tier=2
+                    ))
             _mark_source_success(self.source_id)
         except Exception as e:
             logger.warning(f"  {self.display_name}抓取失败: {e}")
@@ -253,7 +333,7 @@ class RssPlugin(BaseSourcePlugin):
     def display_name(self) -> str:
         return "RSS聚合精选"
 
-    def fetch_data(self) -> List[str]:
+    def fetch_data(self) -> List[Any]:
         if _is_source_disabled(self.source_id):
             return []
         logger.info(f"  正在同步 {self.display_name}...")
@@ -276,7 +356,17 @@ class RssPlugin(BaseSourcePlugin):
                     for entry in feed.entries[:10]:
                         title = entry.get("title", "").strip()
                         if title and _is_entry_fresh(entry) and _is_title_fresh(title):
-                            topics.append(title)
+                            url = entry.get("link", "").strip()
+                            summary = entry.get("summary", "") or entry.get("description", "")
+                            pub_time = entry.get("published", "") or entry.get("updated", "")
+                            topics.append(HotspotItem(
+                                title=title,
+                                url=url,
+                                source_id=self.source_id,
+                                summary=summary.strip(),
+                                publish_time=pub_time,
+                                tier=1
+                            ))
             except Exception as e:
                 logger.warning(f"  RSS 源 {feed_url} 解析失败: {e}")
                 
@@ -297,7 +387,7 @@ class PoliticsPlugin(BaseSourcePlugin):
     def display_name(self) -> str:
         return "时政科技交叉"
 
-    def fetch_data(self) -> List[str]:
+    def fetch_data(self) -> List[Any]:
         if _is_source_disabled(self.source_id):
             return []
         logger.info(f"  正在同步 {self.display_name}...")
@@ -318,7 +408,14 @@ class PoliticsPlugin(BaseSourcePlugin):
                 for link in links:
                     title = link.get_text(strip=True)
                     if title and 8 < len(title) < 80 and _is_title_fresh(title):
-                        topics.append(title)
+                        href = link.get("href", "").strip()
+                        url = urllib.parse.urljoin(site_url, href) if href else ""
+                        topics.append(HotspotItem(
+                            title=title,
+                            url=url,
+                            source_id=self.source_id,
+                            tier=1
+                        ))
                 if links:
                     has_success = True
             except Exception as e:
@@ -340,7 +437,17 @@ class PoliticsPlugin(BaseSourcePlugin):
                             for entry in feed.entries[:10]:
                                 title = entry.get("title", "").strip()
                                 if title and len(title) > 4 and _is_entry_fresh(entry) and _is_title_fresh(title):
-                                    topics.append(title)
+                                    url = entry.get("link", "").strip()
+                                    summary = entry.get("summary", "") or entry.get("description", "")
+                                    pub_time = entry.get("published", "") or entry.get("updated", "")
+                                    topics.append(HotspotItem(
+                                        title=title,
+                                        url=url,
+                                        source_id=self.source_id,
+                                        summary=summary.strip(),
+                                        publish_time=pub_time,
+                                        tier=1
+                                    ))
                     except Exception as e:
                         logger.warning(f"  时政 RSS {feed_url} 失败: {e}")
             except ImportError:
@@ -363,7 +470,7 @@ class ToutiaoPlugin(BaseSourcePlugin):
     def display_name(self) -> str:
         return "今日头条热榜"
 
-    def fetch_data(self) -> List[str]:
+    def fetch_data(self) -> List[Any]:
         if _is_source_disabled(self.source_id):
             return []
         logger.info(f"  正在同步 {self.display_name}...")
@@ -375,8 +482,14 @@ class ToutiaoPlugin(BaseSourcePlugin):
             data = res.json()
             for item in data.get("data", []):
                 title = item.get("Title", "").strip()
+                link = item.get("Url", "").strip()
                 if title and len(title) > 1:
-                    topics.append(title)
+                    topics.append(HotspotItem(
+                        title=title,
+                        url=link,
+                        source_id=self.source_id,
+                        tier=2
+                    ))
             if topics:
                 _mark_source_success(self.source_id)
                 return topics[:NEWS_MAX_PER_SOURCE]
@@ -390,8 +503,14 @@ class ToutiaoPlugin(BaseSourcePlugin):
             if data.get("code") == 200:
                 for item in data.get("data", []):
                     title = item.get("title", "").strip()
+                    url = item.get("url", "").strip()
                     if title and len(title) > 1:
-                        topics.append(title)
+                        topics.append(HotspotItem(
+                            title=title,
+                            url=url,
+                            source_id=self.source_id,
+                            tier=2
+                        ))
                 if topics:
                     _mark_source_success(self.source_id)
                     return topics[:NEWS_MAX_PER_SOURCE]
@@ -410,7 +529,7 @@ class ThePaperPlugin(BaseSourcePlugin):
     def display_name(self) -> str:
         return "澎湃新闻"
 
-    def fetch_data(self) -> List[str]:
+    def fetch_data(self) -> List[Any]:
         if _is_source_disabled(self.source_id):
             return []
         logger.info(f"  正在同步 {self.display_name}...")
@@ -425,7 +544,14 @@ class ThePaperPlugin(BaseSourcePlugin):
             for link in links:
                 title = link.get_text(strip=True)
                 if title and 8 < len(title) < 80 and _is_title_fresh(title):
-                    topics.append(title)
+                    href = link.get("href", "").strip()
+                    full_url = urllib.parse.urljoin(url, href) if href else ""
+                    topics.append(HotspotItem(
+                        title=title,
+                        url=full_url,
+                        source_id=self.source_id,
+                        tier=1
+                    ))
             if topics:
                 _mark_source_success(self.source_id)
             else:
@@ -445,11 +571,12 @@ class HuxiuPlugin(BaseSourcePlugin):
     def display_name(self) -> str:
         return "虎嗅网深度"
 
-    def fetch_data(self) -> List[str]:
+    def fetch_data(self) -> List[Any]:
         if _is_source_disabled(self.source_id):
             return []
         logger.info(f"  正在同步 {self.display_name}...")
         topics = []
+        seen_titles = set()
         try:
             res = HTTP_SESSION.get("https://www.huxiu.com/", headers=get_headers(), timeout=12)
             res.raise_for_status()
@@ -458,21 +585,35 @@ class HuxiuPlugin(BaseSourcePlugin):
             links = soup.select("a[href*='/article/']")
             for link in links:
                 title = link.get_text(strip=True)
-                if title and 8 < len(title) < 80 and _is_title_fresh(title) and title not in topics:
-                    topics.append(title)
+                if title and 8 < len(title) < 80 and _is_title_fresh(title) and title not in seen_titles:
+                    seen_titles.add(title)
+                    href = link.get("href", "").strip()
+                    full_url = urllib.parse.urljoin("https://www.huxiu.com/", href) if href else ""
+                    topics.append(HotspotItem(
+                        title=title,
+                        url=full_url,
+                        source_id=self.source_id,
+                        tier=1
+                    ))
             if topics:
                 _mark_source_success(self.source_id)
                 return topics[:NEWS_MAX_PER_SOURCE]
         except Exception as e:
             logger.warning(f"  {self.display_name}抓取失败: {e}，将尝试 Selenium 降级")
 
-        # 降级至 Selenium
+        # 降级至 Selenium 前先检测环境支持
+        from utils.spider import is_browser_available
+        if not is_browser_available():
+            logger.info("  虎嗅网深度 HTTP 触发防护，当前环境未安装无头浏览器，安全跳过 Selenium 尝试")
+            _mark_source_failure(self.source_id)
+            return []
         return self._fetch_huxiu_selenium()
 
-    def _fetch_huxiu_selenium(self) -> List[str]:
+    def _fetch_huxiu_selenium(self) -> List[Any]:
         logger.info("  正在同步 虎嗅网 (Selenium 降级)...")
         browser = None
         topics = []
+        seen_titles = set()
         try:
             from utils.spider import build_stealth_browser
             browser = build_stealth_browser(headless=True)
@@ -485,8 +626,15 @@ class HuxiuPlugin(BaseSourcePlugin):
                 href = a.get("href", "")
                 if "/article/" in href:
                     title = a.get_text(strip=True)
-                    if title and 8 < len(title) < 80 and _is_title_fresh(title) and title not in topics:
-                        topics.append(title)
+                    if title and 8 < len(title) < 80 and _is_title_fresh(title) and title not in seen_titles:
+                        seen_titles.add(title)
+                        full_url = urllib.parse.urljoin("https://www.huxiu.com/", href) if href else ""
+                        topics.append(HotspotItem(
+                            title=title,
+                            url=full_url,
+                            source_id=self.source_id,
+                            tier=1
+                        ))
             if topics:
                 _mark_source_success(self.source_id)
             else:
@@ -496,9 +644,11 @@ class HuxiuPlugin(BaseSourcePlugin):
             _mark_source_failure(self.source_id)
         finally:
             if browser:
-                browser.quit()
+                try:
+                    browser.quit()
+                except Exception:
+                    pass
         return topics[:NEWS_MAX_PER_SOURCE]
-
 
 
 class DouyinPlugin(BaseSourcePlugin):
@@ -510,7 +660,7 @@ class DouyinPlugin(BaseSourcePlugin):
     def display_name(self) -> str:
         return "抖音热搜"
 
-    def fetch_data(self) -> List[str]:
+    def fetch_data(self) -> List[Any]:
         if _is_source_disabled(self.source_id):
             return []
         logger.info(f"  正在同步 {self.display_name}...")
@@ -522,8 +672,14 @@ class DouyinPlugin(BaseSourcePlugin):
             if data.get("code") == 200:
                 for item in data.get("data", []):
                     title = item.get("title", "").strip()
+                    url = item.get("url", "").strip()
                     if title and len(title) > 1:
-                        topics.append(title)
+                        topics.append(HotspotItem(
+                            title=title,
+                            url=url,
+                            source_id=self.source_id,
+                            tier=2
+                        ))
             if topics:
                 _mark_source_success(self.source_id)
             else:
@@ -532,6 +688,7 @@ class DouyinPlugin(BaseSourcePlugin):
             logger.warning(f"  {self.display_name}抓取失败: {e}")
             _mark_source_failure(self.source_id)
         return topics[:NEWS_MAX_PER_SOURCE]
+
 
 class WeiboPlugin(BaseSourcePlugin):
     @property
@@ -542,7 +699,7 @@ class WeiboPlugin(BaseSourcePlugin):
     def display_name(self) -> str:
         return "微博实时热搜"
 
-    def fetch_data(self) -> List[str]:
+    def fetch_data(self) -> List[Any]:
         if _is_source_disabled(self.source_id):
             return []
 
@@ -557,7 +714,13 @@ class WeiboPlugin(BaseSourcePlugin):
             for item in data.get("data", {}).get("realtime", []):
                 word = item.get("word", "").strip()
                 if word and len(word) > 1 and "公告" not in word:
-                    topics.append(word)
+                    url = f"https://s.weibo.com/weibo?q={urllib.parse.quote(word)}"
+                    topics.append(HotspotItem(
+                        title=word,
+                        url=url,
+                        source_id=self.source_id,
+                        tier=2
+                    ))
             if topics:
                 _mark_source_success(self.source_id)
                 return topics[:NEWS_MAX_PER_SOURCE]
@@ -571,13 +734,24 @@ class WeiboPlugin(BaseSourcePlugin):
             if data.get("code") == 200:
                 for item in data.get("data", []):
                     title = item.get("title", "").strip()
+                    url = item.get("url", "").strip()
                     if title and len(title) > 1:
-                        topics.append(title)
+                        topics.append(HotspotItem(
+                            title=title,
+                            url=url,
+                            source_id=self.source_id,
+                            tier=2
+                        ))
                 if topics:
                     _mark_source_success(self.source_id)
                     return topics[:NEWS_MAX_PER_SOURCE]
         except Exception as e:
-            logger.warning(f"  微博 60s API 也失败: {e}，降级至 Selenium")
+            logger.warning(f"  微博 60s API 也失败: {e}，准备尝试 Selenium 降级")
+            from utils.spider import is_browser_available
+            if not is_browser_available():
+                logger.info("  微博热搜 当前环境未安装无头浏览器，安全跳过 Selenium 尝试")
+                _mark_source_failure(self.source_id)
+                return []
             return self._fetch_weibo_selenium()
         
         return topics
@@ -598,12 +772,22 @@ class WeiboPlugin(BaseSourcePlugin):
             for item in items:
                 t = item.get_text(strip=True)
                 if t and t != "公告" and not t.startswith("直播"):
-                    topics.append(t)
+                    href = item.get("href", "")
+                    full_url = urllib.parse.urljoin("https://s.weibo.com", href) if href else ""
+                    topics.append(HotspotItem(
+                        title=t,
+                        url=full_url,
+                        source_id=self.source_id,
+                        tier=2
+                    ))
             _mark_source_success(self.source_id)
         except Exception as e:
             logger.warning(f"  微博 Selenium 抓取也失败: {e}")
             _mark_source_failure(self.source_id)
         finally:
             if browser:
-                browser.quit()
+                try:
+                    browser.quit()
+                except Exception:
+                    pass
         return topics[:NEWS_MAX_PER_SOURCE]

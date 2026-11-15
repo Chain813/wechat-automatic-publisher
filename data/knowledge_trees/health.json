@@ -1,0 +1,75 @@
+{
+  "meta": {
+    "name": "健康科普知识体系",
+    "column_name": "健康科普",
+    "description": "从睡眠营养到代谢长寿的日常健康管理路线，按先修依赖拓扑排序",
+    "version": "1.0",
+    "created": "2026-08-14"
+  },
+  "nodes": [
+    {
+      "id": "sleep-science",
+      "title": "睡眠科学：生物钟与睡眠周期",
+      "tags": ["睡眠", "生物钟"],
+      "prerequisites": [],
+      "difficulty": 1,
+      "summary": "理解昼夜节律与 90 分钟睡眠周期，用光照、温度与作息习惯改善睡眠质量"
+    },
+    {
+      "id": "nutrition-basics",
+      "title": "营养基础：三大营养素与均衡膳食",
+      "tags": ["营养", "饮食"],
+      "prerequisites": [],
+      "difficulty": 1,
+      "summary": "拆解碳水、蛋白质、脂肪的角色，用膳食结构框架代替流行饮食法的盲目跟风"
+    },
+    {
+      "id": "exercise-basics",
+      "title": "运动基础：有氧、力量与恢复",
+      "tags": ["运动", "体能"],
+      "prerequisites": [],
+      "difficulty": 1,
+      "summary": "区分有氧与抗阻训练的收益，制定普通人可坚持的每周运动与恢复节奏"
+    },
+    {
+      "id": "posture-spine",
+      "title": "久坐与脊柱健康：办公族护腰指南",
+      "tags": ["久坐", "脊柱"],
+      "prerequisites": ["exercise-basics"],
+      "difficulty": 2,
+      "summary": "理解久坐对腰椎的负荷机制，用坐姿调整、工位改造与微运动对抗职业病"
+    },
+    {
+      "id": "gut-health",
+      "title": "肠道健康：菌群与免疫",
+      "tags": ["肠道", "菌群"],
+      "prerequisites": ["nutrition-basics"],
+      "difficulty": 2,
+      "summary": "认识肠道菌群的代谢与免疫角色，用膳食纤维与发酵食物科学养菌"
+    },
+    {
+      "id": "mental-health",
+      "title": "心理健康：压力管理与情绪调节",
+      "tags": ["心理", "压力"],
+      "prerequisites": ["sleep-science"],
+      "difficulty": 2,
+      "summary": "识别压力的生理信号，用认知重构、呼吸训练与社交支持建立情绪韧性"
+    },
+    {
+      "id": "metabolic-health",
+      "title": "代谢健康：血糖、血脂与体重管理",
+      "tags": ["代谢", "体重"],
+      "prerequisites": ["nutrition-basics", "exercise-basics"],
+      "difficulty": 3,
+      "summary": "从胰岛素抵抗看代谢综合征的成因，制定不靠节食的长期体重管理策略"
+    },
+    {
+      "id": "longevity",
+      "title": "长寿科学：衰老机制与健康寿命",
+      "tags": ["长寿", "抗衰"],
+      "prerequisites": ["metabolic-health", "gut-health", "mental-health"],
+      "difficulty": 4,
+      "summary": "梳理衰老的标志性机制，区分证据充分与尚存争议的抗衰干预，聚焦健康寿命"
+    }
+  ]
+}

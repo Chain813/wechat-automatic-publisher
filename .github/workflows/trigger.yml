@@ -1,10 +1,10 @@
 name: "🚀 AutoWeChat 定时发布"
 
 on:
-  # 定时触发 (已暂停，如需恢复取消注释)
-  # schedule:
-  #   # 每天早上 8:00 (北京时间) = 00:00 UTC
-  #   - cron: "0 0 * * *"
+  # 定时触发：每天早上 8:00 (北京时间) = 00:00 UTC
+  # 公开仓库免费无限额度；私有仓库每月 2000 分钟免费
+  schedule:
+    - cron: "0 0 * * *"
 
   # 手动触发（GitHub 手机 App 或网页 → Actions → Run workflow）
   workflow_dispatch:
@@ -13,16 +13,17 @@ on:
         description: "任务类型"
         required: true
         type: choice
-        default: "aikepu"
+        default: "hotspots"
         options:
           - hotspots
           - github
           - aikepu
+          - daily_knowledge
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
       - name: "📥 拉取代码"
@@ -39,23 +40,13 @@ jobs:
           sudo apt-get install -y -qq graphviz
           pip install -r requirements.txt
 
-      - name: "🎓 运行 AI科普"
-        if: ${{ github.event_name == 'schedule' || github.event.inputs.task_type == 'aikepu' }}
-        env:
-          WECHAT_APP_ID: ${{ secrets.WECHAT_APP_ID }}
-          WECHAT_APP_SECRET: ${{ secrets.WECHAT_APP_SECRET }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          SD_ENABLED: "False"
-        run: python main.py --task aikepu
-
       - name: "📡 运行 热点发布"
         if: ${{ github.event.inputs.task_type == 'hotspots' }}
         env:
           WECHAT_APP_ID: ${{ secrets.WECHAT_APP_ID }}
           WECHAT_APP_SECRET: ${{ secrets.WECHAT_APP_SECRET }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           SD_ENABLED: "False"
         run: python main.py --task hotspots
 
@@ -65,17 +56,39 @@ jobs:
           WECHAT_APP_ID: ${{ secrets.WECHAT_APP_ID }}
           WECHAT_APP_SECRET: ${{ secrets.WECHAT_APP_SECRET }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           SD_ENABLED: "False"
         run: python main.py --task github
+
+      - name: "🎓 运行 体系连载"
+        if: ${{ github.event.inputs.task_type == 'aikepu' }}
+        env:
+          WECHAT_APP_ID: ${{ secrets.WECHAT_APP_ID }}
+          WECHAT_APP_SECRET: ${{ secrets.WECHAT_APP_SECRET }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          KNOWLEDGE_TREE: ${{ vars.KNOWLEDGE_TREE }}
+          SD_ENABLED: "False"
+        run: python main.py --task aikepu
+
+      - name: "💡 运行 每日小知识"
+        if: ${{ github.event.inputs.task_type == 'daily_knowledge' }}
+        env:
+          WECHAT_APP_ID: ${{ secrets.WECHAT_APP_ID }}
+          WECHAT_APP_SECRET: ${{ secrets.WECHAT_APP_SECRET }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          SD_ENABLED: "False"
+        run: python main.py --task daily_knowledge
 
       - name: "💾 保存历史记录"
         if: always()
         run: |
           git config user.name "AutoWeChat Bot"
           git config user.email "bot@autowechat.local"
-          git add data/aikepu_history.json 2>/dev/null || true
+          git add data/cache/aikepu/aikepu_history.json 2>/dev/null || true
+          git add data/auto_publish.sqlite 2>/dev/null || true
+          git add data/daily_knowledge.sqlite 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "无变化，跳过提交"
           else

@@ -18,19 +18,25 @@ from config import GITHUB_SEARCH_STARS_THRESHOLDS, GITHUB_SEARCH_LANGUAGES
 HTTP_SESSION = build_api_session()
 
 def _load_github_history():
-    session = db_manager.get_session()
-    records = session.query(ArticleHistory.title).filter_by(source_type="github_repo").all()
-    return set(r.title for r in records)
+    try:
+        session = db_manager.get_session()
+        records = session.query(ArticleHistory.title).filter_by(source_type="github_repo").all()
+        return set(r.title for r in records)
+    finally:
+        db_manager.remove_session()
 
 def save_github_history(new_repos):
-    session = db_manager.get_session()
-    today = datetime.now().strftime("%Y-%m-%d")
-    for repo in new_repos:
-        existing = session.query(ArticleHistory).filter_by(title=repo, source_type="github_repo").first()
-        if not existing:
-            ah = ArticleHistory(title=repo, source_type="github_repo", publish_date=today, success_status=True)
-            session.add(ah)
-    session.commit()
+    try:
+        session = db_manager.get_session()
+        today = datetime.now().strftime("%Y-%m-%d")
+        for repo in new_repos:
+            existing = session.query(ArticleHistory).filter_by(title=repo, source_type="github_repo").first()
+            if not existing:
+                ah = ArticleHistory(title=repo, source_type="github_repo", publish_date=today, success_status=True)
+                session.add(ah)
+        session.commit()
+    finally:
+        db_manager.remove_session()
 
 # ---- 优先匹配：架构图、流程图、演示截图等 ----
 ARCHITECTURE_KEYWORDS = [
@@ -72,10 +78,14 @@ LANG_DIAGRAM_MAP = {
 
 
 def _get_github_client():
-    """获取 PyGithub 客户端（支持可选 token）"""
-    token = os.getenv("GITHUB_TOKEN", "")
+    """获取 PyGithub 客户端（优先读取环境变量 GITHUB_TOKEN，未配置则匿名模式）"""
+    token = os.getenv("GITHUB_TOKEN", "").strip() or os.getenv("GITHUB_API_KEY", "").strip()
     if token:
-        return Github(token)
+        try:
+            from github import Auth
+            return Github(auth=Auth.Token(token))
+        except Exception:
+            return Github(token)
     return Github()
 
 
@@ -121,14 +131,90 @@ def _find_other_docs_files(repo):
 
 
 # ================================================================
-#  Demo URL 多策略检测
+#  Demo URL 多策略检测 & 安全域名白名单
 # ================================================================
-# 已知部署平台域名
-_DEPLOY_PLATFORMS = [
-    'vercel.app', 'netlify.app', 'github.io', 'onrender.com',
-    'fly.dev', 'railway.app', 'herokuapp.com', 'surge.sh',
-    'pages.dev', 'workers.dev', 'glitch.me', 'repl.co',
+# 截图安全域名白名单
+SAFE_SCREENSHOT_DOMAINS = [
+    'github.io', 'vercel.app', 'netlify.app', 'pages.dev',
+    'workers.dev', 'fly.dev', 'railway.app', 'onrender.com',
+    'herokuapp.com', 'surge.sh', 'glitch.me', 'repl.co',
+    'huggingface.co', 'hf.space', 'streamlit.app',
 ]
+_DEPLOY_PLATFORMS = SAFE_SCREENSHOT_DOMAINS
+
+
+def is_safe_screenshot_url(url: str) -> bool:
+    """
+    检查在线 UI / Demo 链接是否属于安全可信任域名白名单。
+    非白名单域名一律拒绝启动无头浏览器截图，防止钓鱼和恶意网页。
+    """
+    if not url or not isinstance(url, str):
+        return False
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url.strip())
+        if parsed.scheme not in ("http", "https"):
+            return False
+        hostname = (parsed.hostname or "").lower()
+        if not hostname:
+            return False
+        for domain in SAFE_SCREENSHOT_DOMAINS:
+            domain = domain.lower()
+            if hostname == domain or hostname.endswith("." + domain):
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def is_qualified_repository(repo) -> tuple[bool, str]:
+    """
+    GitHub 真实性四维过滤器：
+    1. 拦截已归档仓库 (archived)
+    2. 拦截空壳 PPT 仓库 (size < 50KB)
+    3. 拦截刷 Star 仓库 (forks/stars 比例 < 0.015)
+
+    返回: (is_qualified: bool, reason: str)
+    """
+    if repo is None:
+        return False, "无效的仓库对象"
+
+    # 1. 归档检测
+    archived = getattr(repo, "archived", None)
+    if archived is None and isinstance(repo, dict):
+        archived = repo.get("archived", False)
+    if archived:
+        return False, "仓库已归档 (archived)"
+
+    # 2. 空壳检测 (size < 50KB)
+    size = getattr(repo, "size", None)
+    if size is None and isinstance(repo, dict):
+        size = repo.get("size", 0)
+    size = size if size is not None else 0
+    if size < 50:
+        return False, f"仓库体积过小 ({size}KB < 50KB)，疑似空壳项目"
+
+    # 3. 刷 Star 检测 (forks/stars 比例 < 0.015)
+    stars = getattr(repo, "stargazers_count", None)
+    if stars is None:
+        stars = getattr(repo, "stars", None)
+    if stars is None and isinstance(repo, dict):
+        stars = repo.get("stargazers_count", repo.get("stars", 0))
+    stars = stars if stars is not None else 0
+
+    forks = getattr(repo, "forks_count", None)
+    if forks is None:
+        forks = getattr(repo, "forks", None)
+    if forks is None and isinstance(repo, dict):
+        forks = repo.get("forks_count", repo.get("forks", 0))
+    forks = forks if forks is not None else 0
+
+    if stars > 0:
+        ratio = forks / stars
+        if ratio < 0.015:
+            return False, f"Fork/Star 比例过低 ({ratio:.4f} < 0.015)，疑似刷量仓库"
+
+    return True, "合格"
 
 
 def _detect_demo_url(repo, chinese_readme_excerpt, readme_excerpt):
@@ -239,6 +325,10 @@ def fetch_one_worthy_project():
                 raw_repos = list(g.search_repositories(query=query, sort="stars", order="desc")[offset:offset+20])
                 for repo in raw_repos:
                     if repo.full_name not in history:
+                        qualified, reason = is_qualified_repository(repo)
+                        if not qualified:
+                            logger.info(f"  ⏭️ 过滤不合格仓库 {repo.full_name}: {reason}")
+                            continue
                         candidates.append(repo)
                         if len(candidates) >= 20:
                             break
@@ -306,6 +396,11 @@ def fetch_one_worthy_project():
         # 多策略提取 Demo/主页 URL
         homepage_url = _detect_demo_url(best_repo, chinese_readme_excerpt, readme_excerpt)
 
+        try:
+            repo_topics = best_repo.get_topics() if hasattr(best_repo, "get_topics") else getattr(best_repo, "topics", [])
+        except Exception:
+            repo_topics = getattr(best_repo, "topics", []) or []
+
         return [{
             "repo": best_repo.full_name,
             "desc": best_repo.description or "暂无描述",
@@ -315,7 +410,7 @@ def fetch_one_worthy_project():
             "chinese_readme_excerpt": chinese_readme_excerpt,
             "tree_image_path": tree_image_path,
             "stars": best_repo.stargazers_count,
-            "topics": best_repo.get_topics(),
+            "topics": repo_topics,
             "homepage": homepage_url,
             "other_images": other_images,
             "readme_file_path": readme_file_path,
@@ -612,7 +707,7 @@ def _render_tree_text_to_png(repo_name, tree_items, save_dir):
 
     # 加载字体
     font = None
-    for fp in ["C:/Windows/Fonts/consola.ttf", "C:/Windows/Fonts/msyh.ttc"]:
+    for fp in ["C:/Windows/Fonts/consola.ttf", "C:/Windows/Fonts/msyh.ttc", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"]:
         if os.path.exists(fp):
             try:
                 font = ImageFont.truetype(fp, font_size)
@@ -822,7 +917,10 @@ def take_github_readme_screenshot(repo_name, readme_file_path=None, save_dir="as
     import os
     import time
     from PIL import Image
-    from utils.spider import build_stealth_browser
+    from utils.spider import build_stealth_browser, is_browser_available
+    if not is_browser_available():
+        logger.info("  [GitHub文档截图] 当前云端环境未安装无头浏览器，安全跳过截图")
+        return None
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
@@ -866,7 +964,10 @@ def take_github_readme_screenshot(repo_name, readme_file_path=None, save_dir="as
         return None
     finally:
         if browser:
-            browser.quit()
+            try:
+                browser.quit()
+            except Exception:
+                pass
 
     if not os.path.exists(save_path):
         return None
@@ -905,13 +1006,18 @@ def take_live_ui_screenshot(repo_name, homepage_url, save_dir="assets"):
     """
     通过无头浏览器直接访问项目的主页/在线 Demo 地址，并截取 UI 截图。
     放弃本地 Clone/部署策略，规避安全风险与依赖构建失败问题。
+    包含安全域名白名单防护，非白名单链接绝不启动 Selenium 访问。
     """
     import os
     from PIL import Image
-    from utils.spider import build_stealth_browser
 
-    if not homepage_url or not homepage_url.startswith("http"):
-        logger.warning(f"  跳过在线 UI 截图：主页地址 '{homepage_url}' 无效")
+    if not homepage_url or not is_safe_screenshot_url(homepage_url):
+        logger.warning(f"  跳过在线 UI 截图：主页地址 '{homepage_url}' 不在安全域名白名单中或无效")
+        return None
+
+    from utils.spider import build_stealth_browser, is_browser_available
+    if not is_browser_available():
+        logger.info("  [Demo演示截图] 当前云端环境未安装无头浏览器，安全跳过截图")
         return None
 
     logger.info(f"  🖥️ 正在截取在线 UI 页面: {homepage_url}")
@@ -958,4 +1064,14 @@ def take_live_ui_screenshot(repo_name, homepage_url, save_dir="assets"):
                 browser.quit()
             except Exception:
                 pass
-__all__ = ["fetch_one_worthy_project", "generate_code_screenshot", "get_repo_code_snippet", "save_github_history", "take_github_readme_screenshot", "take_live_ui_screenshot"]
+__all__ = [
+    "fetch_one_worthy_project",
+    "generate_code_screenshot",
+    "get_repo_code_snippet",
+    "is_qualified_repository",
+    "is_safe_screenshot_url",
+    "SAFE_SCREENSHOT_DOMAINS",
+    "save_github_history",
+    "take_github_readme_screenshot",
+    "take_live_ui_screenshot",
+]

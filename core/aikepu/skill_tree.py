@@ -1,7 +1,8 @@
 """
 ============================================================
-  AI 技能树引擎 v1.0
+  知识体系连载引擎 v2.0 (原 AI 技能树引擎)
   管理知识节点 DAG：加载、先修检查、下一个选题选择
+  支持多主题知识库 (data/knowledge_trees/*.json) 与用户自定义导入
 ============================================================
 """
 import json
@@ -11,10 +12,12 @@ import threading
 from datetime import datetime
 from loguru import logger
 
-SKILL_TREE_FILE = os.getenv("AIKEPU_SKILL_TREE", os.path.join("data", "aikepu_skill_tree.json"))
+LEGACY_TREE_FILE = os.getenv("AIKEPU_SKILL_TREE", os.path.join("data", "aikepu_skill_tree.json"))
+TREES_DIR = os.getenv("KNOWLEDGE_TREES_DIR", os.path.join("data", "knowledge_trees"))
+ACTIVE_TREE_FILE = os.path.join(TREES_DIR, "_active.txt")
 HISTORY_FILE = os.getenv("AIKEPU_HISTORY", os.path.join("data", "cache", "aikepu", "aikepu_history.json"))
 
-_tree_cache = None
+_tree_cache = {}
 _tree_lock = threading.Lock()
 
 # 当前批次已选中但尚未发布的节点（防止同批次重复选题）
@@ -22,26 +25,137 @@ _reserved_ids = set()
 _reserved_lock = threading.Lock()
 
 
-def load_skill_tree():
-    """加载技能树 JSON，返回 {nodes: [...], meta: {...}}"""
+def get_active_tree_name():
+    """返回当前激活的主题包名（WebUI 切换后持久化于 _active.txt）"""
+    name = os.getenv("KNOWLEDGE_TREE", "").strip()
+    if name:
+        return name
+    try:
+        if os.path.exists(ACTIVE_TREE_FILE):
+            with open(ACTIVE_TREE_FILE, "r", encoding="utf-8") as f:
+                saved = f.read().strip()
+            if saved:
+                return saved
+    except Exception:
+        pass
+    return "aikepu"
+
+
+def set_active_tree(name):
+    """切换激活主题包并刷新缓存（持久化到 _active.txt）"""
     global _tree_cache
-    if _tree_cache is not None:
-        return _tree_cache
+    name = (name or "aikepu").strip()
     with _tree_lock:
-        if _tree_cache is not None:
-            return _tree_cache
-        if not os.path.exists(SKILL_TREE_FILE):
-            logger.error("技能树文件不存在: {}", SKILL_TREE_FILE)
-            _tree_cache = {"nodes": [], "meta": {}}
-            return _tree_cache
+        _tree_cache.pop(name, None)
+    try:
+        os.makedirs(TREES_DIR, exist_ok=True)
+        with open(ACTIVE_TREE_FILE, "w", encoding="utf-8") as f:
+            f.write(name)
+    except Exception as e:
+        logger.warning("主题包激活状态持久化失败: {}", e)
+    invalidate_published_ids_cache()
+    logger.info("已切换知识体系主题包: {}", name)
+    return name
+
+
+def _tree_path(name):
+    """主题包 JSON 路径：优先 data/knowledge_trees/{name}.json，兼容旧文件"""
+    if name == "aikepu":
+        new_path = os.path.join(TREES_DIR, "aikepu.json")
+        if os.path.exists(new_path):
+            return new_path
+        return LEGACY_TREE_FILE
+    return os.path.join(TREES_DIR, f"{name}.json")
+
+
+def list_knowledge_trees():
+    """列出全部主题包: [{name, title, description, node_count}]"""
+    packs = []
+    try:
+        os.makedirs(TREES_DIR, exist_ok=True)
+    except Exception:
+        pass
+    for fn in sorted(os.listdir(TREES_DIR)):
+        if not fn.endswith(".json") or fn.startswith("_"):
+            continue
+        name = fn[:-5]
         try:
-            with open(SKILL_TREE_FILE, "r", encoding="utf-8") as f:
-                _tree_cache = json.load(f)
-            logger.info("技能树加载成功: {} 个节点", len(_tree_cache.get("nodes", [])))
+            with open(os.path.join(TREES_DIR, fn), "r", encoding="utf-8") as f:
+                data = json.load(f)
+            meta = data.get("meta") or {}
+            packs.append({
+                "name": name,
+                "title": meta.get("name", name),
+                "description": meta.get("description", ""),
+                "node_count": len(data.get("nodes", [])),
+            })
         except Exception as e:
-            logger.error("技能树加载失败: {}", e)
-            _tree_cache = {"nodes": [], "meta": {}}
-        return _tree_cache
+            logger.warning("主题包 {} 解析失败: {}", fn, e)
+    # 旧文件也算一个包（未迁移时）
+    if not any(p["name"] == "aikepu" for p in packs) and os.path.exists(LEGACY_TREE_FILE):
+        try:
+            with open(LEGACY_TREE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            meta = data.get("meta") or {}
+            packs.insert(0, {
+                "name": "aikepu",
+                "title": meta.get("name", "AI 全栈技能树"),
+                "description": meta.get("description", ""),
+                "node_count": len(data.get("nodes", [])),
+            })
+        except Exception:
+            pass
+    return packs
+
+
+def validate_tree_structure(data):
+    """校验用户导入的知识库 JSON 结构，返回 (ok, error)"""
+    if not isinstance(data, dict):
+        return False, "根节点必须是 JSON 对象"
+    nodes = data.get("nodes")
+    if not isinstance(nodes, list) or not nodes:
+        return False, "缺少非空 nodes 数组"
+    ids = set()
+    for i, node in enumerate(nodes):
+        if not isinstance(node, dict):
+            return False, f"第 {i + 1} 个节点不是对象"
+        nid = str(node.get("id") or "").strip()
+        title = str(node.get("title") or "").strip()
+        if not nid or not title:
+            return False, f"第 {i + 1} 个节点缺少 id 或 title"
+        if nid in ids:
+            return False, f"节点 id 重复: {nid}"
+        ids.add(nid)
+        prereqs = node.get("prerequisites", [])
+        if not isinstance(prereqs, list):
+            return False, f"节点 {nid} 的 prerequisites 必须是数组"
+    return True, ""
+
+
+def load_skill_tree(tree_name=None):
+    """加载知识树 JSON，返回 {nodes: [...], meta: {...}}（按主题包缓存）"""
+    global _tree_cache
+    name = tree_name or get_active_tree_name()
+    cached = _tree_cache.get(name)
+    if cached is not None:
+        return cached
+    with _tree_lock:
+        cached = _tree_cache.get(name)
+        if cached is not None:
+            return cached
+        path = _tree_path(name)
+        if not os.path.exists(path):
+            logger.error("知识库文件不存在: {} (主题包: {})", path, name)
+            _tree_cache[name] = {"nodes": [], "meta": {}}
+            return _tree_cache[name]
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                _tree_cache[name] = json.load(f)
+            logger.info("知识体系加载成功 [{}]: {} 个节点", name, len(_tree_cache[name].get("nodes", [])))
+        except Exception as e:
+            logger.error("知识库加载失败 [{}]: {}", name, e)
+            _tree_cache[name] = {"nodes": [], "meta": {}}
+        return _tree_cache[name]
 
 
 def _node_by_id(tree, node_id):
@@ -134,7 +248,7 @@ def _match_node_title(node, target_title):
 
 def reconcile_history_file(wechat_draft_titles=None):
     """
-    自动清理 data/aikepu_history.json 中被用户在微信草稿箱手动删除的草稿记录。
+    自动清理 data/cache/aikepu/aikepu_history.json 中被用户在微信草稿箱手动删除的草稿记录。
 
     核心规则:
       - published 状态的历史记录 -> 绝对保留（因为 freepublish API 对个人号不可用，无法验证）
@@ -221,7 +335,7 @@ def reconcile_history_file(wechat_draft_titles=None):
 
 def get_published_ids(force_refresh=False):
     """
-    计算已群发的 AI 科普节点 ID 列表（带 TTL 缓存）。
+    计算已群发的 体系连载节点 ID 列表（带 TTL 缓存）。
 
     数据来源（个人公众号 freepublish API 不可用，不依赖它）:
       1. 本地 JSON 历史中 status=="published" 的 node_id
@@ -252,22 +366,24 @@ def get_published_ids(force_refresh=False):
         from core.db.manager import db_manager
         from core.db.models import ArticleHistory
         session = db_manager.get_session()
-        records = session.query(ArticleHistory).filter(
-            ArticleHistory.source_type == 'aikepu',
-            ArticleHistory.success_status.is_(True),
-            ArticleHistory.is_published.is_(True)
-        ).all()
-        if records:
-            tree = load_skill_tree()
-            nodes = tree.get("nodes", [])
-            for r in records:
-                if r.title:
-                    for node in nodes:
-                        nid = node.get("id")
-                        if nid and nid not in published_set and _match_node_title(node, r.title):
-                            published_set.add(nid)
-                            break
-        db_manager.remove_session()
+        try:
+            records = session.query(ArticleHistory).filter(
+                ArticleHistory.source_type == 'aikepu',
+                ArticleHistory.success_status.is_(True),
+                ArticleHistory.is_published.is_(True)
+            ).all()
+            if records:
+                tree = load_skill_tree()
+                nodes = tree.get("nodes", [])
+                for r in records:
+                    if r.title:
+                        for node in nodes:
+                            nid = node.get("id")
+                            if nid and nid not in published_set and _match_node_title(node, r.title):
+                                published_set.add(nid)
+                                break
+        finally:
+            db_manager.remove_session()
     except Exception as e:
         logger.debug("读取 SQLite 已发表状态失败: {}", e)
 
@@ -311,13 +427,15 @@ def get_draft_ids(wechat_draft_titles=None):
             from core.db.manager import db_manager
             from core.db.models import ArticleHistory
             session = db_manager.get_session()
-            db_records = session.query(ArticleHistory).filter(
-                ArticleHistory.source_type == 'aikepu',
-                ArticleHistory.success_status.is_(True),
-                ArticleHistory.is_published.is_(False)
-            ).all()
-            db_draft_titles = [r.title.strip() for r in db_records if r.title]
-            db_manager.remove_session()
+            try:
+                db_records = session.query(ArticleHistory).filter(
+                    ArticleHistory.source_type == 'aikepu',
+                    ArticleHistory.success_status.is_(True),
+                    ArticleHistory.is_published.is_(False)
+                ).all()
+                db_draft_titles = [r.title.strip() for r in db_records if r.title]
+            finally:
+                db_manager.remove_session()
         except Exception as e:
             logger.debug("读取 SQLite 草稿记录失败: {}", e)
 
@@ -429,7 +547,7 @@ def get_available_nodes(published_ids=None):
 
 def select_next_topic(override_node_id=None):
     """
-    选择下一个要发布的 AI 科普选题。
+    选择下一个要发布的 体系连载选题。
     若指定 override_node_id，则直接选中该节点；
     否则从可发布节点中选出度最高（解锁最多后续）的枢纽节点。
     返回 node_id, title, tags, summary 等字典或 None。
@@ -487,7 +605,7 @@ def select_next_topic(override_node_id=None):
 
 def mark_published(node_id, title, draft_id=None, status="draft"):
     """
-    记录节点状态到 aikepu_history.json。
+    记录节点状态到 data/cache/aikepu/aikepu_history.json。
     status: 'draft' (草稿箱中) 或 'published' (已正式发版)
     """
     if not node_id:
@@ -557,15 +675,17 @@ def set_node_status(node_id, status="published"):
             from core.db.manager import db_manager
             from core.db.models import ArticleHistory
             session = db_manager.get_session()
-            if node:
-                clean_n = _c(node["title"])
-                records = session.query(ArticleHistory).filter(ArticleHistory.source_type == 'aikepu').all()
-                for r in records:
-                    if r.title and (clean_n in _c(r.title) or _c(r.title) in clean_n):
-                        r.success_status = False
-                        r.is_published = False
-                session.commit()
-            db_manager.remove_session()
+            try:
+                if node:
+                    clean_n = _c(node["title"])
+                    records = session.query(ArticleHistory).filter(ArticleHistory.source_type == 'aikepu').all()
+                    for r in records:
+                        if r.title and (clean_n in _c(r.title) or _c(r.title) in clean_n):
+                            r.success_status = False
+                            r.is_published = False
+                    session.commit()
+            finally:
+                db_manager.remove_session()
         except Exception as e:
             logger.warning("清理 SQLite 节点记录失败: {}", e)
         invalidate_published_ids_cache()
@@ -579,25 +699,27 @@ def set_node_status(node_id, status="published"):
         from core.db.manager import db_manager
         from core.db.models import ArticleHistory
         session = db_manager.get_session()
-        clean_n = _c(title)
-        records = session.query(ArticleHistory).filter(ArticleHistory.source_type == 'aikepu').all()
-        matched = False
-        is_pub = (status == "published")
-        for r in records:
-            if r.title and (clean_n in _c(r.title) or _c(r.title) in clean_n):
-                r.is_published = is_pub
-                r.success_status = True
-                matched = True
-        if not matched:
-            new_record = ArticleHistory(
-                source_type='aikepu',
-                title=title,
-                success_status=True,
-                is_published=is_pub
-            )
-            session.add(new_record)
-        session.commit()
-        db_manager.remove_session()
+        try:
+            clean_n = _c(title)
+            records = session.query(ArticleHistory).filter(ArticleHistory.source_type == 'aikepu').all()
+            matched = False
+            is_pub = (status == "published")
+            for r in records:
+                if r.title and (clean_n in _c(r.title) or _c(r.title) in clean_n):
+                    r.is_published = is_pub
+                    r.success_status = True
+                    matched = True
+            if not matched:
+                new_record = ArticleHistory(
+                    source_type='aikepu',
+                    title=title,
+                    success_status=True,
+                    is_published=is_pub
+                )
+                session.add(new_record)
+            session.commit()
+        finally:
+            db_manager.remove_session()
     except Exception as e:
         logger.warning("同步 SQLite is_published 状态失败: {}", e)
 

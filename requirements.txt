@@ -4,7 +4,6 @@ beautifulsoup4>=4.12,<5
 selenium>=4.15,<5
 webdriver-manager>=4.0,<5
 markdown>=3.5,<4
-icrawler>=0.6,<1
 Pillow>=10.0
 numpy>=1.26
 python-dotenv>=1.0,<2
@@ -13,7 +12,6 @@ requests-cache>=1.1,<2
 rapidfuzz>=3.5,<4
 feedparser>=6.0,<7
 flask>=3.0,<4
-google-genai>=1.0
 PyGithub>=2.0
 rich>=13.0
 diagrams>=0.23
@@ -24,3 +22,4 @@ matplotlib>=3.8
 # easyocr>=1.7,<2
 sqlalchemy
 apscheduler
+trafilatura>=2.0
