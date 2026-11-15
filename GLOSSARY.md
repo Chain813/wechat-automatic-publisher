@@ -1,99 +1,54 @@
-[English](GLOSSARY_EN.md) | 中文
+# AutoWeChat 核心概念与术语表 (Glossary)
 
-# 名词解释
-
-本文档收录了 AutoWeChat 项目中涉及的技术术语、工具名称和专业概念的详细解释。
+本文档用于统一开发团队、运营人员及 AI 协作伙伴在 **AutoWeChat** 项目中的专业术语口径。
 
 ---
 
-## 目录
+## 一、四大创作工作流
 
-- [技术术语](#技术术语)
-- [图片相关术语](#图片相关术语)
-- [GitHub 相关术语](#github-相关术语)
-- [微信相关术语](#微信相关术语)
-
----
-
-## 技术术语
-
-| 术语 | 解释 |
-|------|------|
-| **LLM** | Large Language Model，大语言模型。本项目使用 DeepSeek 作为 LLM，负责文章生成、选题筛选、摘要生成等文本任务 |
-| **DeepSeek Prompting** | **(新)** 针对 DeepSeek 深度优化的提示词工程。结合通俗化语言风格指令和格式防错指令（如行首冒号过滤、H2/H3 层级自动规划），确保生成内容既专业又易读 |
-| **SYSTEM_PROMPT** | 系统提示词。发送给 LLM 的角色设定和指令，定义 AI 的写作风格、文章结构、排版规则等。相当于给 AI 的"工作手册" |
-| **pHash** | Perceptual Hash，感知哈希。一种图片指纹算法，将图片缩放并转换为灰度后计算哈希值。相似图片的哈希值接近，用于检测重复配图。即使图片被缩放、裁剪或轻微修改，pHash 仍能识别为相似图片 |
-| **RapidFuzz** | 高性能模糊字符串匹配库。用于标题去重时计算两个标题的相似度（0-100%），比 Python 标准库的 `difflib` 快 10-100 倍。例如"AI芯片禁令升级"与"芯片禁令再升级"的相似度约为 75% |
-| **ThreadPoolExecutor** | Python 标准库的线程池执行器。用于并行执行多个任务（如同时下载 5 张图片），将串行的 5 次下载合并为一次并行操作，大幅缩短等待时间 |
-| **Selenium 隐身模式** | 通过配置浏览器参数（禁用 `webdriver` 标志、设置真实 User-Agent、禁用自动化检测等），使 Selenium 控制的 Chrome 浏览器看起来像真人操作，绕过网站的反爬虫检测 |
-| **icrawler** | Python 图片爬虫框架。封装了 Bing、百度、Google 等搜索引擎的图片抓取逻辑，支持按关键词、尺寸、类型等条件筛选图片 |
-| **Webhook** | 回调通知机制。企业微信群机器人提供一个 Webhook URL，向该 URL 发送 HTTP POST 请求即可在群内推送消息。本项目在文章发布成功后自动发送通知 |
-| **API Token** | 访问令牌。用于 API 调用时的身份验证密钥字符串。不同服务的 Token 格式不同，如 GitHub 的以 `ghp_` 开头，DeepSeek 的以 `sk-` 开头 |
-| **Markdown** | 轻量级标记语言。用 `#` 表示标题、`**` 表示加粗、`>` 表示引用等。LLM 生成的文章使用 Markdown 格式，系统自动转换为微信支持的 HTML |
-| **HTML** | HyperText Markup Language，超文本标记语言。网页的标准格式。系统将 Markdown 文章转换为带内联样式的 HTML，适配微信公众号的排版引擎 |
-| **内联样式 (Inline Style)** | 直接写在 HTML 标签上的 CSS 样式（如 `style="color: red;"`）。微信公众号不支持外部 CSS 文件，只能使用内联样式控制排版 |
-| **双端活跃标题去重** | **(新)** 从微信接口同时拉取草稿箱与最近已发布推文的标题集合，配合四重匹配算法进行查重，避免二次生成与重复发布 |
-| **微信云端状态同步** | **(新)** 在主引擎运行前，比对本地 SQLite 历史记录与微信端实时推文列表。若云端推文已删除，本地 SQLite 数据库自动将相应记录的 `success_status` 更新为 `False`，释放已占用的话题/仓库名称 |
-| **真实性铁律** | **(新)** 核心创作约束，严禁 AI 撰写内容时虚构数据、臆测事实或凭空捏造代码、参数，所有生成内容必须基于真实数据与官方文档，确保客观准确，杜绝 AI 幻觉 |
-| **三阶段 Map-Reduce 提示词自优化** | **(新)** 一种用于超长科普文生成的大模型交互架构。Phase 1 生成大纲；Phase 2 利用大纲进行提示词自优化，让 LLM 明确设定每节的比喻、钩子及排他内容；Phase 3 串行生成并携带上文，以防章节间内容重复和叙事割裂 |
-| **双通道预览机制** | **(新)** WebUI 的一种文章预览策略。优先从本地 HTML 缓存（`data/previews/`）读取已生成的稿件结构，若不存在则调用微信 Draft API `/cgi-bin/draft/get` 渲染。支持对发布失败的稿件也能够进行可视化排版预览 |
-| **实时信源健康轮询** | **(新)** WebUI 数据源监控页面的同步机制。在激活信源 Tab 时自动以 3 秒间隔轮询数据源状态 API，实现页面端与后端采集进度实时同步，离开页面时自动卸载定时器 |
-| **浅色主题重构 (Light Theme Rewrite)** | **(新)** WebUI 前端由暗色玻璃拟态升级为浅色主题。全部颜色收敛到 `static/css/style.css` 的 `:root` 设计 token（`--accent` 靛蓝、`--accent-2` 紫等），旧变量名保留别名以兼容页面内联样式与 JS 动态模板 |
-| **Three.js 3D 粒子网络背景** | **(新)** WebUI 的背景动效。使用 Three.js 在页面底层渲染约 120 个带连线的运动粒子（靛蓝/紫色系），随鼠标轻微流动并自适应窗口大小；WebGL 不可用或 CDN 加载失败时自动静默降级 |
-| **云端 Token 登录页** | **(新)** 云端模式（`CLOUD_MODE=1` 且设置 `WEBUI_TOKEN`）的访问门槛。未认证访问 `/` 时返回 `templates/login.html`，token 校验通过后写入 `aw_token` Cookie 放行；`/static/` 静态资源豁免认证以支撑登录页样式与背景脚本 |
-| **体系连载引擎 (Knowledge Series Engine)** | **(新)** 由 AI 科普技能树泛化而来的多主题内容引擎。基于知识节点 DAG（有向无环图）按先修依赖自动连载生成深度长文，内置 AI 科普 / 职场成长 / 健康科普三套知识库，支持 WebUI 上传自定义知识库 JSON 一键切换主题 |
-| **Qwen-Image-3.0** | **(新)** 阿里通义万相文本生图模型。通过 DashScope（百炼）API 国内直连调用，支持文本生图（T2I）与 1-3 张参考图的图生图/编辑（I2I）。本项目用于自动配图与合规的参考图重绘二次创作 |
-| **Qwen-VL-Max** | **(新)** 阿里通义千问旗舰视觉理解模型（约 3 元/百万输入 tokens）。单张图评估约 2000 tokens，成本不到 1 分钱；本项目图片质量 AI 评估的唯一模型（`QWEN_VL_MODEL` 可切 qwen3-vl-flash 降本） |
-| **DeepSeek 峰谷定价** | **(新)** 2026年8月17日生效的 DeepSeek API 动态计费规则。分为高峰时段（9:00-12:00, 14:00-18:00）与空闲时段，空闲时段享受 50% 价格折扣。系统自带自动峰谷判定与节省金额实时计算 |
-| **纯内存单元测试套件** | **(新)** 存放于 `tests/` 目录下的自动化测试集合（`test_core.py`）。隔离外部网络请求，在 0.1 秒内快速完成核心业务逻辑与模型计费公式验证 |
+| 术语 | 英文 / 代码标识 | 定义与职责 |
+| :--- | :--- | :--- |
+| **综合热点追踪** | `hotspots` | 从 12 路科技/财经/资讯信源采集热点，经关键词初筛、全文深抓、联网事实核查与动态叙事策略后生成深度解读文章。 |
+| **GitHub 开源深潜** | `github` | 自动发现 GitHub Trending 或高星开源项目，抓取 README、截图与架构信息，生成工程级开源拆解长文。 |
+| **体系科普长文** | `aikepu` / Knowledge Graph Series | 基于多阶梯知识图谱 DAG（内置 5 套垂直主题包），按前置依赖解锁节点，通过大纲、Prompt 优化与并行 Sub-Agent 协同产出系统化长文。 |
+| **每日小知识 / 每日百科** | `daily_knowledge` | 位于 `daily_knowledge/` 的独立轻量科普工作流，负责日更级轻量百科选题规划、历史去重、独立 SQLite 记录与快速发布。 |
 
 ---
 
-## 图片相关术语
+## 二、质量保障与安全发布术语
 
-| 术语 | 解释 |
-|------|------|
-| **【已移除】Pollinations.ai / Pexels** | ~~境外图源。~~ 因境外服务不可商用，已从图源链移除；现图源链为：Qwen-Image 生图 → Bing 搜图 → 本地文字卡兜底 |
-| **Stable Diffusion** | **(新)** 开源本地图像生成模型。本项目支持调用 Stable Diffusion WebUI API，根据 DeepSeek 生成的项目专属提示词，为 GitHub 项目生成定制化的艺术插图 |
-| **Carbon** | 代码美化截图服务（carbon.now.sh）。将代码片段渲染为带有语法高亮、行号和精美背景的图片，是技术博客和文章中最流行的代码展示方式 |
-| **宽高比 (Aspect Ratio)** | 图片宽度与高度的比值。微信公众号对图片尺寸有推荐值：封面图 2.35:1（900×383 像素），正文插图约 16:9（900×500 像素）。系统会自动裁剪适配 |
-| **拉普拉斯方差** | 图片清晰度评估指标。对图片求二阶导数（拉普拉斯算子）后计算方差值。模糊图片的方差值小（<100），清晰图片的方差值大（>500）。无需参考原图即可判断清晰度 |
-| **颜色直方图熵** | 图片色彩丰富度指标。统计图片中各颜色出现频率，计算信息熵。纯色图片熵值接近 0，色彩丰富的图片熵值较高（>5）。高熵图片通常更吸引眼球 |
-| **OCR** | Optical Character Recognition，光学字符识别。识别图片中的文字内容。本项目用 EasyOCR 检测图片文字密度，文字占比过高的图片（如截图、PPT）不适合做文章配图 |
-| **感知哈希 (pHash)** | 见 [pHash](#技术术语) |
-| **尺寸适配 (Resize)** | 将图片裁剪和缩放到微信推荐尺寸的过程。先按目标宽高比居中裁剪，再缩放到目标分辨率，最后压缩至文件大小限制内（正文图片 2MB） |
+| 术语 | 英文 / 代码标识 | 定义与职责 |
+| :--- | :--- | :--- |
+| **人机协同发布** | `Human-in-the-Loop (HITL)` | 系统核心合规原则：所有 AI 生成内容只推送至微信**草稿箱**，配合审稿工作台由人类终审后手动群发，拒绝无监督全自动群发。 |
+| **联网事实核查** | `Fact Grounding` (`scraper.py` / `searcher.py`) | 先通过 `trafilatura` 抓取信源原始正文，再经 DuckDuckGo / Bing 实时搜索关键事实片段注入写作上下文，减少大模型幻觉。 |
+| **动态叙事引擎** | `Dynamic Narrative Engine` (`narrative.py`) | 将文章拆分为 4 种叙事原型与 4 种开篇钩子的动态组合，打破传统固定提示词造成的“八股文”同质化。 |
+| **AI Critic 质量门禁** | `Critic Gate` (`core/pipeline/critic.py`) | 发文前的自动质检关卡：自动清洗 AI 套话、补全 H2 结构、校验字数与标题规范；不达标稿件状态置为 `REJECTED` 并落地 `data/previews/fail_*.html`。 |
+| **HITL 审稿工作台** | `Audit Workbench` (`audit` 视图) | WebUI 第三核心视图，支持预览通过或被拦截的文章全文，核准后通过 `/api/review/approve` 直推微信草稿箱。 |
+| **四层标题防重** | `4-Layer Title Dedup` (`publisher.py`) | 合并微信云端草稿箱、公众号已发布列表与本地数据库，依次执行精确匹配、字符模糊匹配、关键词重叠度校验与 AI 语义兜底查重。 |
 
 ---
 
-## GitHub 相关术语
+## 三、视觉引擎与前端控制台
 
-| 术语 | 解释 |
-|------|------|
-| **GitHub Trending** | GitHub 官方的热门趋势页面（github.com/trending）。展示近 24 小时/7 天/30 天内获得最多 star（收藏）的开源项目，是开发者发现新项目的首选渠道 |
-| **Star** | GitHub 的收藏功能。用户点击项目页面的 Star 按钮表示关注或认可。Star 数量是衡量项目热度的核心指标 |
-| **README** | 项目根目录下的说明文件（通常为 README.md）。包含项目介绍、安装方法、使用说明等，是访问者看到的第一个文件 |
-| **PyGithub** | Python 的 GitHub REST API 封装库。提供面向对象的接口访问 GitHub 数据，如 `repo.get_readme()` 获取 README、`repo.get_topics()` 获取标签等。比直接发 HTTP 请求更稳定、类型安全 |
-| **rich** | Python 富文本和美化输出库（github.com/Textualize/rich，56k+ stars）。支持在终端渲染表格、进度条、树形结构等。本项目用 `rich.tree.Tree` 将项目目录树渲染为带颜色和图标的 PNG 图片 |
-| **diagrams** | Python 架构图生成库（github.com/mingrammer/diagrams，42k+ stars）。用 Python 代码绘制云架构图、系统拓扑图，支持 AWS/Azure/GCP/Kubernetes 等云服务节点。输出 PNG/SVG 文件 |
-| **目录树 (File Tree)** | 项目的文件和文件夹层级结构。展示项目包含哪些文件和目录（如 `src/main.py`、`config/`），帮助读者快速了解项目组成和技术栈 |
-| **架构图 (Architecture Diagram)** | 项目的系统架构示意图。展示各组件（前端/后端/数据库/缓存等）之间的关系和数据流向，帮助理解系统设计 |
-| **Personal Access Token (PAT)** | GitHub 个人访问令牌。在 GitHub Settings → Developer settings → Personal access tokens 中创建。用于 API 调用的身份验证，比匿名访问有更高的速率限制（5000 vs 60 次/小时） |
-| **Graphviz** | 开源图形可视化软件（graphviz.org）。diagrams 库依赖它将代码描述的架构图渲染为 PNG/SVG 图片文件。Windows 安装后需将 `bin` 目录添加到系统 PATH 环境变量 |
-| **API 速率限制** | GitHub API 对请求频率的限制。匿名访问 60 次/小时，认证访问 5000 次/小时。超限后请求会被拒绝（HTTP 403），系统自动回退到网页爬取方式 |
-| **单项目深度拆解** | **(新)** GitHub 模块 v4.0 推出的全新工作流。不同于过往列表式盘点，现在每次选择 1 个优质项目，整合中英文 README 说明文档和在线 UI 截图，生成深度剖析的长文 |
+| 术语 | 英文 / 代码标识 | 定义与职责 |
+| :--- | :--- | :--- |
+| **Linear Modern Light** | Design System | 项目统一采用的浅色工程级极简美学体系（`#FFFFFF` / `#F8F9FB` 高对比表面 + `#4F5BD5` 靛蓝点缀），同时贯穿于 WebUI 控制台、微信正文排版与技术图表卡片。 |
+| **4 层微光网格画布** | `.ambient-canvas` (`views.css`) | 纯 CSS 实现的轻量动态背景（3 组渐变光斑 + 工程网格 + 噪点微纹），已彻底替代旧版重型 Three.js 3D 粒子网络。 |
+| **零构建 ES Module** | Zero-Build Frontend (`static/js/`) | 不依赖 Webpack/Vite 打包，由浏览器直接加载 `main.js`、`core/` 与 `views/` 原生模块，包含 `console` / `graph` / `audit` / `image` / `ops` 五大视图。 |
+| **100% AI 生图容错链** | `image_handler.py` | 已禁用热点场景下的 Bing 爬虫抓图，统一采用「`Qwen-Image-3.0` → 本地 `Stable Diffusion` → Pillow 矢量卡片」三级纯生成链路。 |
+| **5 模并行图表引擎** | `diagram_gen.py` | 按需调度 `Mermaid`、`HTML+Tailwind+KaTeX`、`Graphviz DOT` 与 `Matplotlib` 结构体卡片（公式/对比/总结）的并行绘制引擎，自动修复微信端透明背景发黑问题。 |
+| **配图合规重绘工作台** | `Image Studio` (`image` 视图) | 支持解析任意公众号文章链接参考图并用 `Qwen-Image-3.0-Pro` 原创重绘，同时支持 Markdown 占位符提取、拖拽上传与 1:1 手机预览。 |
 
 ---
 
-## 微信相关术语
+## 四、知识定制与运维基础设施
 
-| 术语 | 解释 |
-|------|------|
-| **AppID** | 微信公众号的应用唯一标识。在微信公众平台后台 → 开发 → 基本配置中获取。格式为 `wx` 开头的 18 位字符串 |
-| **AppSecret** | 微信公众号的应用密钥。与 AppID 配对使用，用于获取 access_token。需妥善保管，泄露需立即重置 |
-| **access_token** | 微信 API 访问令牌。通过 AppID + AppSecret 换取，有效期 2 小时。所有微信 API 调用都需要携带此 Token，系统自动管理和刷新 |
-| **草稿箱 (Draft Box)** | 微信公众号的文章草稿存储空间。系统将生成的文章推送到草稿箱，运营人员在微信公众平台审核后正式发布。API 接口为 `draft/add` |
-| **thumb_media_id** | 微信素材 ID。封面图上传到微信服务器后返回的唯一标识符，格式为 media_id 字符串。创建草稿时需传入此 ID 关联封面 |
-| **标题去重** | 发布前检查草稿箱中是否已有相似标题的文章，避免重复发布。系统支持 4 种策略：精确匹配（标题完全相同）、模糊匹配（相似度>80%）、关键词匹配（核心关键词重叠）、AI 语义匹配（语义相似） |
-| **摘要 (Digest)** | 文章推送通知中显示的简短描述文字（最多 120 字）。在微信订阅号消息列表中展示，决定用户是否点击阅读全文 |
-| **草稿发布流程** | 系统的发布流程为：①生成文章 HTML → ②上传封面图获取 media_id → ③调用草稿箱 API 创建草稿 → ④发送企微通知 → ⑤运营人员审核后手动发布 |
-| **内联样式** | 见 [技术术语 - 内联样式](#技术术语) |
+| 术语 | 英文 / 代码标识 | 定义与职责 |
+| :--- | :--- | :--- |
+| **零访谈账号定制** | Zero-Interview Customization (`tools/`) | 通过 `analyze_account.py` 自动从历史文章萃取 9 维账号画像，再由 `build_knowledge_tree.py` 全自动生成知识图谱 DAG 与行业写作 Skill Prompt。 |
+| **多领域知识包** | Knowledge Packs (`data/knowledge_trees/`) | 内置 `aikepu`、`career`、`health`、`law`、`tax` 5 套领域图谱 JSON，并通过 `_active.txt` 与 `prompts/{slug}_skill.md` 热切换生效领域。 |
+| **多 Key 轮换池** | `KeyPool` (`utils/key_pool.py`) | 支持 `LLM_API_KEYS` 与 `DASHSCOPE_API_KEYS` 逗号分隔多组 Key 线程安全轮询与 429/401/403 自动冷却。 |
+| **Prompt Cache 遥测** | Cache Telemetry (`llm.py`) | 在控制台顶部实时追踪 LLM 上下文缓存命中率、节省 Token 数量与节省人民币成本。 |
+| **控制信号机制** | `cancel_event` / `pause_event` | 基于 `threading.Event` 的实时中断与暂停信号，确保一键 Stop/Pause 可快速安全响应。 |
+| **云端无状态模式** | `CLOUD_MODE=1` | 针对 GitHub Actions 或 Render 等无状态云环境的保护开关，强制优先同步微信云端记录并保护本地仓库历史不被误覆写。 |
+| **GitHub Token** | `GITHUB_TOKEN` | 可选的 GitHub API 个人访问令牌（PAT），用于提升 `github` 开源项目发现与仓库检索的 API 速率限制。 |

@@ -1,590 +1,297 @@
-[English](README_EN.md) | 中文
+# AutoWeChat — 企业级 AI 微信公众号全流程创作与合规发布工作台
 
-# AutoWeChat: 全自动 AI 内容工厂
+<p align="center">
+  <strong>Human-in-the-Loop（人机协同）</strong> · <strong>4 大自动创作工作流</strong> · <strong>联网事实核查与 AI Critic 门禁</strong> · <strong>Linear Modern Light 双语控制台</strong>
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python: 3.8+](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![DeepSeek: Powered](https://img.shields.io/badge/LLM-DeepSeek-green.svg)](https://api.deepseek.com)
-[![Qwen-VL](https://img.shields.io/badge/Vision-Qwen%20VL-blue.svg)](https://www.alibabacloud.com/help/en/model-studio/vision)
-
-微信公众号全自动内容生产与发布系统。集成实时热点监控、AI 选题、深度文章创作、智能配图、一键发布。
-
----
-
-## 📋 目录
-
-- [🏗️ 架构概览](#🏗️-架构概览)
-- [✨ 功能特性](#✨-功能特性)
-- [🛠️ 技术栈](#🛠️-技术栈)
-- [📁 项目结构](#📁-项目结构)
-- [🚀 快速开始](#🚀-快速开始)
-- [💻 Web 管理界面](#💻-web-管理界面)
-- [🖼️ 配图策略](#🖼️-配图策略)
-- [⚙️ 核心配置](#⚙️-核心配置)
-- [📚 名词解释](GLOSSARY.md)
-- [👨‍💻 开发文档](DEVELOPMENT.md)
-- [☁️ 云端部署](#☁️-云端部署零成本)
-- [📋 环境要求](#📋-环境要求)
-- [📄 许可证](#📄-许可证)
-- [⚠️ 免责声明](#⚠️-免责声明)
+<p align="center">
+  <a href="README_EN.md">English</a> ·
+  <a href="#核心创作工作流">四大工作流</a> ·
+  <a href="#系统架构与质量闭环">架构与闭环</a> ·
+  <a href="#webui-五维控制台">WebUI 控制台</a> ·
+  <a href="#快速开始">快速开始</a> ·
+  <a href="DEVELOPMENT.md">开发指南</a>
+</p>
 
 ---
 
-## 🏗️ 架构概览
+**AutoWeChat** 是一个面向技术媒体、垂直自媒体与专业内容团队的微信公众号自动化生产工作台。它打通了从**多源热点/知识图谱发现 -> 网页深抓与联网事实核查 -> 动态叙事撰写 -> AI 配图与多模态图表渲染 -> Critic 自动质检与人工审稿 -> 微信草稿箱去重推送**的全链路。
+
+> [!IMPORTANT]
+> **合规与安全底线**：系统所有自动发布任务仅推送至微信公众号**草稿箱（Draft Box）**，配合内置的 **Audit 审稿工作台** 实现人工终审把关，严禁绕过平台审核机制进行全自动无监督群发。
+
+---
+
+## 目录
+
+- [核心创作工作流](#核心创作工作流)
+- [系统架构与质量闭环](#系统架构与质量闭环)
+- [核心工程特性](#核心工程特性)
+- [WebUI 五维控制台](#webui-五维控制台)
+- [项目目录结构](#项目目录结构)
+- [快速开始](#快速开始)
+- [环境变量参考](#环境变量参考)
+- [云端部署与自动化调度](#云端部署与自动化调度)
+- [测试与扩展文档](#测试与扩展文档)
+
+---
+
+## 核心创作工作流
+
+系统提供统一的引擎入口（[`core/engine.py`](core/engine.py) 与 [`main.py`](main.py)），支持 CLI 命令行、APScheduler 定时调度以及 WebUI 一键触发以下 4 类创作流水线：
+
+| 工作流标识 (`--task`) | 控制台页签 | 适用场景 | 核心驱动机制 |
+| :--- | :--- | :--- | :--- |
+| **`hotspots`** | 综合热点 | 科技、财经、时事深度解读 | 12 路信息源采集 + 领域关键词初筛 + `trafilatura` 全文深抓 + DuckDuckGo/Bing 实时事实搜索 + 4 类动态叙事原型切换 |
+| **`github`** | 开源项目 | GitHub Trending 与高潜开源工具拆解 | GitHub Trending 网页抓取 + API 搜索（支持可选 `GITHUB_TOKEN` 提速）+ 仓库深度分析 + 架构图/配图自动合成 |
+| **`aikepu`** | 硬核科普 | 垂直行业体系化长文连载 | 基于知识图谱 DAG（内置 5 套垂直领域图谱）按前置依赖解锁节点；Outline（大纲）→ Prompt 优化 → `ThreadPoolExecutor` 至多 4 个 Sub-Agent 并行成文 |
+| **`daily_knowledge`** | 每日百科 | 轻量高频日常科普与百科日更 | [`daily_knowledge/`](daily_knowledge) 独立引擎，自动选题规划 + 历史去重 + 独立 SQLite 记录 + 轻量图文流水线 |
+
+---
+
+## 系统架构与质量闭环
 
 ```mermaid
-graph TD
-    %% 定义样式类
-    classDef ui fill:#1E1E1E,stroke:#4CAF50,stroke-width:2px,color:#fff,rx:5px
-    classDef engine fill:#2C3E50,stroke:#3498DB,stroke-width:2px,color:#fff,rx:10px
-    classDef plugin fill:#8E44AD,stroke:#9B59B6,stroke-width:2px,color:#fff,rx:10px
-    classDef llm fill:#E67E22,stroke:#D35400,stroke-width:2px,color:#fff,rx:5px
-    classDef vision fill:#16A085,stroke:#1ABC9C,stroke-width:2px,color:#fff,rx:5px
-    classDef wechat fill:#27AE60,stroke:#2ECC71,stroke-width:3px,color:#fff,rx:15px
-    classDef db fill:#F39C12,stroke:#F1C40F,stroke-width:2px,color:#fff,rx:5px
-
-    subgraph UI ["用户入口 (User Interface)"]
-        A1["💻 Web UI (Flask)"]:::ui
-        A2["⌨️ CLI (命令行)"]:::ui
-    end
-
-    subgraph Core ["核心调度引擎 (Core Dispatcher)"]
-        B{"⚙️ Core Engine"}:::engine
-        C[["🔌 Plugin Manager"]]:::plugin
-    end
-
-    subgraph Workflows ["动态工作流插件 (Workflows)"]
-        D["🌐 12 大全网热点源"]:::plugin
-        E["🐙 GitHub 趋势挖掘"]:::plugin
-        F["🎓 知识体系连载引擎 (DAG)"]:::plugin
-    end
-
-    subgraph AIEngines ["人工智能引擎 (AI Engines)"]
-        G{"🧠 DeepSeek LLM\n(深度长文生成)"}:::llm
-        H{"👁️ Qwen-VL 千问\n(视觉质量评估)"}:::vision
-    end
-
-    subgraph Publishing ["持久化与发布模块 (Publishing)"]
-        J["📝 Publisher 渲染器"]:::ui
-        DB[("🗄️ SQLite Database\n(标题去重与历史记录)")]:::db
-        K(("💬 微信公众号\n(云端草稿箱同步)")):::wechat
-    end
-
-    A1 -->|触发启动| B
-    A2 -->|触发启动| B
-    B -->|流转配置| C
-    C -->|拉取数据| D
-    C -->|拉取数据| E
-    C -->|依赖遍历| F
-    
-    D -->|加工清洗| G
-    E -->|翻译精炼| G
-    F -->|教育风格| G
-    
-    G -->|图文组装| H
-    H -->|选取封图与配图| J
-    J -->|双端验重| DB
-    J -->|API 提交| K
+flowchart TD
+    A["多源触发<br/>12路热点 / GitHub / 知识图谱 DAG / 每日百科"] --> B["内容深抓与事实核查<br/>Trafilatura 全文提取 + DuckDuckGo/Bing 实时搜索"]
+    B --> C["动态叙事与分层路由<br/>4种原型 × 4种钩子 · Flash大纲 / Pro创作"]
+    C --> D["多模态视觉引擎<br/>Qwen-Image-3.0 / 本地 SD / Pillow 矢量兜底<br/>Mermaid / HTML+KaTeX / Graphviz / Matplotlib"]
+    D --> E{"AI Critic 质检门禁<br/>(core/pipeline/critic.py)"}
+    E -- "自动修复 & 评分达标" --> F["4层标题查重<br/>精确 → 模糊 → 关键词重叠 → AI语义"]
+    E -- "触发红线 (REJECTED)" --> G["落地 fail_*.html & SQLite<br/>进入 WebUI Audit 人工复核台"]
+    G -- "人工核准" --> F
+    F -- "无重复" --> H["Linear Modern Light 排版<br/>推送微信草稿箱 + 企微通知"]
 ```
 
 ---
 
-## ✨ 功能特性
+## 核心工程特性
 
-### 多源热点聚合
+### 1. 联网事实核查与动态叙事引擎 (`Fact Grounding & Narrative`)
+- **原文深抓与联网核查**：[`core/hotspots/scraper.py`](core/hotspots/scraper.py) 通过 `trafilatura` 与浏览器伪装请求提取原始信源正文；[`core/hotspots/searcher.py`](core/hotspots/searcher.py) 在开启 `ENABLE_FACT_SEARCH` 时自动执行 DuckDuckGo（HTML/Lite 双路降级）与 Bing 网页搜索，抽取权威时间线与事实摘要（默认最多 `MAX_FACT_SNIPPETS=4` 条）注入写作上下文，抑制模型幻觉。
+- **动态叙事策略**：[`core/hotspots/narrative.py`](core/hotspots/narrative.py) 内置 4 种写作原型（`investigative_game` 深度调查博弈、`tech_deep_dive` 技术硬核拆解、`business_war` 商业竞争分析、`narrative_human` 人物纪实叙事）与 4 种黄金开篇钩子（`counter_intuitive`、`cost_and_bill`、`critical_scene`、`cognitive_reversal`），配合 `core/hotspots/processor.py` 消除千篇一律的“八股文”。
 
-12 个平台并行采集实时热点资讯：
+### 2. AI Critic 自动质检门禁与 HITL 审稿闭环
+- **自动修复与质检**：[`core/pipeline/critic.py`](core/pipeline/critic.py) 在发文前执行四项自动化检查：
+  1. 清洗高频“AI 味”套话短语（自动替换/删除）。
+  2. 为缺失小节结构的长文自动补齐 H2 标题分节。
+  3. 校验正文汉字规模、标题长度上限与禁用结尾标点。
+  4. 综合评分与拦截：未通过门禁的文章状态标记为 `REJECTED`，预览 HTML 落地至 `data/previews/` 并写入本地 SQLite（[`data/auto_publish.sqlite`](core/db/manager.py)，WAL 模式），等待人类编辑审核。
+- **人工终审直推**：审稿人可在 WebUI `审稿 (Audit)` 视图中预览完整排版、编辑或核准放行（`/api/review/approve`），核准后自动补传封面并同步至微信草稿箱。
 
-| 平台 | 类型 | 说明 |
-|------|------|------|
-| 微博热搜 | 社交媒体 | 实时热搜榜，覆盖全网热点 |
-| IT之家 | 科技资讯 | 国内头部科技媒体 |
-| 36氪 | 创投科技 | 创业投资与科技前沿 |
-| 百度热搜 | 搜索引擎 | 基于搜索量的热点排行 |
-| 知乎热榜 | 问答社区 | 深度讨论型热点 |
-| CSDN | 开发者社区 | 技术开发者聚集地 |
-| RSS 订阅 | 信息聚合 | 支持自定义 RSS 源 |
-| 时政新闻 | 新闻媒体 | 时政要闻聚合 |
-| 今日头条 | 资讯平台 | 算法推荐热点 |
-| 澎湃新闻 | 新闻媒体 | 深度新闻报道 |
-| 虎嗅 | 商业媒体 | 商业科技深度分析 |
-| 抖音热点 | 短视频 | 短视频平台热点趋势 |
+### 3. 100% AI 生图与 5 模专业技术图表引擎
+- **封面与正文配图 (`utils/image_handler.py`)**：已全面切换为纯 AI 生成架构（已禁用热点场景下的 Bing 爬虫抓取）：
+  1. **首选**：通义万相 `Qwen-Image-3.0`（默认 `1280*720`，内置全局最小请求间隔与最大并发数限流保护）；Image Studio 二次重绘默认采用 `qwen-image-3.0-pro`。
+  2. **备选**：本地 `Stable Diffusion WebUI` API（`SD_ENABLED` / `SD_API_URL`）。
+  3. **兜底**：本地 Pillow 生成高对比 **Linear Modern Light** 风格矢量封面与摘要卡片，保证零外部依赖下链路不断档。
+- **多模态技术图表与公式渲染 (`utils/diagram_gen.py`)**：支持并行渲染（默认 `DIAGRAM_PARALLEL_WORKERS=5`），自动处理微信富文本对透明 PNG 背景的黑底兼容性问题：
+  - **高保真模态**：`Mermaid`（`mermaid.ink` 在线渲染 + 本地 [`utils/html_render.py`](utils/html_render.py) Selenium 无头浏览器降级）、`HTML + Tailwind + KaTeX`（复杂数学公式与高定信息卡片）。
+  - **轻量兜底模态**：`Graphviz DOT`（[`utils/lite_render.py`](utils/lite_render.py)）与 `Matplotlib` 结构体卡片（公式卡、对比卡、总结卡），统一采用 Linear Modern Light（`#FFFFFF` / `#F8F9FB` / `#4F5BD5`）浅色专业配色。
 
-每个数据源独立健康监控（绿/黄/红状态），故障时自动降级，不影响其他源。
+### 4. 四层微信公众号标题防重机制 (`core/shared/publisher.py`)
+发文前自动拉取**微信云端草稿箱 + 公众号已发布列表 + 本地发布历史**，按耗时由低到高依次执行 4 层校验：
+1. **精确字符串匹配**（归一化大小写与空白符）。
+2. **字符级模糊相似度**（`rapidfuzz` / `SequenceMatcher` 超过 `TITLE_DUPLICATE_RATIO` 阈值）。
+3. **关键词 n-gram 重叠率**（重叠度 `>= 0.70` 拦截）。
+4. **AI 语义查重兜底**（前三层均未命中时调用轻量 LLM 判断核心议题是否撞车）。
 
-### 🎓 体系连载（知识库驱动）
+### 5. 5 套垂直知识包与“零访谈”账号定制工具链
+- **开箱即用知识图谱**：[`data/knowledge_trees/`](data/knowledge_trees) 内置 `aikepu.json`（AI 硬核科普 30 节点）、`career.json`（职场成长 10 节点）、`health.json`（健康科普 8 节点）、`law.json`（法律实务 10 节点）与 `tax.json`（财税实务 6 节点），配合 `prompts/` 下对应的专属写作规范（如 `law_skill.md`、`tax_skill.md`）。
+- **零访谈风格克隆 (`tools/`)**：
+  - [`tools/analyze_account.py`](tools/analyze_account.py)：自动采集目标账号/行业历史标杆文章并提炼结构、语气与排版风格，生成专属 Writing Skill Prompt。
+  - [`tools/build_knowledge_tree.py`](tools/build_knowledge_tree.py)：自动规划多阶梯知识图谱 DAG 并通过 `_active.txt` 热切换生效领域。
 
-基于知识体系 DAG，系统化输出从入门到前沿的深度连载文章，主题可自由切换（AI 科普 / 职场成长 / 健康科普 / 自定义知识库）：
-
-- **三阶段 Map-Reduce 提示词自优化** (🆕 v4.2)：系统化生成超长科普文章（≥ 15000字）。大纲生成（Phase 1）→ 提示词自优化（Phase 2，LLM 自主设定每节的类比分工、衔接钩子及排他内容，杜绝跨章节比喻重复或内容“撞车”）→ 串行生成与上文传递（Phase 3，每节引入前一节末尾 500 字，一气呵成）。
-- **多主题知识库**：内置 AI 科普（30 节点）、职场成长（10 节点）、健康科普（8 节点）三套知识体系，支持 WebUI 一键切换与上传自定义知识库 JSON。
-- **拓扑排序选题**：自动选择「先修已发布」的节点中出度最高的枢纽节点，确保循序渐进。
-- **教育风格文章**：独立的教育风 SYSTEM_PROMPT——类比驱动、图解思维、从 WHY→HOW→WHAT 逐层展开。
-- **路线感知**：每篇文章末尾标注在技能树中的位置和下一步学习建议。
-- **独立历史追踪**：使用 SQLite 自动记录发布状态，运行记录完美接入 Web 控制台历史预览。
-
-```bash
-# CLI 运行
-python main.py --task aikepu
-
-# 或 WebUI 中选择 "🎓 体系连载"
-```
-
-### AI 深度创作
-
-基于 DeepSeek 大语言模型生成 2500-3500 字深度分析文章：
-
-- **人格化主笔 (v4.1)**：热点主笔和 GitHub 推荐官均有完整的人格画像——背景经历、思维习惯、表达原则、世界观，彻底告别”AI 味”。
-- **分级重点标注**：红色加粗（`**{{核心结论}}`**，3-5 处）+ 黑色加粗（关键数据/概念，每段 1-2 处），读者扫一眼就能抓住核心。LLM 未输出足够粗体时自动兜底补全。
-- **API 截断检测**：自动检测文章是否被 LLM API 静默截断（结尾不完整），截断时自动重试，杜绝残缺文章发布。
-- **智能重试**：首稿不合格时将原文传给 LLM 定向修复（而非从零重写），保留好内容，只修结构问题。
-- **双端活跃标题去重 (v4.0)**：4 种策略（精确/模糊/关键词/AI语义匹配）查重，彻底杜绝重复。
-- **云端状态自动同步 (v4.0)**：运行前自动拉取微信草稿和已发布列表，云端已删除的内容自动释放本地历史。
-- **排版健壮性**：自动修复行首冒号、清理空列表项、修复红字重点花括号溢出、统一字体栈。时间戳（如 `10:30`）不会被误改。
-- **三梯队选题体系**：AI+时政（最高优先级）→ 硬核 AI → 金融时政，确保内容契合品牌定位。
-
-### 智能配图
-
-多源图片检索 + AI 生成，自动为文章匹配最佳配图：
-
-- **6 维评分体系**：从分辨率、宽高比、清晰度、文字密度、色彩丰富度、文件大小 6 个维度对候选图片打分
-- **感知哈希去重**：使用 pHash（感知哈希）算法检测相似图片，避免重复配图
-- **微信尺寸适配**：自动裁剪为微信推荐尺寸（封面 900×383，正文 900×500）
-- **视觉 AI 二次评估**：候选图片经千问 Qwen-VL 视觉模型二次评估（国内直连），选出最佳
-- **本地 Stable Diffusion 集成**：支持调用本地 SD WebUI API 生成极客艺术感插图。
-- **LLM 图像关键词优化**：当常规搜索无果时，由 LLM 将抽象术语转化为视觉化搜索词（如“监管政策”→“科技感天平”），大幅提升匹配率。
-- **固定专题封面**：GitHub 专题统一采用 2.35:1 黄金比例的固定品牌封面，增强辨识度。
-
-### 高效并行架构
-
-- **GitHub 配图全并行**：6 种图片来源同时启动，集满 3 张自动停止，速度提升 3-5 倍
-- **封面与文章并行**：封面 SD 生图与文章创作同时进行，每篇节省 5-20 秒
-- **GitHub 正文配图并行**：多张配图同时下载上传
-- **热点多篇并行**：多篇文章同时生成和发布
-- **12 源热点并发扫描**：所有数据源同时抓取
-- **可中断**：所有长时间操作均支持用户中断（Stop 按钮 0.5 秒内响应）
-
-### 安全合规
-
-- **4 策略标题去重**：精确匹配 → 模糊匹配（RapidFuzz）→ 关键词匹配 → AI 语义匹配
-- **跨话题内部去重**：同一批次内的相似话题自动去重
-- **草稿箱审计**：发布前与微信草稿箱已有文章比对，防止重复
-
-### Web 管理界面
-
-Flask 浅色玻璃拟态主题仪表盘（Three.js 3D 粒子网络背景），共 7 个页面；云端模式另配同款浅色主题的 Token 登录页：
-
-| 页面 | 功能说明 |
-|------|---------|
-| **控制台** | 一键启停任务、实时日志流、任务类型选择（热点/GitHub/体系连载）。支持暂停/恢复/停止。 |
-| **图片工作台** | **拖拽配图与生图工作室** (🆕 v4.3)：自动提取 Markdown 中的配图占位符，生成可配置模型（如 Qwen-Image-3.0 / Imagen 3 / Midjourney / FLUX.1）Prompt，支持 HTML5 拖拽上传配图、微信公众号手机端高保真预览，以及**文章参考图重绘**（粘贴公众号文章链接 → 自动抓图 → Qwen-Image Pro 重绘为全新原创配图）。 |
-| **图表引擎** | **混合五模渲染** (🆕 v4.3)：支持 Mermaid 脑图、LaTeX 学术卡片、Graphviz 依赖图、Tailwind HTML 对比卡片及 **Archify / D2 系统架构图**，系统未安装 Archify 时自动平滑降级。 |
-| **历史记录** | 按日期分组展示。**支持离线/在线文章预览** (🆕 v4.2)：每条记录均提供“预览”按钮，点击后可在弹窗中完美渲染文章内容和精美排版。即使发布失败，也可本地浏览失败前的稿件。 |
-| **数据源** | 12 个数据源的健康状态卡片（绿=正常/黄=告警/红=故障）。**支持实时同步** (🆕 v4.2)：在信源 Tab 激活时，每 3 秒自动轮询健康状态，实现与后台采集进度的实时一致。 |
-| **体系连载** | 多主题知识库 DAG 拓扑图谱：4 层级分栏、先修依赖连线、节点状态与微信草稿箱同步（已发布/可解锁/锁定），支持主题包切换、上传自定义知识库 JSON、手动标记节点状态与「撰写下一个可解锁节点」。 |
-| **定时任务** | APScheduler cron 表达式定时发布（热点 / GitHub / AI 科普），任务列表在线管理。 |
-| **设置** | API Key 在线配置，密钥脱敏显示，防注入校验，支持在线配置**提示词目标生图模型**（`IMAGE_GEN_MODEL`）与**图表并行生成线程数**（`DIAGRAM_PARALLEL_WORKERS`）。 |
-
-### 企业微信集成
-
-发布成功后自动推送通知到企业微信群机器人，内容包含品牌名和文章标题。
+### 6. 多 Key 线程安全轮换与 Prompt Cache 遥测
+- [`utils/key_pool.py`](utils/key_pool.py) 支持通过 `LLM_API_KEYS`、`DASHSCOPE_API_KEYS`（逗号分隔多组 Key）实现线程安全轮换（Round-Robin）与限流/异常自动冷却切换（429 冷却 120s、认证类 300s）。
+- [`core/shared/llm.py`](core/shared/llm.py) 按任务难度自动路由 `Flash` / `Pro` 模型，并在控制台实时上报 Prompt Cache 命中率、节省 Token 数与节省金额（CNY）。
 
 ---
 
-## 🛠️ 技术栈
+## WebUI 五维控制台
 
-| 类别 | 技术 | 用途 |
-|------|------|------|
-| **语言** | Python 3.8+ | 主开发语言 |
-| **LLM** | DeepSeek Chat / Reasoner | 文章生成、选题筛选、摘要生成 |
-| **视觉 AI** | 千问 Qwen-VL-Max | 图片质量 AI 评估（云端，国内直连） |
-| **架构与图表** | Archify / D2 / Mermaid / Graphviz | 系统架构图、流程图、数据流图原生与平滑转译渲染 |
-| **GitHub 工具链** | PyGithub | GitHub API 封装，获取 Trending 项目、仓库元数据 |
-| | rich | Python 富文本库，渲染项目目录树为高质量 PNG 图片 |
-| | diagrams | Python 架构图生成库，根据技术栈自动生成项目架构图 |
-| | carbon | 代码截图服务，将代码片段渲染为精美截图 |
-| **爬虫** | Requests | HTTP 请求库 |
-| | BeautifulSoup4 | HTML 解析库 |
-| | Selenium（隐身模式） | 浏览器自动化，用于反爬严格的网站 |
-| | icrawler | 图片爬虫框架（Bing/百度图片搜索） |
-| **图片处理** | Pillow | Python 图片处理库，裁剪/缩放/格式转换 |
-| | numpy | 数值计算，用于图片评分算法 |
-| | 通义万相 Qwen-Image | 国内直连 AI 生图 API（DashScope） |
-| **缓存/匹配** | requests-cache | HTTP 请求缓存，减少重复请求 |
-| | RapidFuzz | 高性能模糊字符串匹配库 |
-| **日志** | Loguru | Python 日志库 |
-| **Web** | Flask | 轻量级 Web 框架 |
-| **API** | 微信公众号草稿箱 API | 文章发布接口 |
+全新重构的 **Linear Modern Light** 控制台基于零构建（Zero-Build）原生 ES Module（[`static/js/main.js`](static/js/main.js)）与三层设计令牌样式（[`tokens.css`](static/css/tokens.css) / [`components.css`](static/css/components.css) / [`views.css`](static/css/views.css)），摒弃重型 WebGL 背景，以 4 层纯 CSS 微光网格画布实现桌面端与移动端底栏双端流畅适配，内置**中/英双语即时切换**与可选 `WEBUI_TOKEN` 鉴权登录页（[`templates/login.html`](templates/login.html)）。
+
+| 视图标识 | 页面名称 | 核心能力说明 |
+| :--- | :--- | :--- |
+| **`console`** | 总控 (Console) | 4 类工作流一键切换、启动/暂停/恢复/强停、缓存预热、Prompt Cache 遥测条、4 阶段 Pipeline 进度条、Timeline 手风琴日志 / Raw 日志流、知识图谱进度卡与 Live Pulse |
+| **`graph`** | 图谱 (Graph) | 知识图谱 DAG 拓扑浏览、1-4 阶梯筛选、垂直领域主题包热切换、自定义图谱 JSON 导入、微信已发记录同步、节点抽屉单篇“立即撰写”与状态标记 |
+| **`audit`** | 审稿 (Audit) | HITL 质量门禁工作台（全部 / 待核准 / 已通过 / 待推送 / 已推送）、移动端感官级 HTML 全文预览、一键核准并同步微信草稿箱、历史条目批量清理 |
+| **`image`** | 配图 (Studio) | 输入微信文章 URL 自动解析并执行合规重构重绘（`Qwen-Image-3.0-Pro`）、Markdown 配图指令自动提取、本地图片拖拽上传与 1:1 手机端微信排版预览 |
+| **`ops`** | 运维 (Ops) | 包含 3 个运维子面板：**信源矩阵**（12 路热点源实时连通性探针）、**定时任务**（4 类工作流 APScheduler Cron 可视化配置）、**系统配置**（API Key、模型路由、图表并发数、SD 开关热更新） |
 
 ---
 
-## 📁 项目结构
+## 项目目录结构
 
-```
+```text
 wechat_auto_publish/
-├── main.py                    # CLI 入口，支持 --task hotspots/github 参数
-├── webui.py                   # Flask Web 管理界面，提供浅色主题仪表盘
-├── config.py                  # 全局配置中心，集中管理所有可调参数
-├── .env.example               # 环境变量模板
-├── requirements.txt           # Python 依赖清单
-├── run.bat                    # Windows CLI 一键启动脚本
-├── run_gui.bat                # Windows Web UI 一键启动脚本
+├── main.py                        # CLI 无头执行入口 (--task hotspots|github|aikepu|daily_knowledge)
+├── webui.py                       # Flask + SSE 实时控制台与 REST API 服务
+├── config.py                      # 全局环境配置与默认值中心
+├── run.bat / run_gui.bat          # Windows 一键启动 WebUI 快捷脚本
+├── Dockerfile / docker-compose*.yml / render.yaml  # 容器与云端部署编排
 │
-├── data/                      # 数据库与运行时数据配置目录
-│   ├── auto_publish.sqlite    # 标题去重与发布历史 SQLite 数据库
-│   ├── knowledge_trees/      # 知识体系主题包（AI科普/职场成长/健康科普/自定义导入）
-│   ├── aikepu_skill_tree.json # 旧版 AI 科普技能树结构文件（向后兼容）
-│   ├── aikepu_history.json    # 已发布节点历史（自动生成）
-│   └── hotspot_cache.sqlite   # 热点采集网络请求缓存数据库（自动生成）
+├── core/
+│   ├── engine.py                  # 统一任务调度总线
+│   ├── db/                        # SQLAlchemy 模型与 SQLite WAL 审计持久化 (data/auto_publish.sqlite)
+│   ├── pipeline/                  # PipelineEngine、节点协议与 AI Critic 质检门禁 (critic.py)
+│   ├── hotspots/                  # 热点采集处理器、Trafilatura 深抓、DuckDuckGo/Bing 核查、动态叙事
+│   ├── github/                    # GitHub Trending / API 采集与开源深潜工作流
+│   ├── aikepu/                    # 知识图谱 DAG 解析、Outline/Prompt 优化与并行 Sub-Agent 写作
+│   ├── plugins/                   # 12 路热点源与 GitHub 采集插件抽象层
+│   └── shared/                    # LLM 分层路由与缓存统计、Linear Light 微信富文本排版、4 层查重发布器
 │
-├── core/                      # 核心业务逻辑
-│   ├── engine.py              # 工作流调度器，根据任务类型分发到对应工作流
-│   │
-│   ├── hotspots/              # 热点文章模块
-│   │   ├── collector.py       # 12 源热点采集引擎，并行抓取各平台热点
-│   │   ├── processor.py       # AI 文章生成引擎，包含 SYSTEM_PROMPT 定义
-│   │   └── workflow.py        # 热点发布完整流水线（采集→筛选→创作→配图→发布）
-│   │
-│   ├── github/                # GitHub Trending 模块
-│   │   ├── collector.py       # GitHub 采集引擎（PyGithub API + 目录树 + 架构图 + 代码截图）
-│   │   ├── processor.py       # GitHub 文章生成（微信公众号排版优化）
-│   │   └── workflow.py        # GitHub 发布完整流水线
-│   │
-│   └── shared/                # 共享模块
-│       ├── llm.py             # DeepSeek API 封装，含重试机制和敏感词过滤
-│       ├── publisher.py       # 微信公众号 API 封装（token管理/草稿发布/标题去重）
-│       ├── article_utils.py   # Markdown→HTML 转换 + 样式注入 + 配图嵌入
-│       └── runtime.py         # 日志初始化和全局配置
+├── daily_knowledge/               # 每日小知识独立工作流、去重器与本地数据库
+├── tools/                         # 零访谈账号分析 (analyze_account.py) 与图谱构建工具 (build_knowledge_tree.py)
+├── prompts/                       # 分工作流与分领域 Writing Skill 提示词 (hotspots/aikepu/daily_knowledge/law/tax)
+├── utils/
+│   ├── image_handler.py           # Qwen-Image-3.0 -> Local SD -> Pillow 兜底生图管线
+│   ├── diagram_gen.py             # Mermaid / HTML+KaTeX / Graphviz / Matplotlib 多模态图表并行引擎
+│   ├── lite_render.py / html_render.py  # 轻量矢量卡片与无头浏览器截图渲染器
+│   ├── image_prompt_gen.py / image_filter.py  # 配图提示词生成与视觉筛选辅助模块
+│   └── key_pool.py / http_client.py / spider.py  # 多 Key 轮换池与抗风控 HTTP/爬虫基础件
 │
-├── utils/                     # 工具模块
-│   ├── image_handler.py       # 智能图片检索引擎（多源搜索 + AI 生图 + 评分筛选 + 尺寸适配）
-│   ├── image_filter.py        # 图片质量评估（6维评分 + OCR文字检测 + pHash去重 + 视觉AI）
-│   ├── http_client.py         # HTTP 会话管理（缓存 + 重试 + 超时控制）
-│   └── spider.py              # Selenium 浏览器启动器（隐身模式配置）
-│
-├── static/                    # Web UI 前端资源（CSS/JS/图标）
-├── templates/                 # Web UI HTML 模板
-└── assets/                    # 运行时自动下载的图片资源目录
+├── templates/ & static/           # Linear Modern Light 双语零构建 ES Module 前端工程
+├── data/
+│   ├── knowledge_trees/           # 内置 5 套领域图谱 (*.json) 与当前激活指示 (_active.txt)
+│   ├── cache/                     # 热点/GitHub 缓存与 aikepu_history.json 进度记录
+│   └── previews/                  # 审稿预览与质量拦截落地 HTML (fail_*.html)
+├── tests/                         # 13 个 Pytest 单元、集成与 WebUI 交互测试套件
+└── docs/                          # 架构重构设计文档与实施记录
 ```
 
 ---
 
-## 🚀 快速开始
+## 快速开始
 
-### 1. 克隆仓库
+### 1. 环境前置条件
+- **Python 3.11+**
+- **Git**
+- **可选组件**：
+  - `Chrome / Chromium`（或 Playwright 浏览器内核）：用于 `HTML+KaTeX`、本地 `Mermaid` 兜底渲染及 GitHub 页面降级抓取。
+  - `Graphviz`（系统命令行 `dot`）：用于轻量结构图本地渲染。
+
+### 2. 安装与初始化
 
 ```bash
+# 1. 克隆仓库并进入目录
 git clone https://github.com/Chain813/wechat-automatic-publisher.git
 cd wechat-automatic-publisher
-```
 
-### 2. 安装依赖
-
-```bash
-# 创建虚拟环境
-python -m venv venv
-
-# 激活虚拟环境（Windows）
-venv\Scripts\activate
-
-# 安装依赖
+# 2. 安装 Python 依赖
 pip install -r requirements.txt
+
+# 3. 准备环境变量配置（Windows 可使用 copy）
+cp .env.example .env
 ```
 
-或直接双击 `run.bat` 自动完成以上步骤。
+编辑 `.env`，至少填入你的 **LLM API Key**（如 DeepSeek / OpenAI 兼容接口）、**DashScope Key**（用于通义万相配图）以及**微信公众号 `AppID` / `AppSecret`**。
 
-**额外依赖**：[Graphviz](https://graphviz.org/download/)（架构图生成需要。在 Windows 系统下，如果安装在默认路径 `C:\Program Files\Graphviz`，系统将自动检测并注入 PATH 环境变量，无需手动配置；若安装在其他路径则需添加到系统 PATH）。
+> [!NOTE]
+> **微信公众号 IP 白名单提示**：在微信公众号后台 **「设置与开发」→「基本配置」** 中，务必将当前运行机器或云服务器的公网出口 IP 加入**公众号 API IP 白名单**，否则 `access_token` 获取与草稿箱同步接口将被微信拦截。
 
-### 3. 配置环境变量
+### 3. 启动运行
 
-复制 `.env.example` 为 `.env`，填入你的 API 密钥：
-
-```env
-# ===== 必填 =====
-WECHAT_APP_ID="你的微信公众号AppID"
-WECHAT_APP_SECRET="你的微信公众号AppSecret"
-LLM_API_KEY="你的DeepSeek API Key"
-
-# ===== 可选 =====
-
-# LLM 模型（默认: deepseek-v4-pro，可选 deepseek-v4-flash）
-# 💡 降本提示：DeepSeek 采用峰谷定价，空闲时段 (0:00-9:00, 12:00-14:00, 18:00-24:00) 享受 50% 折扣！
-LLM_MODEL="deepseek-v4-pro"
-
-# DashScope 千问 API Key（必填，一个 Key 覆盖生图 + 识图）
-DASHSCOPE_API_KEY="sk-xxx"
-
-# 企业微信群机器人 Webhook（可选，发布后自动推送通知）
-QYWECHAT_WEBHOOK=""
-```
-
-### 4. 运行
-
-**CLI 模式：**
-```bash
-python main.py                    # 热点文章发布（默认）
-python main.py --task github      # GitHub Trending 文章发布
-```
-
-**Web 模式：**
+#### 方式 A：启动 WebUI 可视化控制台（推荐）
 ```bash
 python webui.py
 ```
-浏览器访问 http://127.0.0.1:5000
+Windows 用户也可直接双击根目录的 [`run.bat`](run.bat) 或 [`run_gui.bat`](run_gui.bat)。服务默认监听 `5001` 端口（若被占用会自动顺延尝试 `5002`、`5050`、`8080`、`8888`），浏览器打开 `http://127.0.0.1:5001` 即可进入工作台。
 
----
-
-## Web 管理界面
-
-> 界面为浅色玻璃拟态主题（Inter 字体 + 靛蓝/紫渐变主色），背景是 Three.js 3D 粒子网络（`static/js/three-bg.js`）；云端模式的 Token 登录页与主界面同款主题。
-
-### 控制台页面
-
-- **任务类型选择**：热点发布 / GitHub Trending / 体系连载 / 每日小知识
-- **一键启停**：Start / Pause / Resume / Stop 完整控制流
-- **实时日志**：轮询推送的实时运行日志，滚动显示
-- **状态指示**：Running / Paused / Idle 状态标识
-- **Prompt Cache 监控**：命中率、节省 Tokens、节省费用与延迟的实时看板
-
-### 体系连载页面
-
-- 多主题知识库 DAG 拓扑图谱，4 个层级分栏展示
-- 主题包一键切换（AI 科普 / 职场成长 / 健康科普），支持导入自定义知识库 JSON
-- 先修依赖连线与节点状态（已发布/可解锁/锁定），与微信草稿箱自动同步
-- 支持手动标记节点状态与「撰写下一个可解锁节点」
-
-### 图片工作台页面
-
-- 从 Markdown 自动提取 `【此处插入配图：xxx】` 占位符，生成 Imagen 3 / Midjourney / FLUX.1 英文提示词
-- HTML5 拖拽上传配图、实时进度与缩略图、微信公众号移动端高保真预览
-
-### 历史记录页面
-
-- 按日期分组展示发布结果
-- 每条记录显示：✓/✗ 状态、话题名、发布时间、草稿 ID
-- 失败记录显示错误原因
-- 在线/离线文章预览，支持批量删除
-
-### 数据源页面
-
-- 12 个数据源的健康状态卡片
-- 绿色 = 正常 / 黄色 = 降级 / 红色 = 故障
-- 连续失败 3 次自动降级，下次运行自动恢复
-- Tab 激活时每 3 秒自动轮询，实时同步采集进度
-
-### 定时任务页面
-
-- APScheduler cron 表达式定时发布（热点 / GitHub / 体系连载）
-
-### 设置页面
-
-- API Key 在线编辑，密钥脱敏显示
-- 输入校验（防换行注入、长度限制）
-- 保存后立即生效
-- 生图引擎在线状态检测
-
----
-
-## 🖼️ 配图策略
-
-### 热点文章配图（AI 生图优先）
-
-时政科技热点事件往往没有现成的新闻照片（如"ASML停止对华光刻机维修"），因此优先使用 AI 生成概念性插图：
-
-| 优先级 | 来源 | 说明 |
-|--------|------|------|
-| 1 | **通义万相 Qwen-Image-3.0 生图** | 国内直连 AI 生图，需 `DASHSCOPE_API_KEY`，默认首选 |
-| 2 | **Bing 图片搜索** | 大尺寸横版图过滤，无需 Key |
-| 3 | **本地默认图** | 最终兜底方案 |
-
-### GitHub 文章配图与深度剖析 (v4.1)
-
-GitHub 专题升级为 **单项目深度拆解模式**。配图管线 **全部并行执行**，集满 3 张自动停止，速度提升 3-5 倍。智能 Demo URL 检测支持 Vercel/Netlify/GitHub Pages 等主流平台。
-
-| 优先级 | 来源 | 说明 |
-|--------|------|------|
-| 1 | **Social Preview 封面** | **(新)** 提取仓库所有者设置的社交预览图（`open_graph_image_url`），通常是项目最精美的封面 |
-| 2 | **GIF 动画** | **(新)** 优先提取 README 中的 GIF 动画——项目实际运行效果，比任何截图都有说服力 |
-| 3 | **在线 Demo 截图** | 多策略检测 Demo URL（关键词→Badge 链接→平台 URL→GitHub Pages），截取真实界面 |
-| 4 | **README 截图** | 无头浏览器截取 README 渲染页面，自动裁剪为 2.35:1 微信比例 |
-| 5 | **SD 艺术插图** | DeepSeek 生成专属 Prompt → 本地 Stable Diffusion 创作极客风格配图 |
-| 6 | **代码截图** | carbon API 渲染代码片段为带语法高亮的精美截图 |
-
-### 图片评估流程
-
-每张候选图片经过以下评估流程：
-
-```mermaid
-graph TD
-    classDef pool fill:#2980B9,stroke:#3498DB,stroke-width:2px,color:#fff,rx:5px
-    classDef scoring fill:#8E44AD,stroke:#9B59B6,stroke-width:2px,color:#fff,rx:5px
-    classDef ai fill:#D35400,stroke:#E67E22,stroke-width:2px,color:#fff,rx:5px
-    classDef process fill:#27AE60,stroke:#2ECC71,stroke-width:2px,color:#fff,rx:5px
-    classDef final fill:#16A085,stroke:#1ABC9C,stroke-width:3px,color:#fff,rx:15px
-
-    subgraph Phase1 ["阶段一: 生成候选池"]
-        A["🖼️ 原始图片池 (AI生图/图库爬虫)"]:::pool
-    end
-
-    subgraph Phase2 ["阶段二: 传统机器视觉筛选"]
-        B{"📊 6 维 CV 初筛\n分辨率 | 宽高比 | 清晰度\nOCR 文字密度 | 色彩直方图 | 压缩大小"}:::scoring
-    end
-
-    subgraph Phase3 ["阶段三: 深度视觉大模型仲裁 (Top 3)"]
-        C{"🤖 AI 择优引擎"}:::ai
-        D["☁️ Qwen-VL-Max (云端)"]:::ai
-        F["📉 纯 CV 分数 (无AI兜底)"]:::scoring
-    end
-
-    subgraph Phase4 ["阶段四: 后期处理与合规"]
-        G["✂️ 智能画幅裁切\n(900x383 或 900x500)"]:::process
-        H["🔍 pHash 感知哈希\n(防止视觉重复发布)"]:::process
-    end
-
-    I(("📤 上传至微信永久素材库")):::final
-
-    A --> B
-    B -->|选出前三名| C
-    C -->|云端链路通畅| D
-    C -->|云端不可用| F
-    
-    D --> G
-    F --> G
-    
-    G --> H
-    H --> I
-```
-
----
-
-## ⚙️ 核心配置
-
-在 `config.py` 或 `.env` 中调整：
-
-| 配置项 | 说明 | 默认值 |
-|--------|------|--------|
-| `BRAND_NAME` | 品牌名称，显示在文章末尾和通知中 | AutoWeChat |
-| `NEWS_SOURCES` | 启用的热点数据源列表 | 12 个平台 |
-| `FILTER_CATEGORIES` | 优先筛选的关键词类别 | 79 个关键词 |
-| `LLM_MODEL` | DeepSeek 模型名称 | `deepseek-v4-pro` |
-| `LLM_TIMEOUT` | LLM API 超时设置 (秒) | 180 |
-| `LLM_TEMPERATURE` | 生成文本的随机性（0-1，越高越随机） | 0.75 |
-| `LLM_BASE_URL` | LLM API 地址 | https://api.deepseek.com |
-| `IMAGE_DEFAULT_CANDIDATES` | 每次图片搜索的候选数量 | 5 |
-| `DASHSCOPE_API_KEY` | 通义千问 Key（生图+识图共用，必填） | sk-xxx |
-| `DASHSCOPE_API_KEYS` | 多 Key 轮询（逗号分隔，可跨账号叠加并发） | 可选 |
-| `LLM_API_KEYS` | DeepSeek 多 Key 轮询（逗号分隔） | 可选 |
-| `QWEN_IMAGE_SIZE` | 生图分辨率锁定（控成本） | 1280*720 |
-| `QWEN_IMAGE_MODEL` | 国内生图模型（日常配图） | qwen-image-3.0 |
-| `QWEN_IMAGE_REDRAW_MODEL` | 参考图重绘模型（质量优先） | qwen-image-3.0-pro |
-| `QWEN_VL_MODEL` | 国内识图模型 | qwen-vl-max |
-| `SD_ENABLED` | 是否启用本地 Stable Diffusion 生图 | `True` |
-| `SD_API_URL` | Stable Diffusion WebUI API 地址 | `http://127.0.0.1:7860` |
-| `IMAGE_GEN_MODEL` | 图片工作室 Prompt 目标生成模型 | `Qwen-Image-3.0` |
-| `WECHAT_TITLE_MAX_LEN` | 微信标题最大字数限制 | 64 |
-| `WECHAT_DIGEST_MAX_LEN` | 微信摘要最大字数限制 | 120 |
-| `DIAGRAM_PARALLEL_WORKERS` | 图表并行生成线程数（Chrome + Graphviz） | 5 |
-
----
-
-## 📚 名词解释
-
-项目涉及的技术术语、工具名称和专业概念的详细解释，请参阅 **[GLOSSARY.md](GLOSSARY.md)**。
-
-涵盖：技术术语 | 图片相关 | GitHub 相关 | 微信相关
-
----
-
-## 👨‍💻 开发文档
-
-| 文档 | 说明 |
-|------|------|
-| **[DEVELOPMENT.md](DEVELOPMENT.md)** | 开发工作流：环境搭建、代码规范、测试方法、发布流程、调试技巧、故障排查 |
-| **[CLAUDE.md](CLAUDE.md)** | Claude Code 项目指南：架构概览、核心模块、编码规范、常见开发任务 |
-
----
-
-## ☁️ 云端部署（零成本）
-
-无需本地 GPU，通过 Render + GitHub Actions 实现全自动云端运行。
-
-### 架构
-
-```
-GitHub Actions (cron 定时 / 手动触发)
-       │  POST /api/start?token=xxx
-       ▼
-Render (Flask, free tier)
-       │
-       ├── DeepSeek API ──── 选题 + 文章生成
-       ├── 千问 DashScope ─── 生图 + 识图评分（一个 Key）
-       ├── Bing 搜图 ──────── 封面 + 配图备用（SD 不可用时自动降级）
-       └── 微信 API ──────── 发布草稿箱
-```
-
-### 部署步骤
-
-1. **Fork 本仓库到 GitHub**
-
-2. **Render 部署**
-   - 访问 [render.com](https://render.com)，注册免费账号
-   - 新建 Web Service，连接 GitHub 仓库
-   - 选择 `Docker` 运行时，Render 自动读取 `render.yaml`
-   - 在 Environment Variables 中设置：
-     ```
-     WECHAT_APP_ID=你的公众号AppID
-     WECHAT_APP_SECRET=你的公众号AppSecret
-     LLM_API_KEY=你的DeepSeek API Key
-     DASHSCOPE_API_KEY=你的千问 API Key（生图+识图）
-     WEBUI_TOKEN=你自定义的访问密码
-     ```
-   - 部署完成后获得 URL：`https://autowechat-xxxx.onrender.com`
-
-3. **GitHub Actions 配置**
-   - 在仓库 Settings → Secrets 中添加：
-     - `RENDER_URL`：你的 Render 服务 URL
-     - `WEBUI_TOKEN`：与上一步相同的访问密码
-   - 定时触发默认每天 8:00 AM（北京时间），可在 `.github/workflows/trigger.yml` 中修改 cron
-   - 手动触发：GitHub 仓库 → Actions → "AutoWeChat 定时发布" → Run workflow → 选择任务类型
-
-4. **一键运行**
-   - 手机打开 `https://你的域名/?token=你的密码` → 选择任务类型 → Start
-   - 或 GitHub 手机 App → Actions → 手动触发
-
-### 图片降级策略
-
-云端无 SD 时，系统按以下优先级自动降级（全部国内可用）：
-1. 通义万相 Qwen-Image-3.0 生图（需 `DASHSCOPE_API_KEY`，默认首选）
-2. Bing 图片搜索（icrawler，无需 Key）
-3. 本地 Pillow 文字卡片（终极兜底，无需任何网络）
-
-### 本地 Docker 测试
-
+#### 方式 B：CLI 无头命令模式（适合定时任务/服务器脚本）
 ```bash
-docker compose up -d
-# 访问 http://localhost:5000
+# 综合热点深度解读与草稿同步
+python main.py --task hotspots
+
+# GitHub 热门开源项目解析
+python main.py --task github
+
+# 体系科普图谱按序推演
+python main.py --task aikepu
+
+# 每日小知识轻科普
+python main.py --task daily_knowledge
+```
+
+#### 方式 C：零访谈账号定制化工具
+```bash
+# 1. 分析历史文章风格并生成定制 Writing Skill Prompt
+python tools/analyze_account.py
+
+# 2. 为新垂直赛道生成并激活知识图谱 DAG
+python tools/build_knowledge_tree.py
 ```
 
 ---
 
-## 📋 环境要求
+## 环境变量参考
 
-| 依赖 | 说明 | 是否必须 |
-|------|------|---------|
-| Python 3.8+ | 运行环境 | 必须 |
-| [Graphviz](https://graphviz.org/download/) | 架构图渲染引擎，安装后需添加到系统 PATH | 必须（GitHub 模块） |
-| Chrome 浏览器 | Selenium 备用爬取需要 | 可选 |
-| [Stable Diffusion](https://github.com/AUTOMATIC1111/stable-diffusion-webui) | 本地生图引擎（需开启 `--api`） | 可选 |
-| EasyOCR | 图片文字检测（需 PyTorch ~2GB） | 可选 |
+所有核心配置集中定义于 [`config.py`](config.py)，支持通过 `.env` 或 WebUI `运维 -> 系统配置` 调整（以下均严格对齐代码默认值）：
+
+| 变量名 | 说明 | 代码默认值 |
+| :--- | :--- | :--- |
+| `WECHAT_APP_ID` / `WECHAT_APP_SECRET` | 微信公众号开发者凭证 | `""` |
+| `LLM_API_KEY` / `LLM_API_KEYS` | LLM 密钥 / 逗号分隔多 Key 自动轮换池 | `""` |
+| `LLM_BASE_URL` | OpenAI 兼容接口基址 | `https://api.deepseek.com` |
+| `LLM_MODEL` | 主写作与调度模型 | `deepseek-v4-flash` |
+| `LLM_TEMPERATURE` / `LLM_MAX_TOKENS` | 采样温度与最大输出长度 | `0.75` / `8192` |
+| `DASHSCOPE_API_KEY` / `DASHSCOPE_API_KEYS` | 阿里云百炼 Key / 逗号分隔多 Key 轮换池 | `""` |
+| `IMAGE_GEN_MODEL` / `QWEN_IMAGE_MODEL` | AI 配图默认模型 | `qwen-image-3.0` |
+| `QWEN_IMAGE_REDRAW_MODEL` | Image Studio 合规重绘模型 | `qwen-image-3.0-pro` |
+| `QWEN_VL_MODEL` | 多模态视觉分析模型 | `qwen-vl-max` |
+| `SD_ENABLED` / `SD_API_URL` | 本地 Stable Diffusion 备选生图开关与地址 | `True` / `http://127.0.0.1:7860` |
+| `DIAGRAM_PARALLEL_WORKERS` | 多模态技术图表并行渲染线程数 | `5` |
+| `ENABLE_FACT_SEARCH` / `MAX_FACT_SNIPPETS` | 实时联网事实搜索开关与最大参考片段数 | `True` / `4` |
+| `HOTSPOT_CACHE_TTL_SECONDS` | 热点缓存有效时长（秒） | `60` |
+| `MAX_TOPICS_PER_RUN` / `MAX_AIKEPU_PER_RUN` | 单次运行最大成文篇数上限 | `3` / `1` |
+| `KNOWLEDGE_TREE` | 默认知识图谱包（亦可由 `data/knowledge_trees/_active.txt` 覆盖） | `aikepu` |
+| `GITHUB_TOKEN` | GitHub API 可选访问令牌（提升搜索限额） | `""` |
+| `QYWECHAT_WEBHOOK` | 企业微信群机器人通知 Webhook | `""` |
+| `BRAND_NAME` / `ARTICLE_AUTHOR` | 公众号品牌落款与默认作者名 | `智界洞察社` |
+| `WEBUI_TOKEN` | WebUI 登录保护访问令牌（留空则免登录直入） | `""` |
+| `CLOUD_MODE` | 云端无状态环境开关（设为 `"1"` 启用；强制优先云端记录避免本地覆盖） | `""` (`False`) |
 
 ---
 
-## 📄 许可证
+## 云端部署与自动化调度
 
-[MIT License](LICENSE)
+### 1. GitHub Actions 定时运行
+仓库内置 [`.github/workflows/trigger.yml`](.github/workflows/trigger.yml)，支持 Cron 定时触发与 `workflow_dispatch` 手动选择工作流。使用前请在仓库 `Settings -> Secrets and variables -> Actions` 中配置 `LLM_API_KEY`、`WECHAT_APP_ID`、`WECHAT_APP_SECRET`、`DASHSCOPE_API_KEY` 等密钥（注意：GitHub Actions 动态出口 IP 需配合稳定中转或微信白名单策略）。
+
+### 2. Docker / Docker Compose 部署
+```bash
+# 构建并后台启动 WebUI（默认映射 5001 端口，持久化挂载 ./data 与 ./.env）
+docker compose up -d --build
+```
+容器内置 Chromium 与中文字体环境，开箱支持无头网页截图与图表渲染。
+
+### 3. Render 云平台部署
+仓库提供 [`render.yaml`](render.yaml) 作为基础部署模板（含 `CLOUD_MODE` 与 `WEBUI_TOKEN` 自动生成）。部署到 Render 时，请根据实际使用的模型服务在控制台核对并补全 `DASHSCOPE_API_KEY`、`LLM_API_KEY`、`WECHAT_APP_ID`、`WECHAT_APP_SECRET` 等核心环境变量。
 
 ---
 
-## ⚠️ 免责声明
+## 测试与扩展文档
 
-本工具仅供技术研究和内容创作辅助使用。请遵守微信公众号运营规范及相关法律法规。AI 生成内容需人工审核后发布。使用者应自行承担因使用本工具产生的一切法律责任。
+### 运行测试套件
+```bash
+# 运行全部核心单元与接口集成测试
+python -m pytest tests/ -q --ignore=tests/test_webui_e2e_interactions.py
+
+# 如本机已配置 Playwright 浏览器环境，可执行全量 E2E 交互测试
+python -m pytest tests/ -q
+```
+
+### 延伸阅读
+- [README_EN.md](README_EN.md) — 英文版完整项目说明
+- [DEVELOPMENT.md](DEVELOPMENT.md) — 系统架构、模块约束与二次开发指南
+- [CLAUDE.md](CLAUDE.md) — AI 编程协作规范与工程红线（八荣八耻）
+- [CHANGELOG.md](CHANGELOG.md) — 版本演进与变更日志
+- [GLOSSARY.md](GLOSSARY.md) / [GLOSSARY_EN.md](GLOSSARY_EN.md) — 项目核心概念术语表
+
+---
+
+## 免责声明
+
+1. 本项目仅提供技术研究、个人效率提升与合规辅助创作能力，请严格遵守《微信公众号平台运营规范》及所在地区法律法规。
+2. 请妥善保管 `.env` 与各类 API 密钥，切勿将包含真实密钥的文件提交至公共代码仓库。
+3. 使用前请通过 `Audit` 审稿工作台进行人工内容复核，使用者应对最终公开发布的内容承担全部法律与合规责任。

@@ -1,97 +1,54 @@
-English | [中文](GLOSSARY.md)
+# AutoWeChat Glossary
 
-# Glossary
-
-This document provides detailed explanations of technical terms, tool names, and professional concepts used in the AutoWeChat project.
+This glossary standardizes core domain, architecture, and operations terminology across **AutoWeChat** documentation and contributors.
 
 ---
 
-## Table of Contents
+## 1. Core Creation Workflows
 
-- [Technical Terms](#technical-terms)
-- [Image Terms](#image-terms)
-- [GitHub Terms](#github-terms)
-- [WeChat Terms](#wechat-terms)
-
----
-
-## Technical Terms
-
-| Term | Description |
-|------|-------------|
-| **LLM** | Large Language Model. This project uses DeepSeek as the LLM for article generation, topic filtering, and digest creation |
-| **DeepSeek Prompting** | **(NEW)** Prompt engineering optimized specifically for DeepSeek. Combines colloquial tone instructions and layout robustness rules (e.g., leading colon filtering, automatic H2/H3 planning) to ensure professional and readable output |
-| **SYSTEM_PROMPT** | System prompt sent to the LLM defining the AI's role, writing style, article structure, and formatting rules. Essentially the AI's "work manual" |
-| **pHash** | Perceptual Hash. An image fingerprint algorithm that scales down and converts images to grayscale before computing a hash. Similar images produce similar hashes, enabling duplicate detection even after resizing, cropping, or minor modifications |
-| **RapidFuzz** | High-performance fuzzy string matching library. Calculates similarity (0-100%) between titles for deduplication, 10-100x faster than Python's built-in `difflib`. For example, "AI chip ban escalates" and "chip ban escalates again" would score ~75% similarity |
-| **ThreadPoolExecutor** | Python's standard library thread pool executor. Parallelizes multiple tasks (e.g., downloading 5 images simultaneously), merging 5 serial downloads into one parallel operation for significantly faster execution |
-| **Selenium Stealth Mode** | Browser configuration that disables the `webdriver` flag, sets realistic User-Agent strings, and disables automation detection, making Selenium-controlled Chrome appear as human-operated to bypass anti-scraping measures |
-| **icrawler** | Python image crawler framework. Wraps Bing, Baidu, and Google image search engines with filtering by keyword, size, and type |
-| **Webhook** | Callback notification mechanism. WeChat group bots provide a Webhook URL; sending HTTP POST requests to it pushes messages to the group. This project auto-sends notifications after successful article publishing |
-| **API Token** | Authentication key string for API calls. Different services use different formats: GitHub tokens start with `ghp_`, DeepSeek keys start with `sk-` |
-| **Markdown** | Lightweight markup language using `#` for headings, `**` for bold, `>` for quotes, etc. LLM-generated articles use Markdown format, automatically converted to WeChat-compatible HTML |
-| **HTML** | HyperText Markup Language, the standard web format. The system converts Markdown articles to HTML with inline styles, adapted to WeChat's rendering engine |
-| **Inline Style** | CSS styles written directly on HTML tags (e.g., `style="color: red;"`). WeChat doesn't support external CSS files, so inline styles are the only way to control article formatting |
-| **Active Title Dedup** | **(NEW)** Pulls both draft and published article titles from WeChat API, matching them with the 4-layer deduplication algorithm to prevent duplicates. |
-| **WeChat Cloud Status Sync** | **(NEW)** Compares local SQLite history with active WeChat titles before running. Updates `success_status` to `False` in SQLite for deleted articles, releasing hot topics/repos. |
-| **Truthfulness Rule** | **(NEW)** A core constraint that prohibits AI from hallucinating or fabricating data, facts, or code snippets, ensuring all generated content is based on authentic facts and official documentation. |
-| **Three-Phase Map-Reduce Prompt Self-Optimization** | **(NEW)** A large model interaction architecture optimized for generating long educational articles. Phase 1 generates the outline; Phase 2 optimizes the prompts for each section with specific analogies, hooks, and forbidden overlaps to prevent chapter repetitions; Phase 3 generates the sections serially with preceding look-back context. |
-| **Dual-Channel Preview Mechanism** | **(NEW)** WebUI's article preview policy. It prioritizes local HTML preview caches (stored under `data/previews/`) to render article styling, falling back to WeChat Draft Box API. This enables previewing drafts even for failed publishing tasks. |
-| **Real-time Sources Health Polling** | **(NEW)** A synchronization mechanism for the WebUI data source monitoring page. When the Sources tab is active, polls the backend health API every 3 seconds to keep status in sync with workflow progress. |
-| **Light Theme Rewrite** | **(NEW)** The WebUI frontend was upgraded from a dark glassmorphism theme to a light theme. All colors are consolidated into the `:root` design tokens in `static/css/style.css` (`--accent` indigo, `--accent-2` purple, etc.), with legacy variable aliases retained to keep inline styles and JS templates working. |
-| **Three.js 3D Particle Background** | **(NEW)** The WebUI's background animation: ~120 moving, connected particles (indigo/purple) rendered by Three.js that drift subtly with the mouse and adapt to window resizing. It degrades silently when WebGL is unavailable or the CDN fails to load. |
-| **Cloud Token Login Page** | **(NEW)** The access gate in cloud mode (`CLOUD_MODE=1` with `WEBUI_TOKEN` set). Unauthenticated visits to `/` receive `templates/login.html`; a valid token is stored in the `aw_token` cookie to grant access. `/static/` assets are exempt from auth so the login page can load its styles and background script. |
-| **Knowledge Series Engine** | **(NEW)** A multi-theme content engine generalized from the AI skill tree. Generates serialized deep articles along a knowledge-node DAG, ships with AI / Career / Health knowledge packs, and supports uploading custom knowledge-base JSON via the WebUI. |
-| **Qwen-Image-3.0** | **(NEW)** Alibaba Tongyi Wanxiang text-to-image model. Accessed via the DashScope (Model Studio) API without a VPN, supporting text-to-image (T2I) and reference-image editing (I2I). Used for auto image generation and compliant reference redrawing. |
-| **Qwen-VL-Max** | **(NEW)** Alibaba Qwen flagship vision-language model (~¥3/M input tokens). Each image evaluation uses ~2,000 tokens and costs under ¥0.01. Used as the sole model for AI image quality evaluation (switchable to qwen3-vl-flash via `QWEN_VL_MODEL`). |
-| **DeepSeek Peak-Offpeak Pricing** | **(NEW)** Dynamic pricing rule effective Aug 17, 2026. Splits into peak hours (9:00-12:00, 14:00-18:00) and off-peak hours (50% discount). AutoWeChat automatically detects current peak status and calculates prompt cache savings. |
-| **In-Memory Unit Test Suite** | **(NEW)** Isolated test collection in `tests/test_core.py`. Bypasses external network requests and completes core logic & pricing formula verification in <0.1 seconds. |
+| Term | Identifier | Definition |
+| :--- | :--- | :--- |
+| **Trending Hotspots** | `hotspots` | Collects trending topics across 12 news/tech feeds, applies domain keyword filtering, scrapes full source text, performs live web fact grounding, and drafts deep commentary via dynamic narrative strategies. |
+| **GitHub OSS Deep Dive** | `github` | Discovers high-signal repositories from GitHub Trending and API search, inspects READMEs/screenshots, renders architecture visuals, and produces technical walkthroughs. |
+| **Knowledge Graph Series** | `aikepu` | Traverses prerequisite-ordered DAG knowledge trees (5 built-in vertical packs) using a 3-phase pipeline: Outline → Flash prompt optimization → parallel `ThreadPoolExecutor` Sub-Agent section workers. |
+| **Daily Knowledge** | `daily_knowledge` | Standalone lightweight daily encyclopedia module (`daily_knowledge/`) with topic planning, historical deduplicator, and an isolated SQLite tracking database. |
 
 ---
 
-## Image Terms
+## 2. Quality Assurance & Compliant Publishing
 
-| Term | Description |
-|------|-------------|
-| **【Removed】Pollinations.ai / Pexels** | ~~Foreign image sources.~~ Removed from the source chain for commercial compliance; current chain: Qwen-Image generation → Bing search → local text-card fallback |
-| **Stable Diffusion** | **(NEW)** Open-source local image generation model. This project supports the Stable Diffusion WebUI API to generate custom geek-style illustrations for GitHub projects based on DeepSeek-generated prompts |
-| **Carbon** | Code screenshot beautification service (carbon.now.sh). Renders code snippets with syntax highlighting, line numbers, and styled backgrounds. The most popular code presentation method in tech blogs and articles |
-| **Aspect Ratio** | Width-to-height ratio of an image. WeChat recommends: cover 2.35:1 (900×383px), body image ~16:9 (900×500px). The system auto-crops to fit |
-| **Laplacian Variance** | Image sharpness metric. Computes variance after applying the Laplacian operator (second derivative). Blurry images have low variance (<100), sharp images have high variance (>500). No reference image needed |
-| **Color Histogram Entropy** | Image color richness metric. Calculates information entropy from color distribution. Solid-color images have entropy near 0, colorful images have higher entropy (>5). Higher entropy images are typically more visually appealing |
-| **OCR** | Optical Character Recognition. Detects text content in images. This project uses EasyOCR to measure text density; images with high text ratio (screenshots, PPT slides) are unsuitable as article illustrations |
-| **Resize** | Process of cropping and scaling images to WeChat's recommended dimensions. First center-crops to target aspect ratio, then scales to target resolution, then compresses within file size limits (body images: 2MB) |
+| Term | Identifier | Definition |
+| :--- | :--- | :--- |
+| **Human-in-the-Loop (HITL)** | Safety Principle | All automated runs push exclusively to the WeChat Official Account **Draft Box**, requiring final human confirmation via the Audit Workbench before broadcasting. |
+| **Fact Grounding** | `scraper.py` & `searcher.py` | Combines `trafilatura` full-text source extraction with live DuckDuckGo (HTML/Lite) and Bing web searches (`ENABLE_FACT_SEARCH`) to anchor AI prose in verifiable facts. |
+| **Dynamic Narrative Engine** | `narrative.py` | Dynamically pairs 4 structural writing archetypes with 4 opening hooks to eliminate repetitive AI essay templates. |
+| **AI Critic Quality Gate** | `critic.py` | Pre-publish evaluation and auto-repair gate that strips AI clichés, injects missing H2 sections, enforces length/title bounds, and quarantines failed drafts (`REJECTED` → `data/previews/fail_*.html` & SQLite). |
+| **HITL Audit Workbench** | `audit` WebUI View | Interactive review console backed by `data/auto_publish.sqlite` (WAL mode) allowing editors to preview HTML drafts and push approved articles via `/api/review/approve`. |
+| **4-Layer Title Dedup** | `publisher.py` | Deduplicates candidate titles against WeChat Cloud Drafts, published history, and local logs in 4 tiers: exact match → fuzzy similarity → keyword overlap (`>= 0.70`) → AI semantic check. |
 
 ---
 
-## GitHub Terms
+## 3. Visual Pipeline & Frontend Architecture
 
-| Term | Description |
-|------|-------------|
-| **GitHub Trending** | GitHub's official trending page (github.com/trending). Showcases open-source repositories with the most stars in the last 24 hours/7 days/30 days. The primary channel for developers to discover new projects |
-| **Star** | GitHub's bookmark feature. Users click the Star button on a project page to show interest or approval. Star count is the core metric for measuring project popularity |
-| **README** | Project documentation file in the root directory (usually README.md). Contains project introduction, installation instructions, and usage guide. The first file visitors see |
-| **PyGithub** | Python wrapper for GitHub REST API. Provides object-oriented interfaces for accessing GitHub data, e.g., `repo.get_readme()` for README content, `repo.get_topics()` for tags. More stable and type-safe than raw HTTP requests |
-| **rich** | Python rich text and formatting library (github.com/Textualize/rich, 56k+ stars). Renders tables, progress bars, tree structures in terminals. This project uses `rich.tree.Tree` to render project directory trees as styled PNG images |
-| **diagrams** | Python architecture diagram library (github.com/mingrammer/diagrams, 42k+ stars). Draws cloud architecture and system topology diagrams from Python code, supporting AWS/Azure/GCP/Kubernetes nodes. Outputs PNG/SVG |
-| **File Tree** | Hierarchical structure of project files and folders. Shows what files and directories a project contains (e.g., `src/main.py`, `config/`), helping readers quickly understand project composition and tech stack |
-| **Architecture Diagram** | System architecture illustration showing component relationships (frontend/backend/database/cache) and data flow, helping understand system design |
-| **Personal Access Token (PAT)** | GitHub authentication token created at Settings → Developer settings → Personal access tokens. Used for API authentication with higher rate limits (5000 vs 60 requests/hour for anonymous access) |
-| **Graphviz** | Open-source graph visualization software (graphviz.org). The diagrams library depends on it to render architecture diagrams as PNG/SVG files. On Windows, the `bin` directory must be added to the system PATH after installation |
-| **API Rate Limit** | GitHub API request frequency limits. Anonymous: 60 requests/hour, authenticated: 5000 requests/hour. Exceeding the limit returns HTTP 403; the system automatically falls back to web scraping |
-| **Single-Project Deep-Dive** | **(NEW)** A new GitHub workflow that picks one hot repository and integrates English/Chinese README text and screenshots for a detailed project breakdown. |
+| Term | Identifier | Definition |
+| :--- | :--- | :--- |
+| **Linear Modern Light** | Unified Design System | Clean high-contrast light aesthetic (`#FFFFFF` / `#F8F9FB` surfaces with `#4F5BD5` indigo accents) applied consistently across the WebUI, WeChat rich-text article typesetting, and technical diagrams. |
+| **4-Layer Ambient Canvas** | `.ambient-canvas` (`views.css`) | Lightweight CSS-only gradient blob, grid, and noise canvas that replaced the deprecated Three.js 3D WebGL particle background. |
+| **Zero-Build ES Modules** | `static/js/` | Native browser ES module frontend (`main.js`, `core/`, `views/`) requiring no bundler, powering 5 views: `console`, `graph`, `audit`, `image`, and `ops`. |
+| **100% AI Image Chain** | `image_handler.py` | Pure generative fallback chain (`Qwen-Image-3.0` → Local `Stable Diffusion` → Pillow Linear Light vector cards), with Bing image web scraping disabled in the primary pipeline. |
+| **5-Mode Diagram Engine** | `diagram_gen.py` | Parallel visual renderer supporting `Mermaid`, `HTML+Tailwind+KaTeX`, `Graphviz DOT`, and `Matplotlib` structured cards with opaque white backgrounds for WeChat compatibility. |
+| **Image Studio** | `image` WebUI View | Interactive tool to extract Markdown image slots, drag-and-drop local uploads, redraw reference images from WeChat article URLs via `Qwen-Image-3.0-Pro`, and render 1:1 mobile previews. |
 
 ---
 
-## WeChat Terms
+## 4. Customization & Operations Infrastructure
 
-| Term | Description |
-|------|-------------|
-| **AppID** | WeChat official account's unique application identifier. Found in WeChat admin panel → Development → Basic Configuration. Format: 18-character string starting with `wx` |
-| **AppSecret** | WeChat official account's application secret key. Paired with AppID to obtain access_token. Must be kept secure; reset immediately if compromised |
-| **access_token** | WeChat API access token. Obtained by exchanging AppID + AppSecret, valid for 2 hours. Required for all WeChat API calls; the system auto-manages and refreshes it |
-| **Draft Box** | WeChat official account's article draft storage. The system pushes generated articles to the draft box; operators review and formally publish from the WeChat admin panel. API endpoint: `draft/add` |
-| **thumb_media_id** | WeChat material ID. A unique identifier string returned after uploading a cover image to WeChat servers. Passed when creating drafts to associate the cover image |
-| **Title Dedup** | Pre-publish check against existing drafts to prevent duplicate articles. 4 strategies: exact match (identical title), fuzzy match (similarity >80%), keyword match (overlapping core keywords), AI semantic match (semantically similar) |
-| **Digest** | Brief description shown in article push notifications (max 120 characters). Displayed in WeChat subscription message list, determining whether users click to read the full article |
-| **Publishing Flow** | System workflow: ①Generate article HTML → ②Upload cover image to get media_id → ③Create draft via Draft Box API → ④Send enterprise WeChat notification → ⑤Operator reviews and manually publishes |
+| Term | Identifier | Definition |
+| :--- | :--- | :--- |
+| **Zero-Interview Customization** | `tools/` | `analyze_account.py` + `build_knowledge_tree.py` workflow that analyzes historical reference articles and automatically generates aligned DAG knowledge trees and writing skill prompts. |
+| **Domain Knowledge Packs** | `data/knowledge_trees/` | Five built-in vertical trees (`aikepu`, `career`, `health`, `law`, `tax`) hot-switched via `_active.txt` and paired with domain prompts in `prompts/{slug}_skill.md`. |
+| **Key Rotation Pool** | `utils/key_pool.py` | Thread-safe round-robin pool supporting comma-separated `LLM_API_KEYS` and `DASHSCOPE_API_KEYS` with automatic 429 (`120s`) and auth (`300s`) cooldowns. |
+| **Prompt Cache Telemetry** | `llm.py` | Live console metrics tracking LLM cache hit rates, saved tokens, and estimated CNY savings. |
+| **Control Signals** | `cancel_event` / `pause_event` | `threading.Event` primitives checked across workflow loops and interruptible sleeps to guarantee clean Pause/Resume/Stop behavior. |
+| **Cloud Mode** | `CLOUD_MODE=1` | Stateless cloud guard (e.g. GitHub Actions, Render) prioritizing remote WeChat records to prevent ephemeral containers from overwriting history. |
+| **GitHub Token** | `GITHUB_TOKEN` | Optional GitHub Personal Access Token (PAT) used to raise API rate limits during `github` repository discovery. |
