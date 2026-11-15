@@ -1,7 +1,7 @@
 """
 ============================================================
-  图片检索引擎 v8.0 (微信适配版)
-  策略：本地 Stable Diffusion 生图 -> 尺寸适配
+  AI 配图与封面生成引擎 (微信适配版)
+  策略：通义万相 Qwen-Image-3.0 -> 本地 Stable Diffusion -> Pillow 矢量卡片兜底
 ============================================================
 """
 import os
@@ -10,7 +10,7 @@ import time
 import threading
 from PIL import Image, ImageDraw, ImageFont
 
-# 屏蔽 icrawler/OpenCV 的损坏图片警告
+# 屏蔽 OpenCV 的损坏图片警告
 os.environ["OPENCV_LOG_LEVEL"] = "SILENT"
 try:
     import cv2
@@ -447,7 +447,7 @@ def _sanitize_path(text):
 
 
 # ==========================================
-#  免费图源降级层 (SD 不可用时自动启用)
+#  网络图片下载与完整性校验工具
 # ==========================================
 def _save_image_from_url(url, target_dir, prefix="img", timeout=30):
     """从网络 URL 下载图片并保存到 target_dir，包含防盗链头、大小检验及 PIL 完整性校验"""
@@ -767,194 +767,8 @@ def scrape_article_images(article_url, limit=10):
         return []
 
 
-def _try_icrawler_bing(keyword, target_dir, max_images=5):
-    """通过 icrawler 从 Bing 搜索下载图片（无需 API Key）"""
-    try:
-        from icrawler.builtin import BingImageCrawler
-        import tempfile
-        from PIL import Image
-        from .image_filter import compute_perceptual_hash
-
-        tmp_dir = tempfile.mkdtemp(prefix="aw_img_")
-        downloaded = []
-
-        crawler = BingImageCrawler(
-            feeder_threads=1,
-            parser_threads=1,
-            downloader_threads=2,
-            storage={"root_dir": tmp_dir}
-        )
-
-        original_download = crawler.downloader.download
-
-        def tracking_download(task, *args, **kwargs):
-            result = original_download(task, *args, **kwargs)
-            if result:
-                downloaded.append(result)
-            return result
-
-        crawler.downloader.download = tracking_download
-
-        crawler.crawl(
-            keyword=keyword,
-            max_num=min(max_images, 5),
-            min_size=(200, 150),
-            file_idx_offset=0
-        )
-
-        valid_files = []
-        for root, dirs, files in os.walk(tmp_dir):
-            for f in sorted(files):
-                if f.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
-                    valid_files.append(os.path.join(root, f))
-
-        for src in valid_files:
-            fname = os.path.basename(src)
-            dst = os.path.join(target_dir, f"bing_{int(time.time())}_{fname}")
-            try:
-                os.rename(src, dst)
-                img = Image.open(dst)
-                img.verify()
-                img = Image.open(dst)
-                if img.width >= 200 and img.height >= 150:
-                    phash = compute_perceptual_hash(dst)
-                    if not _is_too_similar_to_existing(phash):
-                        logger.info("  icrawler Bing 下载成功 (独特画面): {} ({}x{})", os.path.basename(dst), img.width, img.height)
-                        import shutil
-                        shutil.rmtree(tmp_dir, ignore_errors=True)
-                        return dst
-                    else:
-                        logger.debug("  icrawler Bing 候选图片 {} 与已有图片重复，尝试下一张", fname)
-                        os.remove(dst)
-                else:
-                    os.remove(dst)
-            except Exception:
-                if os.path.exists(dst):
-                    os.remove(dst)
-
-        import shutil
-        try:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-        except Exception:
-            pass
-
-    except ImportError:
-        logger.debug("  icrawler 不可用")
-    except Exception as e:
-        logger.debug("  icrawler Bing 下载失败: {}", e)
-
-    return None
-
-
-def _extract_concise_keywords(keyword):
-    """从长句子/标题中提取 2-4 个核心关键字，用于搜索引擎精准检索"""
-    if not keyword or not keyword.strip():
-        return ""
-
-    clean_text = keyword.strip()
-
-    try:
-        import jieba.analyse
-        tags = jieba.analyse.extract_tags(clean_text, topK=4)
-        if tags:
-            return " ".join(tags)
-    except Exception:
-        pass
-
-    clean_text = re.sub(r'[^\w\s\u4e00-\u9fa5]', ' ', clean_text)
-    words = [w for w in clean_text.split() if len(w) > 1]
-    return " ".join(words[:4]) if words else clean_text[:20]
-
-
-# ---- LLM 关键词翻译缓存 ----
-_keyword_translation_cache = {}
-
-
-def _translate_keyword_via_llm(keyword):
-    """用 DeepSeek 将中文关键词翻译为适合英文图片搜索的 2-5 个英文词"""
-    if keyword in _keyword_translation_cache:
-        return _keyword_translation_cache[keyword]
-
-    # 如果关键词本身就是纯英文，直接返回
-    if re.match(r'^[a-zA-Z0-9\s\-_.,]+$', keyword.strip()):
-        return keyword.strip()
-
-    try:
-        from core.shared.llm import call_deepseek_with_retry
-        system_prompt = (
-            "你是一个翻译引擎。将用户输入的中文关键词/标题翻译为 2-5 个最适合在 "
-            "Bing 等英文图片网站搜索的英文关键词。\n"
-            "规则：只输出英文关键词，用空格分隔，不要解释，不要标点。\n"
-            "示例：输入'华为发布AI芯片' → 输出'Huawei AI chip technology'"
-        )
-        result = call_deepseek_with_retry(keyword, system_content=system_prompt)
-        if result and len(result.strip()) > 2:
-            translated = result.strip().split('\n')[0].strip()
-            _keyword_translation_cache[keyword] = translated
-            logger.info("  关键词翻译: '{}' → '{}'", keyword, translated)
-            return translated
-    except Exception as e:
-        logger.debug("  LLM 关键词翻译失败: {}", e)
-
-    # Fallback: 使用硬编码映射表
-    return _enhance_search_keyword_static(keyword)
-
-
-def _enhance_search_keyword_static(keyword):
-    """将抽象中文概念转为更适合图片搜索的英文关键词（静态映射表兜底）"""
-    ai_term_map = {
-        "注意力机制": "attention mechanism neural network diagram",
-        "Transformer": "transformer architecture deep learning",
-        "神经网络": "neural network visualization",
-        "深度学习": "deep learning artificial intelligence",
-        "机器学习": "machine learning data science",
-        "反向传播": "backpropagation neural network",
-        "梯度下降": "gradient descent optimization",
-        "大模型": "large language model AI",
-        "RAG": "retrieval augmented generation architecture",
-        "Agent": "AI agent autonomous",
-        "嵌入": "word embedding vector representation",
-        "Token": "tokenization natural language processing",
-        "微调": "fine tuning machine learning",
-        "预训练": "pretraining language model",
-        "多模态": "multimodal AI vision language",
-        "量化": "model quantization optimization",
-        "推理": "AI inference engine",
-        "卷积": "convolutional neural network",
-        "编码器": "encoder transformer architecture",
-        "解码器": "decoder transformer architecture",
-        "华为": "Huawei technology headquarters",
-        "芯片": "semiconductor microchip technology",
-        "半导体": "semiconductor manufacturing",
-        "中美": "US China technology competition",
-        "科技制裁": "technology sanctions global",
-        "航天": "space exploration rocket",
-        "量子计算": "quantum computing",
-        "自动驾驶": "autonomous driving car",
-        "机器人": "humanoid robot advanced",
-        "网络安全": "cybersecurity digital",
-        "数字经济": "digital economy smart city",
-        "区块链": "blockchain distributed ledger",
-        "新能源": "renewable energy solar wind",
-        "元宇宙": "metaverse virtual reality",
-        "脑机接口": "brain computer interface neural",
-        "5G": "5G network tower connected",
-        "数据安全": "data protection encryption",
-    }
-    for cn, en in ai_term_map.items():
-        if cn in keyword:
-            return en
-    return keyword
-
-
-def _enhance_search_keyword(keyword):
-    """将中文关键词转为适合英文图片搜索的关键词（优先 LLM 翻译，兜底静态映射）"""
-    return _translate_keyword_via_llm(keyword)
-
-
 _image_sources_status = {
-    "qwen": {"status": True, "last_check": 0},
-    "bing": {"status": True, "last_check": 0}
+    "qwen": {"status": True, "last_check": 0}
 }
 
 
@@ -1036,40 +850,44 @@ def _download_free_image(keyword, save_dir, purpose="body", max_retries=3):
 # ==========================================
 def generate_default_cover(title, save_path, purpose="cover"):
     """
-    用 Pillow 动态生成一个高颜值的文字封面卡片，作为终极兜底。
+    用 Pillow 动态生成 Linear Modern Light 现代极简风格的文字封面/插图卡片，作为终极兜底。
     - cover 尺寸: 900x383
     - body 尺寸: 900x500
     """
     w, h = (900, 383) if purpose == "cover" else (900, 500)
     
-    # 1. 创建渐变色背景 (从深蓝/黑色到深灰)
-    base = Image.new("RGB", (w, h), (11, 14, 20))  # #0b0e14
+    # 1. 创建优雅纵向浅色微光底色 (#FFFFFF 渐变到 #F1F3F7)
+    base = Image.new("RGB", (w, h), (248, 249, 251))
     draw = ImageDraw.Draw(base)
     
-    # 绘制对角渐变
     for y in range(h):
-        for x in range(w):
-            factor = (x / w + y / h) / 2
-            r = int(15 + (30 - 15) * factor)
-            g = int(23 + (41 - 23) * factor)
-            b = int(42 + (59 - 42) * factor)
-            base.putpixel((x, y), (r, g, b))
-            
-    # 2. 绘制装饰边框或网格 (比如左侧画一条渐变色装饰条)
-    draw.rectangle([0, 0, 12, h], fill=(59, 130, 246))  # #3b82f6
-    draw.rectangle([12, 0, 16, h], fill=(6, 182, 212))  # #06b6d4
+        factor = y / max(h - 1, 1)
+        r = int(255 - (255 - 241) * factor)
+        g = int(255 - (255 - 243) * factor)
+        b = int(255 - (255 - 247) * factor)
+        draw.line([(0, y), (w, y)], fill=(r, g, b))
+        
+    # 2. 绘制左侧 Linear Indigo 主题装饰条
+    draw.rectangle([0, 0, 8, h], fill=(79, 91, 213))   # #4F5BD5
+    draw.rectangle([8, 0, 11, h], fill=(99, 102, 241)) # #6366F1
 
-    # 3. 写入标题文字
+    # 3. 顶边 Specular 高光与微弱边框
+    draw.rectangle([0, 0, w - 1, h - 1], outline=(226, 230, 235), width=1) # #E2E6EB
+    draw.line([(12, 0), (w - 1, 0)], fill=(255, 255, 255))
+
+    # 4. 加载中文字体
     font_paths = [
-        "C:\\Windows\\Fonts\\msyh.ttc",    # 微软雅黑
-        "C:\\Windows\\Fonts\\msyhbd.ttc",  # 微软雅黑粗体
-        "C:\\Windows\\Fonts\\simhei.ttf",   # 黑体
+        "C:/Windows/Fonts/msyhbd.ttc",  # 微软雅黑粗体
+        "C:/Windows/Fonts/msyh.ttc",    # 微软雅黑
+        "C:/Windows/Fonts/simhei.ttf",   # 黑体
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "msyh.ttc",
         "arial.ttf"
     ]
     
     font = None
-    font_size = 40 if purpose == "cover" else 44
+    font_size = 36 if purpose == "cover" else 40
     for fp in font_paths:
         if os.path.exists(fp):
             try:
@@ -1081,8 +899,29 @@ def generate_default_cover(title, save_path, purpose="cover"):
     if not font:
         font = ImageFont.load_default()
 
-    # 简单的文字自动换行
-    max_char_per_line = 14 if purpose == "cover" else 16
+    badge_font = None
+    tag_font = None
+    for fp in font_paths:
+        if os.path.exists(fp):
+            try:
+                badge_font = ImageFont.truetype(fp, 13)
+                tag_font = ImageFont.truetype(fp, 14)
+                break
+            except Exception:
+                continue
+    if not badge_font:
+        badge_font = font
+    if not tag_font:
+        tag_font = font
+
+    # 5. 绘制顶部分类/主题标签胶囊
+    badge_y1 = 44 if purpose == "cover" else 52
+    badge_y2 = badge_y1 + 26
+    draw.rounded_rectangle([60, badge_y1, 160, badge_y2], radius=13, fill=(238, 242, 255), outline=(199, 210, 254), width=1)
+    draw.text((76, badge_y1 + 5), "极研智作", fill=(79, 91, 213), font=badge_font)
+
+    # 6. 文字自适应换行与垂直居中排版 (高对比度墨黑 #0C0D0E)
+    max_char_per_line = 15 if purpose == "cover" else 17
     lines = []
     current_line = ""
     for char in title:
@@ -1095,31 +934,22 @@ def generate_default_cover(title, save_path, purpose="cover"):
         
     lines = lines[:3]
     
-    line_height = font_size + 15
+    line_height = font_size + 14
     total_text_height = len(lines) * line_height
-    y_offset = (h - total_text_height) // 2
+    available_top = badge_y2 + 16
+    available_bottom = h - 60
+    y_offset = available_top + (available_bottom - available_top - total_text_height) // 2
     
     for line in lines:
-        draw.text((60, y_offset), line, fill=(241, 245, 249), font=font)  # #f1f5f9
+        draw.text((60, y_offset), line, fill=(12, 13, 14), font=font)  # #0C0D0E
         y_offset += line_height
         
-    # 5. 绘制右下角的小标注
-    tag_font = None
-    for fp in font_paths:
-        if os.path.exists(fp):
-            try:
-                tag_font = ImageFont.truetype(fp, 18)
-                break
-            except Exception:
-                continue
-    if not tag_font:
-        tag_font = ImageFont.load_default()
-        
-    draw.text((60, h - 50), "科学科普专栏 • AI AUTOMATION", fill=(100, 116, 139), font=tag_font)  # #64748b
+    # 7. 绘制底部规范标注 (高清深灰 #5E6470)
+    draw.text((60, h - 48), "极研前沿研究 • AI AUTOMATION", fill=(94, 100, 112), font=tag_font)  # #5E6470
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     base.save(save_path, "JPEG", quality=95)
-    logger.info("  [兜底卡图] 已成功绘制并保存本地兜底文字卡片: {}", save_path)
+    logger.info("  [兜底卡图] 已成功绘制并保存 Linear Modern Light 兜底文字卡片: {}", save_path)
     return save_path
 
 

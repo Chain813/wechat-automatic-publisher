@@ -37,3 +37,9 @@ scratch/
 deploy_pack/
 # Superpowers brainstorm & plan scratch directories
 .superpowers/
+
+# Private deploy script & runtime customization outputs
+deploy_to_server.py
+data/profile.json
+data/knowledge_trees/_active.txt
+data/markdown/transformer_attention_*.md

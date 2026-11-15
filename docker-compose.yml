@@ -1,7 +1,7 @@
 version: "3.8"
 
 # ============================================
-#  云端模式（默认）：无 SD / 无 Ollama，图片自动降级到免费图源
+#  云端模式（默认）：无本地 SD，配图由 Qwen-Image-3.0 与 Pillow 矢量卡片兜底
 #  启动：docker compose up -d
 # ============================================
 services:
@@ -16,10 +16,7 @@ services:
     env_file:
       - .env
     volumes:
-      # 持久化历史记录和技能树状态
-      - ./hotspots_history.json:/app/hotspots_history.json
-      - ./github_history.json:/app/github_history.json
-      - ./github_publish_records.json:/app/github_publish_records.json
-      - ./aikepu_history.json:/app/aikepu_history.json
-      - ./aikepu_skill_tree.json:/app/aikepu_skill_tree.json
+      # 持久化 SQLite 数据库、知识体系与生成的图片资产
+      - ./data:/app/data
+      - ./assets:/app/assets
     restart: unless-stopped

@@ -248,7 +248,7 @@ def _match_node_title(node, target_title):
 
 def reconcile_history_file(wechat_draft_titles=None):
     """
-    自动清理 data/aikepu_history.json 中被用户在微信草稿箱手动删除的草稿记录。
+    自动清理 data/cache/aikepu/aikepu_history.json 中被用户在微信草稿箱手动删除的草稿记录。
 
     核心规则:
       - published 状态的历史记录 -> 绝对保留（因为 freepublish API 对个人号不可用，无法验证）
@@ -605,7 +605,7 @@ def select_next_topic(override_node_id=None):
 
 def mark_published(node_id, title, draft_id=None, status="draft"):
     """
-    记录节点状态到 aikepu_history.json。
+    记录节点状态到 data/cache/aikepu/aikepu_history.json。
     status: 'draft' (草稿箱中) 或 'published' (已正式发版)
     """
     if not node_id:

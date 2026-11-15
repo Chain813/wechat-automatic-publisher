@@ -1,16 +1,16 @@
 # AutoWeChat Docker Image
-# 云端精简版：不含 Chrome/Selenium/Ollama/Stable Diffusion
-# 图片降级到免费图源 (Unsplash + Bing)
-# 图片评分降级到 Gemini Vision (免费层)
+# 云端精简版：不含 Chrome/Stable Diffusion
+# 配图采用通义万相 Qwen-Image-3.0，无密钥/限流时兜底本地 Pillow Linear Modern Light 矢量卡片
 
 FROM python:3.11-slim
 
 LABEL org.opencontainers.image.title="AutoWeChat"
 LABEL org.opencontainers.image.description="微信公众号 AI 内容工厂 - 云端版"
 
-# 系统依赖（仅 Graphviz 用于 diagrams 架构图，可选）
+# 系统依赖（Graphviz 用于架构图 + Noto CJK 中文字体用于卡片与图表）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     graphviz \
+    fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -86,7 +86,7 @@ jobs:
         run: |
           git config user.name "AutoWeChat Bot"
           git config user.email "bot@autowechat.local"
-          git add data/aikepu_history.json 2>/dev/null || true
+          git add data/cache/aikepu/aikepu_history.json 2>/dev/null || true
           git add data/auto_publish.sqlite 2>/dev/null || true
           git add data/daily_knowledge.sqlite 2>/dev/null || true
           if git diff --cached --quiet; then
