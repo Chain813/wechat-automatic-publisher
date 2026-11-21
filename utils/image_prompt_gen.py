@@ -129,13 +129,18 @@ def render_article_preview(article_text: str, article_title: str, images_mapping
         
     cleaned = re.sub(r'([^\n])\n(```[a-zA-Z]*)', r'\1\n\n\2', cleaned)
     
-    # Clean structures (from article_utils.py)
-    from core.shared.article_utils import _STRUCTURAL_LABEL_PATTERNS
+    # Clean structures & apply shared bold pipeline (from article_utils.py)
+    from core.shared.article_utils import (
+        _STRUCTURAL_LABEL_PATTERNS,
+        _apply_bold_fallback,
+        _apply_inline_strong_styles,
+        extract_redbold_tags,
+    )
     for pattern in _STRUCTURAL_LABEL_PATTERNS:
         cleaned = pattern.sub('', cleaned)
-        
-    # Bold styles
-    cleaned = re.sub(r'\*\*\{+(.*?)\}+\*\*', r'<redbold>\1</redbold>', cleaned)
+
+    cleaned = extract_redbold_tags(cleaned)
+    cleaned = _apply_bold_fallback(cleaned)
     
     # Clean spacing
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
@@ -144,7 +149,13 @@ def render_article_preview(article_text: str, article_title: str, images_mapping
     # 2. Extract placeholders to map index to keyword
     placeholders = extract_placeholders(cleaned)
     
-    # 3. Convert Markdown to HTML
+    # 3. Isolate standalone placeholders so blockquotes don't swallow them, then convert Markdown
+    cleaned = re.sub(
+        r'(?m)^[ \t]*(?:>\s*)?(【\s*(?:此处插入配图|此处绘制(?:图表|架构图|流程图|示意图|逻辑图)?)\s*[：:].*?】)[ \t]*$',
+        r'\n\n\1\n\n',
+        cleaned,
+    )
+    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
     html_body = markdown.markdown(cleaned, extensions=["fenced_code", "tables", "sane_lists"])
     
     # Clean <p> around placeholders
@@ -247,16 +258,7 @@ def render_article_preview(article_text: str, article_title: str, images_mapping
         '<hr style="border: none; border-top: 1px solid #E2E8F0; margin: 32px 0;">',
         html_body
     )
-    html_body = html_body.replace(
-        '<redbold>', '<strong style="color: #e11d48; background-color: #ffe4e6; padding: 2px 6px; border-radius: 4px; font-weight: bold; border: 1px solid #fecdd3;">'
-    ).replace(
-        '</redbold>', '</strong>'
-    )
-    html_body = re.sub(
-        r'<strong>(.*?)</strong>',
-        r'<strong style="color: #0C0D0E; font-weight: 700; background-color: rgba(79,91,213,0.06); padding: 1px 4px; border-radius: 3px;">\1</strong>',
-        html_body
-    )
+    html_body = _apply_inline_strong_styles(html_body)
     
     # Linear Modern Light Sunken Code Card
     code_header = (

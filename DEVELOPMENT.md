@@ -94,8 +94,8 @@
 
 ### 3.4 AI Critic 质量门禁与 SQLite WAL 审计
 - [`core/pipeline/critic.py`](core/pipeline/critic.py) 的 `evaluate_and_repair_article()` 在成文后执行：
-  1. 正则清除“AI 味”套话与空洞过渡词。
-  2. 为缺少小节标题的长文自动补充 H2 锚点分段。
+  1. 标记高频套话，清除可独立删除的段首过渡词。
+  2. 将文稿已有小标题提升为 H2，缺少标题时提示审校。
   3. 按文章类型检查汉字长度、标题字符上限与禁用结尾标点，计算综合 `quality_score`。
 - **门禁拦截流程**：若评分或硬性规则不达标，文章状态记为 `REJECTED`，渲染预览保存至 `data/previews/fail_*.html`，并写入 [`data/auto_publish.sqlite`](core/db/manager.py)（启用 `PRAGMA journal_mode=WAL` 与 `busy_timeout=30000` 防并发锁死）。人工可在 WebUI `Audit` 审稿台预览并通过 `/api/review/approve` 核准补发草稿箱。
 
@@ -104,11 +104,10 @@
 2. **Phase 2 (`_optimize_section_prompts`)**：使用 Flash 模型为每节设计差异化论据、排他边界、类比与承接提示词。
 3. **Phase 3 (`_run_subagent_worker`)**：使用 `ThreadPoolExecutor(max_workers=min(4, len(optimized)))` 并发生成多节正文并注入前序章节概要，再拼接全局校验。
 
-### 3.6 100% AI 配图链路与 5 模图表引擎
-- **插图与封面 (`utils/image_handler.py`)**：主链路已彻底禁用 Bing 网页搜图爬虫，固定采用：
-  1. `Qwen-Image-3.0`（`QWEN_IMAGE_SIZE="1280*720"`，受 `QWEN_IMAGE_MAX_CONCURRENCY` 与 `QWEN_IMAGE_MIN_INTERVAL` 信号量保护；Image Studio 重绘默认用 `qwen-image-3.0-pro`）。
-  2. 本地 `Stable Diffusion WebUI`（`SD_ENABLED=True` 且可达时自动触发）。
-  3. 本地 Pillow `Linear Modern Light` 矢量卡片兜底（`generate_default_cover()`）。
+### 3.6 照片配图与技术图表
+
+- 热点和每日小知识的配图占位符由 `utils/source_photos.py` 检索 Openverse 照片。`core/shared/article_photos.py` 上传实图并渲染署名，对未命中的槽位调用 `download_image(..., allow_title_card=False)`。模型实际返回的图标明「AI 示意图」。封面优先使用实图，AI 封面嵌入同样的标识，实图和生成图均不可用时回退为标题卡。
+- GitHub 原图和截图按采集时记录的地址注明出处。体系连载沿用固定封面及图表。Image Studio 支持单独调用通义万相重绘。
 - **视觉评估模块 (`utils/image_filter.py`)**：收敛为 `Qwen-VL-Max` + 多维 CV 评分接口（已移除 Gemini Vision 与 Ollama）。
 - **技术图表引擎 (`utils/diagram_gen.py`)**：
   - 高保真路线：Mermaid（`mermaid.ink` API → [`utils/html_render.py`](utils/html_render.py) Selenium 本地降级）、HTML + Tailwind + KaTeX 公式/数据面板。

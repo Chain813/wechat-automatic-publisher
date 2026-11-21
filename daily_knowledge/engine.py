@@ -1,6 +1,7 @@
 import os
 import re
 import logging
+from config import BRAND_NAME
 from daily_knowledge.llm_client import LLMClient
 from daily_knowledge.database import get_recent_concepts, record_concept
 from daily_knowledge.deduplicator import check_duplicate_with_llm
@@ -23,7 +24,7 @@ def generate_daily_knowledge(domain: str = "人工智能与深度学习", max_re
     )
     try:
         with open(prompt_path, 'r', encoding='utf-8') as f:
-            system_prompt = f.read()
+            system_prompt = f.read().replace("{BRAND_NAME}", BRAND_NAME)
     except Exception as e:
         logger.error(f"无法读取系统 Prompt: {e}")
         return "", ""
@@ -36,7 +37,11 @@ def generate_daily_knowledge(domain: str = "人工智能与深度学习", max_re
         
         user_prompt = f"请为领域【{domain}】生成今天的每日小知识寓言。\n"
         user_prompt += "【排版铁律】：严禁使用任何 LaTeX 数学公式与 $...$ 美元符号！所有变量与表达式必须直接写成纯文本（如写 K 而非 $K$，写 x_i 而非 $x_i$，写 ≥ 而非 \\ge）。\n"
-        user_prompt += "【配图铁律】：文章中必须包含 2-3 个 `【此处插入配图：...】` 占位符（详细描摹生动的寓言场景画面或底层算法机制示意），分布在寓言故事高潮与概念揭底等关键小节，以便调用 AI 生图 API 渲染高质量插图！\n"
+        user_prompt += (
+            "【配图要求】在寓言故事与概念解析中分布 2-3 个真实照片占位符。"
+            "选取文中可拍摄的实体，填写 2-5 个英文检索词或国际通用专名，例如【此处插入配图：library shelves】。"
+            "省略光效、构图和作画指令。\n"
+        )
         if historical_concepts:
             user_prompt += "注意，请绝对不要使用以下已经在历史中讲述过的概念：\n"
             user_prompt += ", ".join(historical_concepts) + "\n"

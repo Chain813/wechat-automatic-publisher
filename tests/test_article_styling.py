@@ -228,10 +228,11 @@ class TestArticleStyling(unittest.TestCase):
 
 第二段文字紧接着深入解释注意力机制。"""
 
-        with patch("core.shared.article_utils._download_and_upload", return_value=(0, None)):
+        with patch("core.shared.article_photos.download_image", return_value=None):
             html_body, stats = process_article_content(
                 article,
                 self.publisher,
+                use_ai_first=True,
                 skip_photo_images=False,
                 generate_diagrams=False,
             )
@@ -259,19 +260,15 @@ class TestArticleStyling(unittest.TestCase):
 第三部分。
 【此处插入配图：第三张图】"""
 
-        mock_responses = {
-            0: (0, "https://mmbiz.qpic.cn/img_slot_1.jpg"),
-            1: (1, None),  # 失败槽位
-            2: (2, "https://mmbiz.qpic.cn/img_slot_3.jpg"),
-        }
+        def mock_download_step(keyword, directory, **kwargs):
+            return {"第一张图": "img_slot_1.jpg", "第三张图": "img_slot_3.jpg"}.get(keyword)
 
-        def mock_download_step(kw, pub, use_ai, idx):
-            return mock_responses[idx]
-
-        with patch("core.shared.article_utils._download_and_upload", side_effect=mock_download_step):
+        with patch("core.shared.article_photos.download_image", side_effect=mock_download_step), \
+             patch.object(self.publisher, "upload_news_image", side_effect=lambda path: f"https://mmbiz.qpic.cn/{path}"):
             html_body, stats = process_article_content(
                 article,
                 self.publisher,
+                use_ai_first=True,
                 skip_photo_images=False,
                 generate_diagrams=False,
             )
@@ -279,6 +276,7 @@ class TestArticleStyling(unittest.TestCase):
         # 槽位 1 与 3 正常渲染
         self.assertIn("https://mmbiz.qpic.cn/img_slot_1.jpg", html_body)
         self.assertIn("https://mmbiz.qpic.cn/img_slot_3.jpg", html_body)
+        self.assertEqual(html_body.count("AI 示意图"), 2)
 
         # 槽位 2 平滑消除，不留空段落断层
         self.assertNotIn("第二张图失败项", html_body)

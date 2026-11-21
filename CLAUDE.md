@@ -19,11 +19,11 @@
 7. **以假装理解为耻，以诚实无知为荣**：
    遇到微信 40001 Token 失效、Selenium 隐身检测反爬拦截或 SD WebUI 连接拒绝，诚实上报真实错误日志，绝不伪造抓取或发布成功。
 8. **以盲目断言为耻，以闭环交付为荣**：
-   严禁留存半成品；交付前必须验证 SQLite 标题去重生效、发布历史正常落库、`.env` 敏感凭据脱敏以及 CHANGELOG 文档同步更新。
+   严禁留存半成品；交付前必须验证 SQLite 标题去重生效、发布历史正常落库、`.env` 敏感凭据脱敏以及 CHANGELOG 文档同步更新。若本地存在 `.gitignore` 忽略的私有云端部署脚本 `deploy_to_server.py`，代码修改并通过单元测试（`pytest` 退出码为 0）后，必须执行 `python deploy_to_server.py` 增量同步云端并确认远端导入冒烟与服务健康检查通过，严禁遗留本地与线上代码漂移。
 
 ## 项目概述
 
-AutoWeChat 是企业级微信公众号 AI 全流程创作与合规发布工作台，采用 Human-in-the-Loop（人机协同审核）架构。集成 12 路热点采集、网页深抓与联网事实核查、动态叙事写作、Critic 质量门禁、100% AI 配图与多模态技术图表引擎，最终安全推送至微信草稿箱并经 Audit 审稿台终审。
+AutoWeChat 是企业级微信公众号 AI 全流程创作与合规发布工作台，采用 Human-in-the-Loop（人机协同审核）架构。集成 12 路热点采集、网页深抓与联网事实核查、动态叙事写作、Critic 质量门禁、可追溯来源的资料照片与技术图表，最终安全推送至微信草稿箱并经 Audit 审稿台终审。
 
 ## 技术栈
 
@@ -132,7 +132,8 @@ AutoWeChat 是企业级微信公众号 AI 全流程创作与合规发布工作�
 
 ### 修改配图与图表策略
 
-- 配图生成链：`utils/image_handler.py` 中的 `download_image()` / `download_cover_image()`（`Qwen-Image-3.0` → 本地 SD → Pillow 矢量卡片）
+- 热点和每日小知识自动配图：`utils/source_photos.py` 检索开放许可照片，`core/shared/article_photos.py` 完成上传、署名和封面。
+- AI 配图工具：`utils/image_handler.py` 中的 `download_image()` / `download_cover_image()`（`Qwen-Image-3.0` → 本地 SD → Pillow 矢量卡片）
 - 视觉辅助评估模块：`utils/image_filter.py` 的 `evaluate_image()` / `evaluate_image_with_qwen_vl()`
 - 技术图表渲染：`utils/diagram_gen.py`（Mermaid / HTML+KaTeX / Graphviz / Matplotlib）与 `utils/lite_render.py`
 - GitHub 配图管线：`core/github/workflow.py` 的 `_ensure_deep_images()`

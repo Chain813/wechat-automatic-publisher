@@ -18,7 +18,7 @@ try:
 except (ImportError, AttributeError):
     pass
 
-from config import SD_TIMEOUT, SD_STEPS, SD_MAX_RETRIES, WECHAT_COVER_WIDTH, WECHAT_COVER_HEIGHT, WECHAT_BODY_WIDTH, WECHAT_BODY_HEIGHT, WECHAT_BODY_MAX_MB
+from config import BRAND_NAME, SD_ENABLED, SD_TIMEOUT, SD_STEPS, SD_MAX_RETRIES, WECHAT_COVER_WIDTH, WECHAT_COVER_HEIGHT, WECHAT_BODY_WIDTH, WECHAT_BODY_HEIGHT, WECHAT_BODY_MAX_MB
 
 from loguru import logger
 
@@ -806,7 +806,9 @@ def _download_free_image(keyword, save_dir, purpose="body", max_retries=3):
     使用通义万相 qwen-image-3.0 生图 (需 DASHSCOPE_API_KEY, 高质量定制 AI 原创图)
     内置 3 次重试与指数退避机制。
     """
-    if not keyword or not keyword.strip():
+    from core.shared.runtime import WorkflowCancelled, cancel_event, check_cancelled
+
+    if not keyword or not keyword.strip() or not _get_qwen_key_pool().size:
         return None
 
     width, height = (900, 383) if purpose == "cover" else (900, 500)
@@ -820,6 +822,7 @@ def _download_free_image(keyword, save_dir, purpose="body", max_retries=3):
     # 1. 通义万相 qwen-image-3.0 生图 (带 3 次重试与退避机制)
     if is_source_available("qwen"):
         for attempt in range(1, max_retries + 1):
+            check_cancelled()
             try:
                 # 重试时如果上一轮未成功，变体微调关键词
                 current_kw = keyword if attempt == 1 else f"{keyword} 画面视角{attempt}"
@@ -832,11 +835,13 @@ def _download_free_image(keyword, save_dir, purpose="body", max_retries=3):
                                attempt, max_retries, keyword,
                                f"（将在 {attempt * 2}s 后发起重试）" if attempt < max_retries else "（已耗尽最大重试次数）")
                 if attempt < max_retries:
-                    time.sleep(attempt * 2)
+                    cancel_event.wait(attempt * 2)
+            except WorkflowCancelled:
+                raise
             except Exception as e:
                 logger.warning("  Qwen-Image AI 生图第 {}/{} 次尝试异常: {}", attempt, max_retries, e)
                 if attempt < max_retries:
-                    time.sleep(attempt * 2)
+                    cancel_event.wait(attempt * 2)
 
         # 只有在 3 次重试全部失败后才标记图源暂时冷却
         mark_source_failed("qwen")
@@ -848,6 +853,36 @@ def _download_free_image(keyword, save_dir, purpose="body", max_retries=3):
 # ==========================================
 #  文字卡图本地兜底生成
 # ==========================================
+def _chinese_cover_font(size):
+    for name in (
+        "C:/Windows/Fonts/msyhbd.ttc", "C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/simhei.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/System/Library/Fonts/PingFang.ttc", "msyh.ttc",
+    ):
+        try:
+            return ImageFont.truetype(name, size)
+        except OSError:
+            continue
+    return None
+
+
+def label_ai_cover(image_path):
+    """把标识写入封面像素，单独展示缩略图时也能识别。"""
+    label = "AI 示意图"
+    font = _chinese_cover_font(22)
+    if font is None:
+        raise OSError("无法加载封面标识所需的中文字体")
+    with Image.open(image_path) as original:
+        cover = original.convert("RGB")
+    draw = ImageDraw.Draw(cover)
+    x, y = cover.width // 2, cover.height - 28
+    left, top, right, bottom = draw.textbbox((x, y), label, font=font, anchor="mm")
+    draw.rounded_rectangle((left - 11, top - 6, right + 11, bottom + 6), radius=6, fill="#27303d")
+    draw.text((x, y), label, font=font, anchor="mm", fill="white")
+    cover.save(image_path, "JPEG", quality=90)
+
+
 def generate_default_cover(title, save_path, purpose="cover"):
     """
     用 Pillow 动态生成 Linear Modern Light 现代极简风格的文字封面/插图卡片，作为终极兜底。
@@ -876,49 +911,17 @@ def generate_default_cover(title, save_path, purpose="cover"):
     draw.line([(12, 0), (w - 1, 0)], fill=(255, 255, 255))
 
     # 4. 加载中文字体
-    font_paths = [
-        "C:/Windows/Fonts/msyhbd.ttc",  # 微软雅黑粗体
-        "C:/Windows/Fonts/msyh.ttc",    # 微软雅黑
-        "C:/Windows/Fonts/simhei.ttf",   # 黑体
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "msyh.ttc",
-        "arial.ttf"
-    ]
-    
-    font = None
     font_size = 36 if purpose == "cover" else 40
-    for fp in font_paths:
-        if os.path.exists(fp):
-            try:
-                font = ImageFont.truetype(fp, font_size)
-                break
-            except Exception:
-                continue
-                
-    if not font:
-        font = ImageFont.load_default()
-
-    badge_font = None
-    tag_font = None
-    for fp in font_paths:
-        if os.path.exists(fp):
-            try:
-                badge_font = ImageFont.truetype(fp, 13)
-                tag_font = ImageFont.truetype(fp, 14)
-                break
-            except Exception:
-                continue
-    if not badge_font:
-        badge_font = font
-    if not tag_font:
-        tag_font = font
+    font = _chinese_cover_font(font_size) or ImageFont.load_default()
+    badge_font = _chinese_cover_font(13) or font
+    tag_font = _chinese_cover_font(14) or font
 
     # 5. 绘制顶部分类/主题标签胶囊
     badge_y1 = 44 if purpose == "cover" else 52
     badge_y2 = badge_y1 + 26
-    draw.rounded_rectangle([60, badge_y1, 160, badge_y2], radius=13, fill=(238, 242, 255), outline=(199, 210, 254), width=1)
-    draw.text((76, badge_y1 + 5), "极研智作", fill=(79, 91, 213), font=badge_font)
+    badge_width = draw.textlength(BRAND_NAME, font=badge_font) + 32
+    draw.rounded_rectangle([60, badge_y1, 60 + badge_width, badge_y2], radius=13, fill=(238, 242, 255), outline=(199, 210, 254), width=1)
+    draw.text((76, badge_y1 + 5), BRAND_NAME, fill=(79, 91, 213), font=badge_font)
 
     # 6. 文字自适应换行与垂直居中排版 (高对比度墨黑 #0C0D0E)
     max_char_per_line = 15 if purpose == "cover" else 17
@@ -945,7 +948,7 @@ def generate_default_cover(title, save_path, purpose="cover"):
         y_offset += line_height
         
     # 7. 绘制底部规范标注 (高清深灰 #5E6470)
-    draw.text((60, h - 48), "极研前沿研究 • AI AUTOMATION", fill=(94, 100, 112), font=tag_font)  # #5E6470
+    draw.text((60, h - 48), f"{BRAND_NAME} • AI AUTOMATION", fill=(94, 100, 112), font=tag_font)  # #5E6470
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     base.save(save_path, "JPEG", quality=95)
@@ -956,7 +959,7 @@ def generate_default_cover(title, save_path, purpose="cover"):
 # ==========================================
 #  核心下载与图源调度接口
 # ==========================================
-def download_image(keyword, save_dir="assets"):
+def download_image(keyword, save_dir="assets", *, allow_title_card=True):
     """
     下载正文配图：100% AI 生图架构。
     1. 优先通义万相 Qwen-Image-3.0 AI 生图；
@@ -964,16 +967,15 @@ def download_image(keyword, save_dir="assets"):
     3. 兜底本地高颜值卡片。
     已彻底禁用 Bing 搜索引擎网络爬虫。
     """
+    from core.shared.runtime import check_cancelled
+
+    check_cancelled()
     if not keyword or not keyword.strip():
         return None
 
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
-
     clean_keyword = _sanitize_path(keyword)
     specific_dir = os.path.join(save_dir, clean_keyword)
-    if not os.path.exists(specific_dir):
-        os.makedirs(specific_dir)
+    os.makedirs(specific_dir, exist_ok=True)
 
     # 1. 优先通义万相 Qwen-Image-3.0 AI 生图
     logger.info("🎨 正在发起通义万相 (Qwen-Image) AI 配图生成: '{}'...", keyword)
@@ -984,12 +986,16 @@ def download_image(keyword, save_dir="assets"):
             return best
 
     # 2. 备选本地 Stable Diffusion AI 生图
+    check_cancelled()
     logger.info("🎨 正在发起本地 Stable Diffusion AI 配图生成: '{}'...", keyword)
-    best = _try_local_sd(keyword, specific_dir, width=1024, height=576)
+    best = _try_local_sd(keyword, specific_dir, width=1024, height=576) if SD_ENABLED else None
     if best:
         best = _finalize_image(best, "body")
         if best:
             return best
+
+    if not allow_title_card:
+        return None
 
     # 3. 兜底本地高颜值文字卡片
     logger.warning("  ⚠️ AI 生图服务未就绪，启用本地高颜值卡片兜底: '{}'", keyword)

@@ -26,7 +26,7 @@ class TestReviewGate:
             "维持极高的开关速度，这使得研发成本呈指数级膨胀，每一座新晶圆厂的建设开销都是天文数字。"
         )
         content += (paragraph + "\n\n") * 15
-        content += "文末：**关注「智界洞察社」，先人一步洞悉未来。**"
+        content += "文末：**关注「极研JiYan」，先人一步洞悉未来。**"
 
         result = evaluate_article_quality(title="先进制程扩产背后的隐秘买单者", article_text=content)
         assert result["score"] >= 75

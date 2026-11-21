@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### 公众号名称、写作与配图
+
+- 默认公众号名为 **极研JiYan**。文章作者默认沿用公众号名，两者可以通过 `BRAND_NAME` 和 `ARTICLE_AUTHOR` 单独配置。写作模板与标题卡使用同一配置。
+- 热点稿修订时保留原始材料。热点与项目解读要求把事实、推断和未披露的信息写清楚，质检仅自动删除可独立移除的段首套话。
+- 热点和每日小知识优先使用带署名的 Openverse 资料照片。缺图时尝试 AI 生图，正文图下注明「AI 示意图」，AI 封面直接嵌入标识。生图失败且封面仍缺失时使用公众号标题卡。GitHub 项目原图与截图标记来源。
+- 热点选题梯队重构为 `config.py` 中的 `HOTSPOT_TIERS` 唯一配置源（同步更新 AI/科技政策、硬核 AI/开源工程与高校科研/考研升学/科技财经三梯队关键词）并接入 `filter_tech_hotspots()` 动态生效；补齐私有云端增量部署闭环规范。
+
 ### 🔍 事实核查、动态叙事与 AI Critic 质量门禁 (Fact Grounding & Quality Gate)
 - **联网事实核查与正文深抓**：新增 `core/hotspots/scraper.py`（基于 `trafilatura` 与浏览器伪装请求提取原始网页正文）及 `core/hotspots/searcher.py`（DuckDuckGo HTML/Lite 与 Bing 网页事实检索，由 `ENABLE_FACT_SEARCH` / `MAX_FACT_SNIPPETS` 控制），为深度创作提供可核查事实现场。
 - **动态叙事防套话引擎**：新增 `core/hotspots/narrative.py`，支持 4 种写作原型（`investigative_game` / `tech_deep_dive` / `business_war` / `narrative_human`）× 4 种黄金开篇钩子动态调度。

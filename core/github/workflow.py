@@ -6,12 +6,12 @@ from loguru import logger
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from config import SD_ENABLED, GITHUB_FIXED_COVER
+from config import GITHUB_FIXED_COVER
 from core.github.collector import generate_code_screenshot, get_repo_code_snippet, save_github_history, take_github_readme_screenshot, take_live_ui_screenshot
 from core.github.processor import generate_github_article, generate_github_digest
 from core.shared.article_utils import process_article_content, _print_review_report
 from core.shared.llm import validate_title
-from utils.image_handler import download_project_image_for_github, reset_image_cache
+from utils.image_handler import reset_image_cache
 from core.shared.runtime import check_cancelled
 
 from core.pipeline.nodes import BaseNode
@@ -91,10 +91,12 @@ def _ensure_deep_images(projects, publisher):
         check_cancelled()
 
         urls = []
+        sources = {}
+        repo_url = f"https://github.com/{p['repo']}"
         urls_lock = threading.Lock()
         enough = threading.Event()
 
-        def _try_add(make_fn, label):
+        def _try_add(make_fn, label, source_url):
             if enough.is_set():
                 return None
             check_cancelled()
@@ -105,8 +107,9 @@ def _ensure_deep_images(projects, publisher):
                 return None
             if img_url:
                 with urls_lock:
-                    if len(urls) < 3:
+                    if len(urls) < 3 and img_url not in urls:
                         urls.append(img_url)
+                        sources[img_url] = source_url
                         print(f"  ✅ {label} 已上传")
                         if len(urls) >= 3:
                             enough.set()
@@ -118,37 +121,30 @@ def _ensure_deep_images(projects, publisher):
               f"gif={len([u for u in p.get('other_images', []) if u.lower().endswith('.gif')])}, "
               f"homepage={bool(p.get('homepage'))}, "
               f"image_url={bool(p.get('image_url'))}, "
-              f"other_images={len(p.get('other_images', []))}, "
-              f"SD={SD_ENABLED}")
+              f"other_images={len(p.get('other_images', []))}")
 
         tasks = []
 
         social_url = p.get('social_preview_url')
         if social_url:
-            tasks.append(("Social Preview", lambda u=social_url: _download_and_upload_url(u, publisher, "social")))
+            tasks.append(("Social Preview", lambda u=social_url: _download_and_upload_url(u, publisher, "social"), repo_url))
 
         other_images = p.get('other_images', [])
         gif_images = [u for u in other_images if u.lower().endswith('.gif')]
         for gif_url in gif_images[:2]:
-            tasks.append(("GIF 动画", lambda u=gif_url: _download_and_upload_url(u, publisher, "gif")))
+            tasks.append(("GIF 动画", lambda u=gif_url: _download_and_upload_url(u, publisher, "gif"), gif_url))
 
         homepage = p.get('homepage')
         if homepage:
             def _make_demo(repo=p['repo'], url=homepage):
                 path = take_live_ui_screenshot(repo, url)
                 return publisher.upload_news_image(path) if path and os.path.exists(path) else None
-            tasks.append(("Demo 截图", _make_demo))
+            tasks.append(("Demo 截图", _make_demo, homepage))
 
         def _make_readme(repo=p['repo'], fp=p.get('readme_file_path')):
             path = take_github_readme_screenshot(repo, fp)
             return publisher.upload_news_image(path) if path and os.path.exists(path) else None
-        tasks.append(("README 截图", _make_readme))
-
-        if SD_ENABLED:
-            def _make_sd(repo=p['repo'], desc=p.get('desc', ''), lang=p.get('lang', 'Unknown'), topics=p.get('topics', [])):
-                path = download_project_image_for_github(repo_name=repo, description=desc, lang=lang, topics=topics)
-                return publisher.upload_news_image(path) if path else None
-            tasks.append(("SD 配图", _make_sd))
+        tasks.append(("README 截图", _make_readme, repo_url + "#readme"))
 
         def _make_code(repo=p['repo'], lang=p.get('lang', 'python')):
             code_text, _ = get_repo_code_snippet(repo)
@@ -156,14 +152,14 @@ def _ensure_deep_images(projects, publisher):
                 img = generate_code_screenshot(code_text, lang)
                 return publisher.upload_news_image(img) if img and os.path.exists(img) else None
             return None
-        tasks.append(("代码截图", _make_code))
+        tasks.append(("代码截图", _make_code, repo_url))
 
         print(f"  🚀 并行启动 {len(tasks)} 个配图任务...")
         if not tasks:
-            print("  ⚠️ 无可用配图任务（social_url/gif/homepage/SD 均为空）")
+            print("  ⚠️ 无可用项目配图")
         else:
             with ThreadPoolExecutor(max_workers=min(4, len(tasks))) as pool:
-                futures = {pool.submit(_try_add, fn, name): name for name, fn in tasks}
+                futures = {pool.submit(_try_add, fn, name, source): name for name, fn, source in tasks}
                 for future in as_completed(futures):
                     try:
                         future.result()
@@ -185,6 +181,7 @@ def _ensure_deep_images(projects, publisher):
                 urls.append(img_url)
 
         p['image_urls'] = urls
+        p['image_sources'] = {url: sources.get(url, url) for url in urls}
         if urls:
             p['image_url'] = urls[0]
             print(f"  📸 最终配图: {len(urls)} 张 — {[u[:60]+'...' for u in urls]}")
@@ -218,7 +215,7 @@ class ProcessGithubImagesNode(BaseNode):
         publisher = context['publisher']
         reset_image_cache()
 
-        print("\n🖼️  正在为项目生成深度配图（README/UI/SD）...")
+        print("\n🖼️  正在收集项目原图和截图...")
         _ensure_deep_images(projects, publisher)
         return True
 
@@ -241,7 +238,8 @@ class GenerateGithubArticleNode(BaseNode):
                     article_text = article_text.replace(placeholder, f"【GITHUB配图：{p['image_url']}】")
 
         print("\n🎨 正在执行排版优化与配图处理...")
-        final_html, review_data = process_article_content(article_text, publisher)
+        sources = {url: page for project in projects for url, page in project.get("image_sources", {}).items()}
+        final_html, review_data = process_article_content(article_text, publisher, github_sources=sources)
 
         repo_name = projects[0]['repo'].split('/')[-1]
         repo_desc = (projects[0].get('desc') or '')[:60]

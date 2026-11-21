@@ -1,13 +1,15 @@
 import os
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from html import unescape
+from urllib.parse import urlsplit
+from concurrent.futures import ThreadPoolExecutor
 import markdown
 import requests
 from loguru import logger
 
 from config import BRAND_NAME, WECHAT_TITLE_MAX_LEN, ASSET_RETENTION_DAYS
-from core.shared.llm import filter_sensitive, simplify_keyword, call_deepseek_with_retry
+from core.shared.llm import filter_sensitive
 
 PLACEHOLDER_PATTERN = re.compile(r"【\s*此处插入配图\s*[：:]\s*(.*?)\s*】")
 GITHUB_IMAGE_PATTERN = re.compile(r"【\s*GITHUB配图\s*[：:]\s*(https?://.*?)\s*】")
@@ -23,74 +25,6 @@ for _label in _STRUCTURAL_LABELS:
     _STRUCTURAL_LABEL_PATTERNS.append(re.compile(rf'#+\s*{_escaped}\s*[:：]?\s*\n?'))
     _STRUCTURAL_LABEL_PATTERNS.append(re.compile(rf'\*\*{_escaped}\*\*\s*[:：]?\s*'))
     _STRUCTURAL_LABEL_PATTERNS.append(re.compile(rf'{_escaped}[：:]\s*'))
-
-
-def _optimize_image_keyword_with_llm(original_keyword):
-    """
-    当常规搜索无法找到高质量图片时，调用 LLM 将抽象的政策/技术术语
-    转化为更具视觉表现力的搜索词。
-    例如：'AI 监管政策' -> '科技感天平 电路纹理 蓝色光效'
-    仅在 simplify_keyword 也失败后触发，token 消耗极低 (~100 tokens)。
-    """
-    if not original_keyword or len(original_keyword) < 2:
-        return ""
-    prompt = (
-        f"原始关键词：{original_keyword}\n\n"
-        "请将这个关键词转化为一个适合在图片搜索引擎中使用的、具有强烈视觉画面感的搜索词。\n"
-        "要求：\n"
-        "- 输出 3-5 个中文关键词，用空格分隔\n"
-        "- 关键词要具象化、有画面感（如'芯片电路板特写'、'数据流光效'）\n"
-        "- 避免抽象概念词（如'政策'、'监管'、'趋势'）\n"
-        "- 直接输出关键词，不要有其他文字"
-    )
-    try:
-        result = call_deepseek_with_retry(
-            prompt,
-            system_content="你是一个图片搜索优化专家。只输出优化后的搜索关键词。",
-            max_retries=1,
-            backoff_base=0.3,
-        )
-        if result:
-            optimized = result.strip().split('\n')[0].strip()
-            logger.info("  LLM 图像关键词优化: '{}' -> '{}'", original_keyword, optimized)
-            return optimized
-    except Exception as e:
-        logger.debug("  LLM 图像关键词优化失败: {}", e)
-    return ""
-
-
-def _download_and_upload(keyword, publisher, use_ai_first=False, slot_idx=0):
-    """下载图片并立即上传到微信，合并为单步操作（供并行调用）"""
-    keyword = keyword.strip()
-    if not keyword:
-        return slot_idx, None
-
-    from utils.image_handler import download_image as _dl
-
-    search_kw = f"{keyword} 画面{slot_idx+1}" if slot_idx > 0 else keyword
-    logger.info("正在为段落关键词 '{}' (槽位 #{}) 搜寻最佳配图...", keyword, slot_idx + 1)
-    image_path = _dl(search_kw)
-
-    if not image_path and search_kw != keyword:
-        image_path = _dl(keyword)
-
-    # 降级：简化关键词重试
-    if not image_path:
-        simplified = simplify_keyword(keyword)
-        if simplified and simplified.strip():
-            image_path = _dl(simplified)
-
-    # LLM 关键词优化兜底：将抽象概念转化为视觉化搜索词
-    if not image_path:
-        optimized = _optimize_image_keyword_with_llm(keyword)
-        if optimized:
-            image_path = _dl(optimized)
-
-    if not image_path:
-        return slot_idx, None
-
-    image_url = publisher.upload_news_image(image_path)
-    return slot_idx, image_url
 
 
 def _extract_image_placeholders(article_text):
@@ -376,7 +310,206 @@ def _format_markdown_tables(html_body: str) -> str:
     return re.sub(r'<table\b[^>]*>.*?</table>', _replace_table, html_body, flags=re.DOTALL)
 
 
-def process_article_content(article_text, publisher, use_ai_first=False, skip_photo_images=False, generate_diagrams=False):
+REDBOLD_STRONG_STYLE = (
+    "color: #e11d48; background-color: #ffe4e6; padding: 2px 6px; "
+    "border-radius: 4px; font-weight: bold; border: 1px solid #fecdd3;"
+)
+BLACKBOLD_STRONG_STYLE = (
+    "color: #0C0D0E; font-weight: bold; background-color: rgba(79,91,213,0.13); "
+    "padding: 1px 5px; border-radius: 4px;"
+)
+
+_PROTECTED_SPAN_PATTERN = re.compile(
+    r'```[\s\S]*?```'
+    r'|<redbold>[\s\S]*?</redbold>'
+    r'|<blockquote\b[\s\S]*?</blockquote>'
+    r'|<section\b[\s\S]*?</section>'
+    r'|<table\b[\s\S]*?</table>'
+    r'|<h[1-6]\b[\s\S]*?</h[1-6]>'
+    r'|<pre\b[\s\S]*?</pre>'
+    r'|<code\b[\s\S]*?</code>'
+    r'|<strong\b[\s\S]*?</strong>'
+    r'|\*\*\{+[\s\S]*?\}+\*\*'
+    r'|<[^>]+>'
+    r'|&[a-zA-Z0-9#]+;'
+    r'|^[ \t]*>[^\n]*'
+    r'|^[ \t]*#{1,6}[ \t]+[^\n]*'
+    r'|\*\*[^*\n]+\*\*'
+    r'|(?<!\*)\*[^*\n]+\*(?!\*)'
+    r'|`[^`\n]+`'
+    r'|【[^】\n]+】'
+    r'|https?://[^\s)>\]」》"\']+',
+    flags=re.MULTILINE,
+)
+
+_NUMBER_UNIT_PATTERN = re.compile(
+    r'(?<![\d.\*a-zA-Z\uE000-\uE01F])'
+    r'(\d[\d,.]*\s*(?:'
+    r'(?:万亿|千亿|百亿|十亿|千万|百万|十万|亿|万|千|百)\s*(?:人民币|美元|欧元|英镑|日元|港元|千瓦时|公里|千米|纳米|毫米|厘米|米|吨|台|颗|枚|座|家|个|项|次|倍|元)'
+    r'|亿美元|万美元|万亿元|万元|人民币|美元|欧元|英镑|日元|港元|千瓦时|百分比|公里|千米|纳米|毫米|厘米|米|吨|台|颗|枚|座|家|个|项|次|倍|元|%|GB|TB|MB|PB|GW|MW|kW|nm|GHz|MHz'
+    r'|万亿|千亿|百亿|十亿|千万|百万|十万|亿|万'
+    r'))'
+    r'(?![\d.%*a-zA-Z\uE000-\uE01F])'
+)
+_QUOTED_PHRASE_PATTERN = re.compile(r'“([^“”\n\uE000\uE001]{2,15})”|"([^"\n\uE000\uE001]{2,15})"')
+_BULLET_COLON_PATTERN = re.compile(r'^([ \t]*(?:[-*+]|\d+\.)[ \t]+)([^：\n*<\uE000\uE001]{2,16})(：)', flags=re.MULTILINE)
+_STANDALONE_PUNCHLINE_PATTERN = re.compile(r'^([ \t]*)([^>\n#*【`\-•\d<\uE000\uE001][^>\n*<\uE000\uE001]{5,28}[。！])([ \t]*)$', flags=re.MULTILINE)
+_SIGNATURE_LINE_PATTERN = re.compile(r'^([ \t]*)(关注「[^」\n]{1,30}」[^\n*<\uE000\uE001]{0,30}[。！!]?)([ \t]*)$', flags=re.MULTILINE)
+
+
+def extract_redbold_tags(text: str) -> str:
+    """识别 **{{红字重点}}** 并剥离多余花括号，转换为 <redbold> 临时标记"""
+    if not text:
+        return text
+    return re.sub(r'\*\*\{+(.*?)\}+\*\*', r'<redbold>\1</redbold>', text)
+
+
+def count_black_bold(text: str) -> int:
+    """统计正文中的普通黑色加粗数量（排除红字重点 **{{...}}** / <redbold> / #e11d48 与标题）"""
+    if not text:
+        return 0
+    stripped = re.sub(r'<redbold>[\s\S]*?</redbold>', '', text)
+    stripped = re.sub(r'\*\*\{+[\s\S]*?\}+\*\*', '', stripped)
+    stripped = re.sub(r'<strong\b[^>]*#e11d48[^>]*>[\s\S]*?</strong>', '', stripped, flags=re.IGNORECASE)
+    stripped_body = re.sub(r'^[ \t]*#{1,6}[ \t]+.*$', '', stripped, flags=re.MULTILINE)
+    stripped_body = re.sub(r'<h[1-6]\b[^>]*>[\s\S]*?</h[1-6]>', '', stripped_body, flags=re.IGNORECASE)
+    md_bolds = len(re.findall(r'\*\*[^*\n]+\*\*', stripped_body))
+    html_bolds = len(re.findall(r'<strong\b[^>]*>[\s\S]*?</strong>', stripped_body, flags=re.IGNORECASE))
+    return md_bolds + html_bolds
+
+
+def _replace_outside_protected(text: str, transform_fn) -> str:
+    """仅对非代码块、非标题、非标签、非引用块、非链接、非已加粗/红字的纯正文字段执行替换（保留完整行边界）"""
+    if not text:
+        return text
+    protected_tokens = []
+
+    def _stash(match):
+        idx = len(protected_tokens)
+        protected_tokens.append(match.group(0))
+        encoded = "".join(chr(0xE010 + int(ch)) for ch in str(idx))
+        return f"\uE000{encoded}\uE001"
+
+    masked = _PROTECTED_SPAN_PATTERN.sub(_stash, text)
+    transformed = transform_fn(masked)
+    if not protected_tokens:
+        return transformed
+
+    def _restore(match):
+        digits = "".join(str(ord(ch) - 0xE010) for ch in match.group(0)[1:-1])
+        idx = int(digits)
+        return protected_tokens[idx] if idx < len(protected_tokens) else match.group(0)
+
+    return re.sub(r"\uE000[\uE010-\uE019]+\uE001", _restore, transformed)
+
+
+def _apply_bold_fallback(text: str, as_html: bool = False) -> str:
+    """
+    黑色粗体兜底：在排除红色重点后，若正文中普通黑色加粗仍偏少，
+    依次补充：1) 关键数字+单位，2) 引号短语，3) 列表标签/独立金句/品牌落款。
+    """
+    if not text:
+        return text
+
+    def _wrap(content: str) -> str:
+        if as_html:
+            return f'<strong style="{BLACKBOLD_STRONG_STYLE}">{content}</strong>'
+        return f'**{content}**'
+
+    # 始终顺手加粗未加粗的文末品牌关注语（独立成行或段落末尾）
+    text = _replace_outside_protected(
+        text,
+        lambda seg: _SIGNATURE_LINE_PATTERN.sub(lambda m: f"{m.group(1)}{_wrap(m.group(2))}{m.group(3)}", seg),
+    )
+
+    plain_text = re.sub(r'<[^>]+>', '', text)
+    chinese_chars = len(re.findall(r'[\u4e00-\u9fa5]', plain_text))
+    target_min = 5 if chinese_chars < 600 else 10
+
+    if count_black_bold(text) >= target_min:
+        return text
+
+    # Tier 1: 带单位的关键数字/百分比（适配中文无空格邻接）
+    added_t1 = 0
+
+    def _sub_numbers(seg: str) -> str:
+        nonlocal added_t1
+
+        def _rep(m):
+            nonlocal added_t1
+            if added_t1 >= 15:
+                return m.group(0)
+            added_t1 += 1
+            return _wrap(m.group(1))
+
+        return _NUMBER_UNIT_PATTERN.sub(_rep, seg)
+
+    text = _replace_outside_protected(text, _sub_numbers)
+    if count_black_bold(text) >= target_min:
+        return text
+
+    # Tier 2: 引号内的关键概念/短语（2-15 字）
+    added_t2 = 0
+    needed_t2 = max(0, max(target_min, 10) - count_black_bold(text))
+
+    def _sub_quotes(seg: str) -> str:
+        nonlocal added_t2
+
+        def _rep(m):
+            nonlocal added_t2
+            if added_t2 >= min(10, needed_t2 + 2):
+                return m.group(0)
+            added_t2 += 1
+            return _wrap(m.group(0))
+
+        return _QUOTED_PHRASE_PATTERN.sub(_rep, seg)
+
+    text = _replace_outside_protected(text, _sub_quotes)
+    if count_black_bold(text) >= target_min:
+        return text
+
+    # Tier 3: 列表冒号标签与短小核心结论句（针对无数字无引号文章）
+    def _sub_bullets(seg: str) -> str:
+        return _BULLET_COLON_PATTERN.sub(lambda m: f"{m.group(1)}{_wrap(m.group(2))}{m.group(3)}", seg)
+
+    text = _replace_outside_protected(text, _sub_bullets)
+    if count_black_bold(text) >= target_min:
+        return text
+
+    remaining = max(0, target_min - count_black_bold(text))
+
+    def _sub_punchlines(seg: str) -> str:
+        nonlocal remaining
+
+        def _rep(m):
+            nonlocal remaining
+            if remaining <= 0:
+                return m.group(0)
+            remaining -= 1
+            return f"{m.group(1)}{_wrap(m.group(2))}{m.group(3)}"
+
+        return _STANDALONE_PUNCHLINE_PATTERN.sub(_rep, seg)
+
+    text = _replace_outside_protected(text, _sub_punchlines)
+    return text
+
+
+def _apply_inline_strong_styles(html_body: str) -> str:
+    """统一渲染红字核心重点 (<redbold>) 与黑色加粗徽章 (<strong>)"""
+    html_body = html_body.replace(
+        '<redbold>', f'<strong style="{REDBOLD_STRONG_STYLE}">'
+    ).replace(
+        '</redbold>', '</strong>'
+    )
+    return re.sub(
+        r'<strong>([\s\S]*?)</strong>',
+        lambda m: f'<strong style="{BLACKBOLD_STRONG_STYLE}">{m.group(1)}</strong>',
+        html_body,
+    )
+
+
+def process_article_content(article_text, publisher, use_ai_first=False, skip_photo_images=False,
+                            generate_diagrams=False, *, cover_title=None, github_sources=None):
     from core.shared.runtime import check_cancelled
     check_cancelled()
     if not article_text:
@@ -397,22 +530,11 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
     # 清理并转换原生 LaTeX 数学代码
     cleaned = _clean_latex_math(cleaned)
 
-    # ---- 粗体兜底：如果 LLM 未输出足够粗体，自动标注关键语句 ----
-    bold_count = len(re.findall(r'\*\*[^*]+\*\*', cleaned))
-    if bold_count < 5:
-        # 自动加粗：带单位的数字（如 3400 亿美元、50%、10 倍）
-        cleaned = re.sub(
-            r'(?<!\*)\b(\d[\d,.]*\s*(?:亿|万|千|百|倍|%|美元|元|人民币|欧元|英镑|日元|亿美元|万元))\b(?!\*)',
-            r'**\1**', cleaned
-        )
-        # 自动加粗：引号内的关键短句（3-15 字的引用）
-        cleaned = re.sub(
-            r'(?<!\*)["“]([^"”]{3,15})["”](?!\*)',
-            r'**"\1"**', cleaned
-        )
+    # 重点分级：先识别红字重点并自动剥离多余花括号，避免其虚增普通黑色加粗计数
+    cleaned = extract_redbold_tags(cleaned)
 
-    # 重点分级：识别红字重点，自动剥离可能存在的多层花括号 (Anti-Brace-Overflow)
-    cleaned = re.sub(r'\*\*\{+(.*?)\}+\*\*', r'<redbold>\1</redbold>', cleaned)
+    # ---- 粗体兜底：在排除红字重点后，若正文中黑色加粗仍不足则自动补标 ----
+    cleaned = _apply_bold_fallback(cleaned)
 
     # ---- 修复低级格式错误 (Anti-Low-Level-Errors V2) ----
     # 1. 修复冒号出现在行首的问题：将行首的冒号合并到上一行末尾
@@ -464,6 +586,14 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
 
     logger.info("  配图诊断: 普通占位符={}, GitHub配图={}", len(placeholders), len(github_images))
 
+    # 确保独立占位符行前后存在空行，避免紧跟 > 引用块时被 markdown 吞并导致 <p> 未闭合与图片被关进 <blockquote>
+    cleaned = re.sub(
+        r'(?m)^[ \t]*(?:>\s*)?(【\s*(?:此处插入配图|此处绘制(?:图表|架构图|流程图|示意图|逻辑图)?|GITHUB配图)\s*[：:].*?】)[ \t]*$',
+        r'\n\n\1\n\n',
+        cleaned,
+    )
+    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+
     html_body = markdown.markdown(cleaned, extensions=["fenced_code", "tables", "sane_lists"])
 
     # 更加鲁棒地移除占位符周围的 P 标签（兼容带 class/style 属性的 p 标签及多行嵌套）
@@ -482,26 +612,14 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
         flags=re.DOTALL
     )
 
-    image_results = {}
-    if placeholders:
-        check_cancelled()
-
-        # ---- 逐图生图管线：每张图独立发起一次 AI API 请求 ----
-        pending = [(idx, kw) for idx, kw in enumerate(placeholders)]
-        logger.info("启动逐图 AI 生图 + 上传引擎 ({} 张图，每张图独立发起 API 生图请求)...", len(pending))
-        with ThreadPoolExecutor(max_workers=min(3, len(pending))) as executor:
-            futures = {
-                executor.submit(_download_and_upload, kw, publisher, use_ai_first, idx): idx
-                for idx, kw in pending
-            }
-            for future in as_completed(futures):
-                slot_idx = futures[future]
-                try:
-                    _, image_url = future.result()
-                    if image_url:
-                        image_results[slot_idx] = image_url
-                except Exception as exc:
-                    logger.warning("  逐图 AI 配图处理异常 (槽位 #{}): {}", slot_idx + 1, exc)
+    from core.shared.article_photos import image_html, prepare_article_photos, source_caption
+    photo_figures = {}
+    thumb_id = None
+    cover_caption = ""
+    if not skip_photo_images and (placeholders or cover_title):
+        photo_figures, thumb_id, cover_caption = prepare_article_photos(
+            placeholders, publisher, cover_title, use_ai_first=use_ai_first,
+        )
 
     image_count = 0
     slot_cursor = 0
@@ -514,19 +632,11 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
         nonlocal image_count, slot_cursor
         current_idx = slot_cursor
         slot_cursor += 1
-        image_url = image_results.get(current_idx)
-        if image_url:
+        if current_idx in photo_figures:
             image_count += 1
-            logger.info("  配图 #{} 已成功嵌入文章", current_idx + 1)
-            return (
-                '<p style="text-align:center;margin: 20px 0;">'
-                f'<img src="{image_url}" style="width:100%;max-width:600px;border-radius:12px;'
-                'box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px rgba(15,23,42,0.06);">'
-                '</p>'
-            )
-        else:
-            logger.info("  最终未匹配到合适配图，已平滑移除占位符 #{}", current_idx + 1)
-            return ""
+            return photo_figures[current_idx]
+        logger.info("  最终未匹配到合适配图，已移除占位符 #{}", current_idx + 1)
+        return ""
 
     html_body = pattern_placeholder.sub(_replace_next_placeholder, html_body)
     # 平滑消除可能残留的空段落与换行断层
@@ -539,6 +649,11 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
         def _process_gh_image(gh_url):
             tmp_path = None
             try:
+                if github_sources is not None:
+                    if gh_url not in github_sources:
+                        return gh_url, None
+                    if urlsplit(gh_url).hostname in {"mmbiz.qpic.cn", "mmbiz.qlogo.cn"}:
+                        return gh_url, gh_url
                 logger.info("正在下载 GitHub 配图: {}", gh_url)
                 res = requests.get(gh_url, timeout=10)
                 if res.status_code == 200:
@@ -561,20 +676,19 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
         with ThreadPoolExecutor(max_workers=min(3, len(github_images))) as gh_pool:
             gh_results = list(gh_pool.map(_process_gh_image, github_images))
 
-        for gh_url, image_url in gh_results:
-            pattern = re.compile(rf"【GITHUB配图：\s*{re.escape(gh_url)}】")
-            if image_url:
-                image_html = (
-                    '<p style="text-align:center;margin: 20px 0;">'
-                    f'<img src="{image_url}" style="width:100%;max-width:600px;border-radius:12px;'
-                    'box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px rgba(15,23,42,0.06);">'
-                    "</p>"
-                )
-                html_body = pattern.sub(lambda m: image_html, html_body)
-                image_count += 1
-                logger.info("  GitHub 配图已成功嵌入文章")
-            else:
-                html_body = pattern.sub("", html_body)
+        uploaded = dict(gh_results)
+
+        def replace_github_image(match):
+            nonlocal image_count
+            url = unescape(match.group(1)).strip()
+            cdn_url = uploaded.get(url)
+            if not cdn_url:
+                return ""
+            source = github_sources[url] if github_sources is not None else url
+            image_count += 1
+            return image_html(cdn_url, source_caption(source))
+
+        html_body = GITHUB_IMAGE_PATTERN.sub(replace_github_image, html_body)
 
     # ---- 技术图表处理（支持关闭 LLM 图表代码生成与 Selenium 渲染，节约 Token） ----
     if generate_diagrams:
@@ -726,16 +840,7 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
     )
 
     # 重点分级样式：红色加粗微光卡片（最核心顿悟时刻） → 黑色加粗徽章（重要术语）
-    html_body = html_body.replace(
-        '<redbold>', '<strong style="color: #e11d48; background-color: #ffe4e6; padding: 2px 6px; border-radius: 4px; font-weight: bold; border: 1px solid #fecdd3;">'
-    ).replace(
-        '</redbold>', '</strong>'
-    )
-    html_body = re.sub(
-        r'<strong>(.*?)</strong>',
-        r'<strong style="color: #0C0D0E; font-weight: 700; background-color: rgba(79,91,213,0.06); padding: 1px 4px; border-radius: 3px;">\1</strong>',
-        html_body
-    )
+    html_body = _apply_inline_strong_styles(html_body)
 
     # 优化多行代码块 (<pre><code>) 样式：渲染为 Linear Modern Light Sunken Code Card (微信防剥离多层容器防护)
     code_header = (
@@ -777,10 +882,12 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
     )
 
     word_count = len(cleaned.replace("\n", "").replace(" ", ""))
+    html_body += cover_caption
     html_bytes = len(html_body.encode('utf-8'))
     return html_body, {
         "word_count": word_count,
         "image_count": image_count,
+        **({"thumb_id": thumb_id} if cover_title else {}),
         "sensitive_words": hit_words,
         "html_bytes": html_bytes,
     }

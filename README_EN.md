@@ -15,7 +15,7 @@
 
 ---
 
-**AutoWeChat** is an end-to-end AI content production and operations workbench built for tech media, vertical creators, and professional WeChat Official Account teams. It automates the entire lifecycle from **multi-source / knowledge-graph discovery → full-text scraping & live fact grounding → dynamic narrative drafting → 100% AI illustration & technical diagram rendering → AI Critic quality gate & human audit → 4-layer deduplicated WeChat Draft Box publishing**.
+**AutoWeChat** is an end-to-end AI content production and operations workbench built for tech media, vertical creators, and professional WeChat Official Account teams. It automates the entire lifecycle from **multi-source / knowledge-graph discovery → full-text scraping & live fact grounding → dynamic narrative drafting → credited photography & technical diagram rendering → AI Critic quality gate & human audit → 4-layer deduplicated WeChat Draft Box publishing**.
 
 > [!IMPORTANT]
 > **Compliance & Safety Principle**: Every automated task only pushes articles to the WeChat Official Account **Draft Box**, paired with an interactive **Audit Workbench** for final human-in-the-loop review before publication.
@@ -55,7 +55,7 @@ Driven by a unified engine ([`core/engine.py`](core/engine.py) & [`main.py`](mai
 flowchart TD
     A["Multi-Source Trigger<br/>12 Hotspot Feeds / GitHub / Knowledge DAG / Daily Knowledge"] --> B["Deep Scraping & Fact Grounding<br/>Trafilatura Extraction + DuckDuckGo/Bing Live Search"]
     B --> C["Dynamic Narrative & Tiered LLM Routing<br/>4 Archetypes × 4 Hooks · Flash Outline / Pro Writing"]
-    C --> D["Multimodal Visual Engine<br/>Qwen-Image-3.0 / Local SD / Pillow Fallback Cards<br/>Mermaid / HTML+KaTeX / Graphviz / Matplotlib"]
+    C --> D["Article Images<br/>Openverse Photos / AI Illustrations / Project Screenshots<br/>Mermaid / HTML+KaTeX / Graphviz / Matplotlib"]
     D --> E{"AI Critic Quality Gate<br/>(core/pipeline/critic.py)"}
     E -- "Auto-Repaired & Passed" --> F["4-Layer Title Dedup<br/>Exact → Fuzzy → Keyword Overlap → AI Semantic"]
     E -- "Gate Rejected (REJECTED)" --> G["Save fail_*.html & SQLite<br/>Queue in WebUI Audit Workbench"]
@@ -72,14 +72,13 @@ flowchart TD
 - **Anti-Cliche Narrative Diversity**: [`core/hotspots/narrative.py`](core/hotspots/narrative.py) pairs 4 structural archetypes (`investigative_game`, `tech_deep_dive`, `business_war`, `narrative_human`) with 4 opening hooks (`counter_intuitive`, `cost_and_bill`, `critical_scene`, `cognitive_reversal`) to avoid repetitive AI prose.
 
 ### 2. AI Critic Quality Gate & HITL Audit Workbench
-- **Pre-Publish Evaluation & Auto-Repair**: [`core/pipeline/critic.py`](core/pipeline/critic.py) sanitizes common AI cliché phrases, auto-injects H2 section breaks if missing, enforces length and title punctuation rules, and scores drafts. Rejected articles are saved as `data/previews/fail_*.html` and persisted in [`data/auto_publish.sqlite`](core/db/manager.py) (SQLite WAL mode) with status `REJECTED`.
+- **Pre-Publish Evaluation & Auto-Repair**: [`core/pipeline/critic.py`](core/pipeline/critic.py) flags stock phrases, trims redundant paragraph openings and promotes existing section labels to H2, enforces length and title punctuation rules, and scores drafts. Rejected articles are saved as `data/previews/fail_*.html` and persisted in [`data/auto_publish.sqlite`](core/db/manager.py) (SQLite WAL mode) with status `REJECTED`.
 - **Human-in-the-Loop Approval**: Editors inspect full rendered HTML previews in the WebUI `Audit` tab and trigger `/api/review/approve` to push approved drafts directly to WeChat.
 
-### 3. 100% AI Image Pipeline & 5-Mode Technical Diagram Engine
-- **Pure AI Covers & Illustrations (`utils/image_handler.py`)**: Bing web image scraping is disabled in `download_image` / `download_cover_image` in favor of a 3-tier generation chain:
-  1. **Primary**: Alibaba `Qwen-Image-3.0` (`1280*720` default, rate-limited with concurrency and interval guards); Image Studio redraw uses `qwen-image-3.0-pro`.
-  2. **Secondary**: Local `Stable Diffusion WebUI` (`SD_ENABLED` / `SD_API_URL`).
-  3. **Fallback**: Local Pillow **Linear Modern Light** vector card generator (`generate_default_cover`).
+### 3. Credited Photos, Project Screenshots and Technical Diagrams
+
+- Hotspot articles and Daily Knowledge search Openverse for the physical subject in each illustration slot. For example, `【此处插入配图：rooftop solar panels】` searches for rooftop solar panels. Captions include the work title, creator, license and original page. Resizing preserves the full frame and watermark.
+- If a slot has no suitable photo, Qwen or an enabled local Stable Diffusion service generates an illustration captioned “AI 示意图”. Covers prefer available photos. When an AI illustration becomes the cover, the label is embedded in the image. If generation also fails, the slot is omitted and a branded card can serve as the cover. GitHub articles prefer project images and screenshots. Educational series use their fixed cover and diagrams.
 - **Parallel Diagram & Formula Rendering (`utils/diagram_gen.py`)**: Renders up to `DIAGRAM_PARALLEL_WORKERS=5` charts concurrently with WeChat-safe opaque white backgrounds:
   - **High-Fidelity**: `Mermaid` (`mermaid.ink` API with local [`utils/html_render.py`](utils/html_render.py) Selenium fallback) and `HTML + Tailwind + KaTeX` dashboards/formulas.
   - **Lite Fallbacks**: `Graphviz DOT` ([`utils/lite_render.py`](utils/lite_render.py)) and `Matplotlib` structured cards (formula, comparison, and summary cards) unified under the Linear Modern Light palette (`#FFFFFF`, `#F8F9FB`, `#4F5BD5`).
@@ -162,7 +161,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env` with your **LLM API Key**, **DashScope Key**, and **WeChat `WECHAT_APP_ID` / `WECHAT_APP_SECRET`**.
+Set your **LLM API key** and **WeChat app ID and secret** in `.env`. Openverse supports anonymous photo search. Set a **DashScope key** to use Qwen for fallback illustrations and AI redraw in Image Studio.
 
 > [!NOTE]
 > **WeChat IP Whitelist**: Add your server or local machine's public egress IP to the **API IP Whitelist** in the WeChat Official Account admin panel before pushing drafts.
@@ -209,7 +208,7 @@ All settings are defined in [`config.py`](config.py):
 | `KNOWLEDGE_TREE` | Default tree pack (`_active.txt` takes precedence if present) | `aikepu` |
 | `GITHUB_TOKEN` | Optional GitHub token for higher API rate limits | `""` |
 | `QYWECHAT_WEBHOOK` | Enterprise WeChat group alert webhook URL | `""` |
-| `BRAND_NAME` / `ARTICLE_AUTHOR` | Official account brand & author signature | `智界洞察社` |
+| `BRAND_NAME` / `ARTICLE_AUTHOR` | Official account name and byline (a blank byline uses the account name) | `极研JiYan` |
 | `WEBUI_TOKEN` | Optional WebUI access password/token | `""` |
 | `CLOUD_MODE` | Stateless cloud guard (`"1"` enables cloud-first sync to avoid local overwrite) | `""` (`False`) |
 

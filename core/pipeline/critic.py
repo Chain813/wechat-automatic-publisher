@@ -1,6 +1,6 @@
 """
 主编审校 Agent 与质量把关门禁 (Critic & Quality Gate)
-用于在推文发布前执行多维技术指标审查、AI 刻板套话识别、字数达标检验及事实一致性把关，
+用于在推文发布前执行多维技术指标审查、套话识别、标题与字数检验，
 并提供自动化自愈修剪 (Auto-Remediation) 闭环。
 """
 
@@ -10,30 +10,34 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 from loguru import logger
 
-# AI 刻板套话正则与专业语感置换映射表（用于自动修剪与自愈）
-CLICHE_REPLACEMENTS: List[Tuple[str, str]] = [
-    (r"在这场没有硝烟的战争中", "在当前日益激烈的竞争格局中"),
-    (r"在这场.+?背后", "在这项动态背后"),
-    (r"不仅如此[，,]?", "与此同时，"),
-    (r"换句话说[，,]?", "具体而言，"),
-    (r"不得不提的是[，,]?", "值得特别关注的是，"),
-    (r"不得不提[，,]?", "值得注意的是，"),
-    (r"不可否认[，,]?", "客观审视，"),
-    (r"综上所述[，,]?", "从全局维度来看，"),
-    (r"总而言之[，,]?", "总体而言，"),
-    (r"总的来说[，,]?", "总体审视，"),
-    (r"随着.+?飞速发展[，,]?", "在当前技术与产业纵深推进的背景下，"),
-    (r"随着.+?快速演进[，,]?", "随着行业进入深化迭代周期，"),
-    (r"说白了[，,]?", "从底层逻辑来看，"),
-    (r"毫无疑问[，,]?", "事实充分表明，"),
-    (r"显而易见[，,]?", "清晰显现，"),
-    (r"拭目以待[，,]?", "保持密切审视，"),
-    (r"这是一把双刃剑", "这一方案伴随着利弊权衡"),
-    (r"双刃剑", "双向博弈机制"),
-    (r"既有机遇也有挑战", "在迎来发展窗口的同时也面临现实考量"),
+# 涉及论断和具体语境的套话只提示审校。程序仅删除可独立去掉的段首过渡语。
+_REMOVABLE_LEADS = (
+    "不仅如此", "换句话说", "不得不提的是", "不可否认", "综上所述",
+    "总而言之", "总的来说", "说白了", "毫无疑问", "显而易见",
+)
+CLICHE_PATTERNS: List[str] = [
+    *_REMOVABLE_LEADS, r"在这场没有硝烟的战争中", r"在这场[^。！？]*?背后",
+    r"随着[^。！？]*?飞速发展", r"随着[^。！？]*?快速演进", "不得不提(?!的是)",
+    "拭目以待", "双刃剑", "既有机遇也有挑战",
 ]
-
-CLICHE_PATTERNS: List[str] = [p for p, _ in CLICHE_REPLACEMENTS]
+# 保护引文和代码，同时适配 Markdown 原稿与微信 HTML。
+_QUOTED_OR_CODE = (
+    r'~~~[\s\S]*?~~~|```[\s\S]*?```'
+    r'|<(?P<tag>blockquote|q|pre|code)\b[^>]*>[\s\S]*?</(?P=tag)>'
+    r'|^[ \t]*>[^\n]*|“[^”]*”|「[^」]*」'
+)
+_PARAGRAPH_LEAD = re.compile(
+    _QUOTED_OR_CODE +
+    r'|(?P<start>^[ \t]*|<p\b[^>]*>)(?P<lead>' + '|'.join(_REMOVABLE_LEADS) + r')[，,][ \t]*(?=[^\s<])',
+    flags=re.MULTILINE | re.IGNORECASE,
+)
+_H2 = re.compile(r'^##[ \t]+\S|<h2\b', re.MULTILINE | re.IGNORECASE)
+_SECTION_LABEL = re.compile(
+    _QUOTED_OR_CODE +
+    r'|(?P<markdown>^###)(?=[ \t]+\S)|(?P<html></?)h3(?=[\s>])'
+    r'|^\*\*(?P<label>(?!关注「)[^*{}\n。！？；]{2,32})\*\*[ \t]*$',
+    flags=re.MULTILINE | re.IGNORECASE,
+)
 
 
 def _extract_plain_text(text: str) -> str:
@@ -56,23 +60,42 @@ def auto_repair_article(article_text: str) -> Tuple[str, List[str]]:
     repaired = article_text
     repairs_applied = []
 
-    # 1. 自动置换刻板套话
-    for pattern, replacement in CLICHE_REPLACEMENTS:
-        matches = re.findall(pattern, repaired)
-        if matches:
-            repaired = re.sub(pattern, replacement, repaired)
-            repairs_applied.append(f"将套话「{matches[0]}」平滑润色为「{replacement}」(替换 {len(matches)} 处)")
+    def strip_lead(match):
+        if match.group("lead") is None:
+            return match.group()
+        repairs_applied.append(f"删除段首套话「{match.group('lead')}」")
+        return match.group("start")
 
-    # 2. 检查并补齐缺失的小标题层级 (针对无 H2 且字数充裕的文本)
-    if not (re.search(r"##\s+", repaired) or re.search(r"<h2\b", repaired)):
-        if len(repaired) > 1200:
-            # 在文章前半段寻找合适段落插入逻辑小标题
-            paragraphs = repaired.split("\n\n")
-            if len(paragraphs) >= 4:
-                paragraphs.insert(1, "## 一、 核心脉络与关键动向")
-                paragraphs.insert(min(4, len(paragraphs) - 1), "## 二、 关键剖析与未来洞察")
-                repaired = "\n\n".join(paragraphs)
-                repairs_applied.append("自动注入逻辑小标题 (##) 强化文章层级排版")
+    repaired = _PARAGRAPH_LEAD.sub(strip_lead, repaired)
+
+    # 2. 只给已有小标题补层级，保留作者原来的措辞与输出格式。
+    if len(repaired) > 1200 and not _H2.search(repaired):
+        def promote_label(match):
+            if match.group("markdown"):
+                return "##"
+            if match.group("html"):
+                return match.group("html") + "h2"
+            if match.group("label"):
+                return "## " + match.group("label")
+            return match.group()
+
+        with_headings = _SECTION_LABEL.sub(promote_label, repaired)
+        if with_headings != repaired:
+            repaired = with_headings
+            repairs_applied.append("将原有小标题调整为二级标题")
+
+    # 3. 检查并补强正文黑色重点标粗（针对 0~4 处黑字加粗的长文）
+    plain_text = _extract_plain_text(repaired)
+    chinese_chars = len(re.findall(r"[\u4e00-\u9fa5]", plain_text))
+    if chinese_chars >= 800:
+        from core.shared.article_utils import _apply_bold_fallback, count_black_bold
+        before_bolds = count_black_bold(repaired)
+        if before_bolds < 5:
+            is_html = bool(re.search(r"<(?:p|section|blockquote|div)\b", repaired, flags=re.IGNORECASE))
+            repaired = _apply_bold_fallback(repaired, as_html=is_html)
+            after_bolds = count_black_bold(repaired)
+            if after_bolds > before_bolds:
+                repairs_applied.append(f"自动补强正文黑色重点标粗 ({before_bolds} -> {after_bolds} 处)")
 
     return repaired, repairs_applied
 
@@ -157,11 +180,21 @@ def evaluate_article_quality(
         score -= 10
         issues.append(f"标题末尾包含禁止的标点符号「{clean_title[-1]}」")
 
-    # 4. 结构完整性审查（二级标题与金句引用）
-    has_h2 = bool(re.search(r"##\s+", article_text) or re.search(r"<h2\b", article_text))
+    # 4. 结构完整性审查（二级标题与重点标粗）
+    has_h2 = bool(_H2.search(article_text))
     if not has_h2 and chinese_chars >= 800:
         score -= 10
         issues.append("文稿缺少二级小标题 (##)，层级感不足")
+
+    if chinese_chars >= 800:
+        from core.shared.article_utils import count_black_bold
+        black_bold_cnt = count_black_bold(article_text)
+        if black_bold_cnt == 0:
+            score -= 26
+            issues.append("文稿正文缺少黑色重点标粗 (**...** / <strong>)，缺少扫读视觉锚点 (0/5)")
+        elif black_bold_cnt < 5:
+            score -= 10
+            issues.append(f"文稿正文黑色重点标粗偏少 ({black_bold_cnt} < 5)")
 
     score = max(0, min(100, score))
     passed = score >= min_pass_score

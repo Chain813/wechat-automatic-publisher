@@ -344,7 +344,7 @@ def load_aikepu_skill_prompt() -> str:
         if os.path.exists(skill_path):
             try:
                 with open(skill_path, "r", encoding="utf-8") as f:
-                    return f.read().strip()
+                    return f.read().strip().replace("{BRAND_NAME}", BRAND_NAME)
             except Exception as e:
                 logger.warning("加载 Skill 文件失败: {}", e)
     return build_system_prompt()
@@ -504,13 +504,7 @@ def generate_aikepu_article(topic_info):
     # 强制清理可能误输出的普通照片配图占位符，落实“科普长文主要以图表为主，避免AI生图”的原则
     final_article = re.sub(r"【\s*此处插入配图\s*[：:]\s*.*?\s*】", "", final_article)
 
-    # 追加知识地图和关注尾缀
-    final_article += (
-        f"\n\n## 知识地图导航\n\n"
-        f"学习完这篇内容，你在 AI 技能树上又点亮了一个重要节点。"
-        f"你可以继续探索与此相关的前置或后置知识，构建完整的知识体系。\n\n"
-        f"**关注「{BRAND_NAME}」，系统学习 AI 知识体系。**"
-    )
+    final_article += f"\n\n**关注「{BRAND_NAME}」。**"
 
     # 统计
     word_count = len(final_article.replace(" ", "").replace("\n", ""))

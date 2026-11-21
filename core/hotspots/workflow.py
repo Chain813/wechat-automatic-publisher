@@ -8,7 +8,7 @@ from config import MAX_TOPICS_PER_RUN, MAX_TOPIC_CANDIDATES
 from core.hotspots.processor import filter_tech_hotspots, generate_article, generate_digest
 from core.shared.article_utils import process_article_content, _print_review_report
 from core.shared.llm import validate_title
-from utils.image_handler import download_cover_image, reset_image_cache
+from utils.image_handler import reset_image_cache
 from core.shared.runtime import check_cancelled
 
 from core.shared.publisher import _to_clean_title_str
@@ -221,36 +221,14 @@ class ParallelPublishNode(BaseNode):
         reset_image_cache()
 
         topic_str = _to_clean_title_str(topic)
-        with ThreadPoolExecutor(max_workers=1) as cover_pool:
-            cover_future = cover_pool.submit(download_cover_image, topic_str)
-            article_text = generate_article(topic)
-            if not article_text:
-                cover_future.cancel()
-                return None
-
-            final_html, review_data = process_article_content(article_text, publisher, use_ai_first=True)
-            check_cancelled()
-            if not final_html:
-                cover_future.cancel()
-                return None
-
-            cover_path = cover_future.result()
-
-        thumb_id = None
-        if cover_path:
-            thumb_id = publisher.upload_image(cover_path)
-            if not thumb_id:
-                try:
-                    from PIL import Image as PILImage
-                    with PILImage.open(cover_path) as img:
-                        if img.mode != 'RGB':
-                            img = img.convert('RGB')
-                        img.save(cover_path, 'JPEG', quality=60, optimize=True)
-                    thumb_id = publisher.upload_image(cover_path)
-                except Exception as e:
-                    logger.warning("封面压缩重试失败: {}", e)
-
-        return final_html, review_data, thumb_id
+        article_text = generate_article(topic)
+        if not article_text:
+            return None
+        final_html, review_data = process_article_content(article_text, publisher, cover_title=topic_str)
+        check_cancelled()
+        if not final_html:
+            return None
+        return final_html, review_data, review_data["thumb_id"]
 
     def _publish_single_topic(self, topic, pub):
         try:

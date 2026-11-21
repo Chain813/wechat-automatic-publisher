@@ -3,18 +3,17 @@ import re
 import hashlib
 from datetime import datetime
 from loguru import logger
-from concurrent.futures import ThreadPoolExecutor
 
 from daily_knowledge.engine import generate_daily_knowledge
 from core.shared.article_utils import process_article_content, _print_review_report
 from core.shared.runtime import check_cancelled
 from core.shared.llm import validate_title
-from utils.image_handler import download_cover_image, reset_image_cache
+from utils.image_handler import reset_image_cache
 from core.pipeline.critic import evaluate_and_repair_article, format_critic_report
 
 def _normalize_and_cap_placeholders(text: str, max_images: int = 3) -> str:
     """
-    统一占位符格式并支持通义万相 AI 生图。
+    统一新旧占位符格式。
     前 max_images 个转为真实配图占位符，多余的保留为图表分析卡片。
     """
     if not text:
@@ -41,7 +40,7 @@ def _normalize_and_cap_placeholders(text: str, max_images: int = 3) -> str:
 def run_daily_knowledge_workflow(publisher):
     """
     全链路推送工作流，将纯文本 Markdown 推送至微信草稿箱。
-    接入通义万相 (Qwen-Image) AI 生图 API，生成专属封面与正文插图。
+    上传带出处的资料照片和封面。
     保持高度解耦，仅引用必要的核心公共服务组件。
     """
     check_cancelled()
@@ -66,51 +65,16 @@ def run_daily_knowledge_workflow(publisher):
     if len(topic_title) > 60:
         topic_title = topic_title[:57] + "..."
 
-    # 规范化配图占位符并限制生图并发上限（默认前 3 张接入 AI 生图 API）
     article_text = _normalize_and_cap_placeholders(article_text, max_images=3)
-
-    # 2. 并行生成封面图与正文排版（含正文逐图 AI 生图）
-    cover_keyword = f"每日小知识 {concept_name} {topic_title}"
-    logger.info("🎨 正在发起通义万相 (Qwen-Image) AI 封面生成: '{}'...", cover_keyword)
-
-    with ThreadPoolExecutor(max_workers=1) as cover_pool:
-        cover_future = cover_pool.submit(download_cover_image, cover_keyword, "assets")
-
-        print("\n🎨 正在执行排版优化与正文配图渲染 (接入通义万相生图 API)...")
-        # 调用核心排版方法，use_ai_first=True, skip_photo_images=False 启用 AI 生图 API 逐图生成与上传
-        final_html, review_data = process_article_content(
-            article_text, publisher, use_ai_first=True, skip_photo_images=False
-        )
-        check_cancelled()
-        
-        if not final_html:
-            cover_future.cancel()
-            print("❌ 内容格式化与渲染异常，跳过。")
-            return False
-
-        cover_path = cover_future.result()
-
-    # 3. 封面图上传
-    thumb_id = None
-    if cover_path and os.path.exists(cover_path):
-        thumb_id = publisher.upload_image(cover_path)
-        if not thumb_id:
-            print("⚠️ 封面上传失败，尝试压缩后重试...")
-            try:
-                from PIL import Image as PILImage
-                with PILImage.open(cover_path) as img:
-                    if img.mode != 'RGB':
-                        img = img.convert('RGB')
-                    img.save(cover_path, 'JPEG', quality=60, optimize=True)
-                thumb_id = publisher.upload_image(cover_path)
-            except Exception as e:
-                logger.warning("  封面压缩重试失败: {}", e)
-    else:
-        print("❌ 严重警告：封面图不存在且生成失败，微信接口将拒绝发布草稿！")
+    final_html, review_data = process_article_content(article_text, publisher, cover_title=topic_title)
+    check_cancelled()
+    thumb_id = review_data.get("thumb_id")
+    if not final_html or not thumb_id:
+        logger.warning("每日小知识缺少正文或封面，跳过草稿上传")
         return False
         
     # 构建简单的摘要
-    digest_text = f"今天的【{domain_name}】小知识，为你讲透底层原理。"
+    digest_text = f"{topic_title}｜本期概念：{concept_name}"[:120]
 
     # 打印排版与安全审查报告
     _print_review_report(

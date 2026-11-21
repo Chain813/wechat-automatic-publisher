@@ -15,7 +15,7 @@
 
 ---
 
-**AutoWeChat** 是一个面向技术媒体、垂直自媒体与专业内容团队的微信公众号自动化生产工作台。它打通了从**多源热点/知识图谱发现 -> 网页深抓与联网事实核查 -> 动态叙事撰写 -> AI 配图与多模态图表渲染 -> Critic 自动质检与人工审稿 -> 微信草稿箱去重推送**的全链路。
+**AutoWeChat** 是一个面向技术媒体、垂直自媒体与专业内容团队的微信公众号自动化生产工作台。它打通了从**多源热点/知识图谱发现 -> 网页深抓与联网事实核查 -> 动态叙事撰写 -> 署名照片与技术图表 -> Critic 自动质检与人工审稿 -> 微信草稿箱去重推送**的全链路。
 
 > [!IMPORTANT]
 > **合规与安全底线**：系统所有自动发布任务仅推送至微信公众号**草稿箱（Draft Box）**，配合内置的 **Audit 审稿工作台** 实现人工终审把关，严禁绕过平台审核机制进行全自动无监督群发。
@@ -55,7 +55,7 @@
 flowchart TD
     A["多源触发<br/>12路热点 / GitHub / 知识图谱 DAG / 每日百科"] --> B["内容深抓与事实核查<br/>Trafilatura 全文提取 + DuckDuckGo/Bing 实时搜索"]
     B --> C["动态叙事与分层路由<br/>4种原型 × 4种钩子 · Flash大纲 / Pro创作"]
-    C --> D["多模态视觉引擎<br/>Qwen-Image-3.0 / 本地 SD / Pillow 矢量兜底<br/>Mermaid / HTML+KaTeX / Graphviz / Matplotlib"]
+    C --> D["配图与图表<br/>Openverse 照片 / AI 示意图 / 项目截图<br/>Mermaid / HTML+KaTeX / Graphviz / Matplotlib"]
     D --> E{"AI Critic 质检门禁<br/>(core/pipeline/critic.py)"}
     E -- "自动修复 & 评分达标" --> F["4层标题查重<br/>精确 → 模糊 → 关键词重叠 → AI语义"]
     E -- "触发红线 (REJECTED)" --> G["落地 fail_*.html & SQLite<br/>进入 WebUI Audit 人工复核台"]
@@ -73,17 +73,16 @@ flowchart TD
 
 ### 2. AI Critic 自动质检门禁与 HITL 审稿闭环
 - **自动修复与质检**：[`core/pipeline/critic.py`](core/pipeline/critic.py) 在发文前执行四项自动化检查：
-  1. 清洗高频“AI 味”套话短语（自动替换/删除）。
-  2. 为缺失小节结构的长文自动补齐 H2 标题分节。
+  1. 标记高频套话，自动删除可独立移除的段首过渡语。
+  2. 为已有的小标题补齐 H2 层级，缺少分节的稿件提示审校。
   3. 校验正文汉字规模、标题长度上限与禁用结尾标点。
   4. 综合评分与拦截：未通过门禁的文章状态标记为 `REJECTED`，预览 HTML 落地至 `data/previews/` 并写入本地 SQLite（[`data/auto_publish.sqlite`](core/db/manager.py)，WAL 模式），等待人类编辑审核。
 - **人工终审直推**：审稿人可在 WebUI `审稿 (Audit)` 视图中预览完整排版、编辑或核准放行（`/api/review/approve`），核准后自动补传封面并同步至微信草稿箱。
 
-### 3. 100% AI 生图与 5 模专业技术图表引擎
-- **封面与正文配图 (`utils/image_handler.py`)**：已全面切换为纯 AI 生成架构（已禁用热点场景下的 Bing 爬虫抓取）：
-  1. **首选**：通义万相 `Qwen-Image-3.0`（默认 `1280*720`，内置全局最小请求间隔与最大并发数限流保护）；Image Studio 二次重绘默认采用 `qwen-image-3.0-pro`。
-  2. **备选**：本地 `Stable Diffusion WebUI` API（`SD_ENABLED` / `SD_API_URL`）。
-  3. **兜底**：本地 Pillow 生成高对比 **Linear Modern Light** 风格矢量封面与摘要卡片，保证零外部依赖下链路不断档。
+### 3. 资料照片、项目截图与技术图表
+
+- 热点和每日小知识按正文中的拍摄对象检索 Openverse 照片。例如，`【此处插入配图：rooftop solar panels】` 会检索屋顶光伏板。图下注明作品名、作者、许可和原始作品页，等比缩放保留水印与完整画面。
+- 单个段落找不到合适照片时，调用通义万相或已启用的本地 Stable Diffusion 补图，图下标明「AI 示意图」。封面优先用实图；复用 AI 图时，标识直接写在封面上。生图也失败时略过该插图，封面仍缺失时使用带公众号名的标题卡。GitHub 文章优先使用项目原图和截图，体系科普使用固定封面和图表。
 - **多模态技术图表与公式渲染 (`utils/diagram_gen.py`)**：支持并行渲染（默认 `DIAGRAM_PARALLEL_WORKERS=5`），自动处理微信富文本对透明 PNG 背景的黑底兼容性问题：
   - **高保真模态**：`Mermaid`（`mermaid.ink` 在线渲染 + 本地 [`utils/html_render.py`](utils/html_render.py) Selenium 无头浏览器降级）、`HTML + Tailwind + KaTeX`（复杂数学公式与高定信息卡片）。
   - **轻量兜底模态**：`Graphviz DOT`（[`utils/lite_render.py`](utils/lite_render.py)）与 `Matplotlib` 结构体卡片（公式卡、对比卡、总结卡），统一采用 Linear Modern Light（`#FFFFFF` / `#F8F9FB` / `#4F5BD5`）浅色专业配色。
@@ -185,7 +184,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-编辑 `.env`，至少填入你的 **LLM API Key**（如 DeepSeek / OpenAI 兼容接口）、**DashScope Key**（用于通义万相配图）以及**微信公众号 `AppID` / `AppSecret`**。
+编辑 `.env`，填入写作使用的 **LLM API Key** 和微信公众号的 **AppID / AppSecret**。Openverse 照片检索可匿名使用。通义万相自动补图及 Image Studio 重绘使用 **DashScope Key**。
 
 > [!NOTE]
 > **微信公众号 IP 白名单提示**：在微信公众号后台 **「设置与开发」→「基本配置」** 中，务必将当前运行机器或云服务器的公网出口 IP 加入**公众号 API IP 白名单**，否则 `access_token` 获取与草稿箱同步接口将被微信拦截。
@@ -247,7 +246,7 @@ python tools/build_knowledge_tree.py
 | `KNOWLEDGE_TREE` | 默认知识图谱包（亦可由 `data/knowledge_trees/_active.txt` 覆盖） | `aikepu` |
 | `GITHUB_TOKEN` | GitHub API 可选访问令牌（提升搜索限额） | `""` |
 | `QYWECHAT_WEBHOOK` | 企业微信群机器人通知 Webhook | `""` |
-| `BRAND_NAME` / `ARTICLE_AUTHOR` | 公众号品牌落款与默认作者名 | `智界洞察社` |
+| `BRAND_NAME` / `ARTICLE_AUTHOR` | 公众号名与作者署名（作者留空时沿用公众号名） | `极研JiYan` |
 | `WEBUI_TOKEN` | WebUI 登录保护访问令牌（留空则免登录直入） | `""` |
 | `CLOUD_MODE` | 云端无状态环境开关（设为 `"1"` 启用；强制优先云端记录避免本地覆盖） | `""` (`False`) |
 
