@@ -7,7 +7,7 @@ from utils.key_pool import ApiKeyPool
 
 from config import (
     LLM_API_KEY, LLM_BASE_URL, LLM_TIMEOUT,
-    LLM_MODEL, LLM_TEMPERATURE, LLM_MAX_TOKENS, LLM_MAX_RETRIES,
+    LLM_MODEL, LLM_TEMPERATURE, LLM_MAX_TOKENS, LLM_ENABLE_THINKING, LLM_MAX_RETRIES,
     WECHAT_TITLE_MAX_LEN, SENSITIVE_WORDS
 )
 
@@ -111,8 +111,8 @@ def _interruptible_sleep(seconds):
         time.sleep(0.5)
 
 
-def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backoff_base=1.0, timeout=None, max_tokens=None, model=None):
-    """带指数退避的 API 调用。timeout/max_tokens/model 可覆盖全局默认值。支持中断和暂停。"""
+def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backoff_base=1.0, timeout=None, max_tokens=None, model=None, enable_thinking=None):
+    """带指数退避的 API 调用。timeout/max_tokens/model/enable_thinking 可覆盖全局默认值。支持中断和暂停。"""
     from core.shared.runtime import check_cancelled, WorkflowCancelled
 
     check_cancelled()
@@ -123,8 +123,10 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
         timeout = LLM_TIMEOUT
     if max_tokens is None:
         max_tokens = LLM_MAX_TOKENS
-    
+
     target_model = model or LLM_MODEL
+    target_thinking = LLM_ENABLE_THINKING if enable_thinking is None else bool(enable_thinking)
+    strip_thinking_field = False
     key_pool = _get_llm_key_pool()
     if key_pool.size == 0:
         logger.error("未配置 LLM_API_KEY / LLM_API_KEYS")
@@ -150,6 +152,9 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
                 "temperature": LLM_TEMPERATURE,
                 "max_tokens": max_tokens
             }
+            if not target_thinking and not strip_thinking_field:
+                data["thinking"] = {"type": "disabled"}
+
             start_t = time.time()
             response = API_SESSION.post(
                 f"{LLM_BASE_URL}/chat/completions",
@@ -162,12 +167,15 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
             result = response.json()
             usage = result.get('usage', {})
             prompt_tokens = usage.get('prompt_tokens', 0)
+            completion_tokens = usage.get('completion_tokens', 0)
+            completion_details = usage.get('completion_tokens_details') or {}
+            reasoning_tokens = completion_details.get('reasoning_tokens', 0)
             hit_tokens = usage.get('prompt_cache_hit_tokens', 0)
             if not hit_tokens and 'prompt_tokens_details' in usage:
                 details = usage.get('prompt_tokens_details') or {}
                 hit_tokens = details.get('cached_tokens', 0)
             miss_tokens = usage.get('prompt_cache_miss_tokens', max(0, prompt_tokens - hit_tokens))
-            
+
             cache_metrics.record(hit_tokens, miss_tokens, latency_ms)
 
             # 控制台实时打出 Prompt Cache 命中与加速监控日志
@@ -178,8 +186,23 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
                     latency_ms, hit_tokens, miss_tokens, stats['hit_rate_pct'], stats['saved_cny']
                 )
 
+            choice = result['choices'][0]
+            finish_reason = choice.get('finish_reason')
+            message = choice['message']
+            content = message.get('content') or ""
             key_pool.report_success(api_key)
-            return result['choices'][0]['message']['content']
+
+            if finish_reason == "length" or not content.strip():
+                logger.warning(
+                    "AI 响应异常或被截断: finish_reason={}, completion_tokens={}, reasoning_tokens={}, content_len={}",
+                    finish_reason, completion_tokens, reasoning_tokens, len(content)
+                )
+                if not content.strip() and finish_reason == "length" and reasoning_tokens > 0 and target_thinking and attempt < max_retries:
+                    logger.warning("思考 Token 耗尽 max_tokens 导致正文为空，自动关闭 thinking 重试...")
+                    target_thinking = False
+                    continue
+
+            return content
 
         except Exception as e:
             # WorkflowCancelled 不应被捕获，直接向上抛
@@ -192,6 +215,10 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
                 continue
             if isinstance(e, requests.exceptions.HTTPError):
                 status = getattr(e.response, 'status_code', 500)
+                if status == 400 and "thinking" in data and not strip_thinking_field:
+                    logger.warning("上游接口返回 400，移除 thinking 字段后兼容重试")
+                    strip_thinking_field = True
+                    continue
                 if status == 429:
                     logger.warning("AI 限流 429 (第 {}/{} 次)，切换 Key 退避重试", attempt, max_retries)
                     key_pool.report_failure(api_key)

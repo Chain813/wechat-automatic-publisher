@@ -153,5 +153,107 @@ class TestHotspotFilterConfig(unittest.TestCase):
         self.assertIn("SENTINEL_KAOYAN_KW", sent_prompt)
 
 
+class TestLLMThinkingAndTokenBudget(unittest.TestCase):
+    def test_llm_default_config_avoids_reasoning_starvation(self):
+        with patch.dict(os.environ, {}, clear=True), patch("dotenv.load_dotenv"):
+            settings = runpy.run_path(config.__file__)
+        self.assertGreaterEqual(settings["LLM_MAX_TOKENS"], 16384)
+        self.assertFalse(settings["LLM_ENABLE_THINKING"])
+
+        with patch.dict(os.environ, {"LLM_ENABLE_THINKING": "true"}, clear=True), patch("dotenv.load_dotenv"):
+            settings_on = runpy.run_path(config.__file__)
+        self.assertTrue(settings_on["LLM_ENABLE_THINKING"])
+
+    def test_call_deepseek_disables_thinking_by_default_and_falls_back_on_400(self):
+        from unittest.mock import MagicMock
+        import requests
+        from core.shared import llm
+
+        resp_400 = MagicMock()
+        resp_400.status_code = 400
+        http_err = requests.exceptions.HTTPError("400 Bad Request", response=resp_400)
+        resp_400.raise_for_status.side_effect = http_err
+
+        resp_200 = MagicMock()
+        resp_200.status_code = 200
+        resp_200.raise_for_status.return_value = None
+        resp_200.json.return_value = {
+            "choices": [{"finish_reason": "stop", "message": {"content": "正常返回正文"}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+        }
+
+        sent_payloads = []
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            sent_payloads.append(dict(json))
+            return resp_400 if len(sent_payloads) == 1 else resp_200
+
+        fake_pool = MagicMock()
+        fake_pool.size = 1
+        fake_pool.get_key.return_value = "test-only-key"
+
+        with (
+            patch.object(llm, "LLM_ENABLE_THINKING", False),
+            patch.object(llm, "_get_llm_key_pool", return_value=fake_pool),
+            patch.object(llm.API_SESSION, "post", side_effect=fake_post),
+        ):
+            out = llm.call_deepseek_with_retry("测试", max_retries=2)
+
+        self.assertEqual(out, "正常返回正文")
+        self.assertEqual(len(sent_payloads), 2)
+        self.assertEqual(sent_payloads[0].get("thinking"), {"type": "disabled"})
+        self.assertNotIn("thinking", sent_payloads[1])
+
+    def test_call_deepseek_recovers_when_reasoning_tokens_exhaust_max_tokens(self):
+        from unittest.mock import MagicMock
+        from core.shared import llm
+
+        starved_resp = MagicMock()
+        starved_resp.status_code = 200
+        starved_resp.raise_for_status.return_value = None
+        starved_resp.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {"content": "", "reasoning_content": "长思考..." * 500},
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 1000,
+                "completion_tokens": 8192,
+                "completion_tokens_details": {"reasoning_tokens": 8192},
+            },
+        }
+
+        ok_resp = MagicMock()
+        ok_resp.status_code = 200
+        ok_resp.raise_for_status.return_value = None
+        ok_resp.json.return_value = {
+            "choices": [{"finish_reason": "stop", "message": {"content": "恢复后的完整正文"}}],
+            "usage": {"prompt_tokens": 1000, "completion_tokens": 1200},
+        }
+
+        sent_payloads = []
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            sent_payloads.append(dict(json))
+            return starved_resp if len(sent_payloads) == 1 else ok_resp
+
+        fake_pool = MagicMock()
+        fake_pool.size = 1
+        fake_pool.get_key.return_value = "test-only-key"
+
+        with (
+            patch.object(llm, "_get_llm_key_pool", return_value=fake_pool),
+            patch.object(llm.API_SESSION, "post", side_effect=fake_post),
+        ):
+            out = llm.call_deepseek_with_retry("写一篇深度文章", max_retries=2, enable_thinking=True)
+
+        self.assertEqual(out, "恢复后的完整正文")
+        self.assertEqual(len(sent_payloads), 2)
+        self.assertNotIn("thinking", sent_payloads[0])
+        self.assertEqual(sent_payloads[1].get("thinking"), {"type": "disabled"})
+
+
 if __name__ == "__main__":
     unittest.main()

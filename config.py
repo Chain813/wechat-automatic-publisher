@@ -42,7 +42,8 @@ HTTP_RETRY_BACKOFF = float(os.getenv("HTTP_RETRY_BACKOFF", "0.8"))
 # 7. LLM 模型参数 (可配置)
 LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-v4-flash")
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.75"))
-LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "8192"))
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "16384"))
+LLM_ENABLE_THINKING = os.getenv("LLM_ENABLE_THINKING", "False").lower() == "true"
 LLM_MAX_RETRIES = 3          # API 调用最大重试次数
 
 # 8. 微信发布规范限制

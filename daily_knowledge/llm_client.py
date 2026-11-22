@@ -1,7 +1,10 @@
 import requests
 import json
 import logging
-from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, LLM_TEMPERATURE, LLM_MAX_TOKENS, LLM_MAX_RETRIES
+from config import (
+    LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, LLM_TEMPERATURE,
+    LLM_MAX_TOKENS, LLM_ENABLE_THINKING, LLM_MAX_RETRIES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,13 +44,18 @@ class LLMClient:
             "temperature": temperature,
             "max_tokens": LLM_MAX_TOKENS
         }
-        
+        if not LLM_ENABLE_THINKING:
+            payload["thinking"] = {"type": "disabled"}
+
         for attempt in range(LLM_MAX_RETRIES):
             try:
                 response = requests.post(endpoint, headers=headers, json=payload, timeout=120)
+                if response.status_code == 400 and "thinking" in payload:
+                    payload.pop("thinking", None)
+                    response = requests.post(endpoint, headers=headers, json=payload, timeout=120)
                 response.raise_for_status()
                 data = response.json()
-                return data["choices"][0]["message"]["content"].strip()
+                return (data["choices"][0]["message"].get("content") or "").strip()
             except Exception as e:
                 logger.warning(f"LLM 每日小知识生成失败 (尝试 {attempt+1}/{LLM_MAX_RETRIES}): {e}")
                 if attempt == LLM_MAX_RETRIES - 1:

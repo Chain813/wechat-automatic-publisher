@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - 热点稿修订时保留原始材料。热点与项目解读要求把事实、推断和未披露的信息写清楚，质检仅自动删除可独立移除的段首套话。
 - 热点和每日小知识优先使用带署名的 Openverse 资料照片。缺图时尝试 AI 生图，正文图下注明「AI 示意图」，AI 封面直接嵌入标识。生图失败且封面仍缺失时使用公众号标题卡。GitHub 项目原图与截图标记来源。
 - 热点选题梯队重构为 `config.py` 中的 `HOTSPOT_TIERS` 唯一配置源（同步更新 AI/科技政策、硬核 AI/开源工程与高校科研/考研升学/科技财经三梯队关键词）并接入 `filter_tech_hotspots()` 动态生效；补齐私有云端增量部署闭环规范。
+- 修复 `deepseek-v4-flash` 默认思考模式占用全部 `max_tokens=8192` 导致长文正文为空或被截断的问题：新增 `LLM_ENABLE_THINKING`（默认 `False`）并将默认 `LLM_MAX_TOKENS` 提升至 `16384`，补充 `finish_reason`/`reasoning_tokens` 诊断日志与思考耗尽自动降级重试。
 
 ### 🔍 事实核查、动态叙事与 AI Critic 质量门禁 (Fact Grounding & Quality Gate)
 - **联网事实核查与正文深抓**：新增 `core/hotspots/scraper.py`（基于 `trafilatura` 与浏览器伪装请求提取原始网页正文）及 `core/hotspots/searcher.py`（DuckDuckGo HTML/Lite 与 Bing 网页事实检索，由 `ENABLE_FACT_SEARCH` / `MAX_FACT_SNIPPETS` 控制），为深度创作提供可核查事实现场。
