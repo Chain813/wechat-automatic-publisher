@@ -20,6 +20,13 @@ CLICHE_PATTERNS: List[str] = [
     r"随着[^。！？]*?飞速发展", r"随着[^。！？]*?快速演进", "不得不提(?!的是)",
     "拭目以待", "双刃剑", "既有机遇也有挑战",
 ]
+META_LANGUAGE_PATTERNS: List[str] = [
+    r"材料(?:没有|未)(?:说明|给出|列出|提及|提供)",
+    r"材料在此处截断",
+    r"下面按材料[^。！？]*?拆开",
+    r"报道(?:未|没有)列出清单",
+    r"判断这(?:条|个)消息时可核对",
+]
 # 保护引文和代码，同时适配 Markdown 原稿与微信 HTML。
 _QUOTED_OR_CODE = (
     r'~~~[\s\S]*?~~~|```[\s\S]*?```'
@@ -131,6 +138,16 @@ def evaluate_article_quality(
         deduction = min(35, len(cliche_hits) * 8)
         score -= deduction
         issues.append(f"命中刻板 AI 套话 {len(cliche_hits)} 次: {distinct_cliches}")
+
+    meta_hits: List[str] = []
+    for pattern in META_LANGUAGE_PATTERNS:
+        matches = re.findall(pattern, plain_text)
+        if matches:
+            meta_hits.extend(matches)
+    if meta_hits:
+        distinct_meta = sorted(list(set(meta_hits)))
+        score -= min(25, len(meta_hits) * 8)
+        issues.append(f"命中内部审稿元话语 {len(meta_hits)} 次: {distinct_meta}")
 
     # 2. 汉字字数达标审查（科学分级，避免一刀切扼杀优质资讯）
     chinese_chars = len(re.findall(r"[\u4e00-\u9fa5]", plain_text))

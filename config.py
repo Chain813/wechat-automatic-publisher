@@ -41,6 +41,11 @@ HTTP_RETRY_BACKOFF = float(os.getenv("HTTP_RETRY_BACKOFF", "0.8"))
 
 # 7. LLM 模型参数 (可配置)
 LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-v4-flash")
+LLM_RESEARCH_MODEL = os.getenv("LLM_RESEARCH_MODEL", "deepseek-flash")
+LLM_WRITER_MODEL = os.getenv("LLM_WRITER_MODEL", "deepseek-v4-pro")
+LLM_WRITER_REASONING_EFFORT = os.getenv("LLM_WRITER_REASONING_EFFORT", "low").strip().lower()
+LLM_FORMATTER_MODEL = os.getenv("LLM_FORMATTER_MODEL", "").strip()
+LLM_ENABLE_WEB_SEARCH = os.getenv("LLM_ENABLE_WEB_SEARCH", "True").lower() == "true"
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.75"))
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "16384"))
 LLM_ENABLE_THINKING = os.getenv("LLM_ENABLE_THINKING", "False").lower() == "true"

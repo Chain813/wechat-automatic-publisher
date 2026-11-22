@@ -254,6 +254,115 @@ class TestLLMThinkingAndTokenBudget(unittest.TestCase):
         self.assertNotIn("thinking", sent_payloads[0])
         self.assertEqual(sent_payloads[1].get("thinking"), {"type": "disabled"})
 
+    def test_call_deepseek_supports_reasoning_effort_and_tools_with_400_fallback(self):
+        from unittest.mock import MagicMock
+        import requests
+        from core.shared import llm
+
+        resp_400 = MagicMock()
+        resp_400.status_code = 400
+        resp_400.raise_for_status.side_effect = requests.exceptions.HTTPError("400", response=resp_400)
+
+        resp_200 = MagicMock()
+        resp_200.status_code = 200
+        resp_200.raise_for_status.return_value = None
+        resp_200.json.return_value = {
+            "choices": [{"finish_reason": "stop", "message": {"content": "调研结果"}}],
+            "usage": {"prompt_tokens": 20, "completion_tokens": 30},
+        }
+
+        sent_payloads = []
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            sent_payloads.append(dict(json))
+            return resp_400 if len(sent_payloads) == 1 else resp_200
+
+        fake_pool = MagicMock()
+        fake_pool.size = 1
+        fake_pool.get_key.return_value = "test-only-key"
+
+        tools = [{"type": "deepseek_web_search"}, {"type": "deepseek_read_url"}]
+        with (
+            patch.object(llm, "_get_llm_key_pool", return_value=fake_pool),
+            patch.object(llm.API_SESSION, "post", side_effect=fake_post),
+        ):
+            out = llm.call_deepseek_with_retry(
+                "调研", max_retries=2, reasoning_effort="low", tools=tools
+            )
+
+        self.assertEqual(out, "调研结果")
+        self.assertEqual(sent_payloads[0].get("reasoning_effort"), "low")
+        self.assertEqual(sent_payloads[0].get("tools"), tools)
+        self.assertNotIn("thinking", sent_payloads[0])
+        self.assertNotIn("reasoning_effort", sent_payloads[1])
+        self.assertNotIn("tools", sent_payloads[1])
+
+
+class TestThreeStageHotspotPipeline(unittest.TestCase):
+    def test_default_three_stage_model_config(self):
+        with patch.dict(os.environ, {}, clear=True), patch("dotenv.load_dotenv"):
+            settings = runpy.run_path(config.__file__)
+        self.assertEqual(settings["LLM_RESEARCH_MODEL"], "deepseek-flash")
+        self.assertEqual(settings["LLM_WRITER_MODEL"], "deepseek-v4-pro")
+        self.assertEqual(settings["LLM_WRITER_REASONING_EFFORT"], "low")
+        self.assertTrue(settings["LLM_ENABLE_WEB_SEARCH"])
+
+    def test_research_stage_uses_web_search_tools_and_writer_uses_pro_low(self):
+        from core.hotspots import processor
+        from core.plugins.base import HotspotItem
+
+        prose = (
+            "## 第一节具体冲突\n\n" + ("这是有事实依据的深度分析段落，拆解技术机制与实际影响。" * 25) + "\n\n"
+            "## 第二节技术与制度博弈\n\n" + ("这是第二部分关于硬件识别与信号探测盲区的详细拆解。" * 25) + "\n\n"
+            "## 第三节对国内考试与研学的镜鉴\n\n" + ("这是第三部分关于标准化考试机制演进的理性讨论。" * 25) + "\n\n"
+            f"**关注「{config.BRAND_NAME}」。**"
+        )
+        formatted = (
+            "## 第一节具体冲突\n\n"
+            "**{{核心判断一保留限定条件。}}**\n\n"
+            + ("这是有 **事实依据** 的 **深度分析** 段落，涉及 **111 名** 考生与 **54 起** 案例。" * 22)
+            + "\n\n> 第一条凝练的观点摘录，用来凸显核心反差而非照抄正文。\n\n"
+            "【此处插入配图：exam hall security】\n\n"
+            "## 第二节技术与制度博弈\n\n"
+            + ("这是第二部分关于 **AI 眼镜** 与 **WiFi 探测** 盲区的详细拆解。" * 22)
+            + "\n\n> 第二条凝练的观点摘录，点明技术对抗的边界。\n\n"
+            "【此处插入配图：smart glasses hardware】\n\n"
+            "## 第三节对国内考试与研学的镜鉴\n\n"
+            + ("这是第三部分关于 **标准化考试** 与 **考研安检** 演进的理性讨论。" * 22)
+            + "\n\n> 第三条凝练的观点摘录，聚焦人才筛选本身。\n\n"
+            "【此处插入配图：university examination room】\n\n"
+            f"**关注「{config.BRAND_NAME}」。**"
+        )
+
+        topic = HotspotItem(title="测试热点话题", url="https://example.org/news", raw_content="原始短快讯。")
+        with (
+            patch.object(processor, "LLM_ENABLE_WEB_SEARCH", True),
+            patch.object(processor, "research_topic_dossier", return_value="多信源深调研简报内容") as mock_research,
+            patch.object(processor, "call_deepseek", return_value=prose) as mock_writer,
+            patch.object(processor, "format_article_for_wechat", return_value=formatted) as mock_fmt,
+        ):
+            result = processor.generate_article(topic)
+
+        mock_research.assert_called_once()
+        mock_writer.assert_called_once()
+        self.assertEqual(mock_writer.call_args.kwargs.get("model"), processor.LLM_WRITER_MODEL)
+        self.assertEqual(mock_writer.call_args.kwargs.get("reasoning_effort"), processor.LLM_WRITER_REASONING_EFFORT)
+        self.assertIn("多信源深调研简报内容", mock_writer.call_args.args[0])
+        mock_fmt.assert_called_once()
+        self.assertIn("【此处插入配图：", result)
+        self.assertIn(f"**关注「{config.BRAND_NAME}」。**", result)
+
+    def test_critic_penalizes_ai_meta_language_disclaimers(self):
+        from core.pipeline.critic import evaluate_article_quality
+
+        meta_article = (
+            "## 标题一\n\n"
+            + ("这是 **测试** 段落，包含 **关键数字 100** 与 **具体细节**。" * 45)
+            + "\n\n材料没有说明单个考点覆盖多少考生，材料在此处截断，其完整说法尚不可见。"
+        )
+        res = evaluate_article_quality(title="正常合规的测试标题", article_text=meta_article, article_type="hotspots")
+        self.assertTrue(any("审稿" in i or "元话语" in i or "套话" in i for i in res["critic_issues"]), res)
+
 
 if __name__ == "__main__":
     unittest.main()

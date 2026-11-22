@@ -4,7 +4,17 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from loguru import logger
 
-from config import BRAND_NAME, HOTSPOT_TIERS, WECHAT_DIGEST_MAX_LEN
+from config import (
+    BRAND_NAME,
+    HOTSPOT_TIERS,
+    LLM_ENABLE_WEB_SEARCH,
+    LLM_FORMATTER_MODEL,
+    LLM_MODEL,
+    LLM_RESEARCH_MODEL,
+    LLM_WRITER_MODEL,
+    LLM_WRITER_REASONING_EFFORT,
+    WECHAT_DIGEST_MAX_LEN,
+)
 from core.shared.llm import call_deepseek_with_retry, validate_article_length
 from core.hotspots.narrative import (
     ARCHETYPES,
@@ -13,14 +23,11 @@ from core.hotspots.narrative import (
 )
 
 SYSTEM_PROMPT = f"""
-你负责为「{BRAND_NAME}」解读科技和政策新闻。开头直接说谁做了什么、改变了哪一步。
-每个小节回答一个读者问题。用原文条款、产品行为或有出处的数字说明变化。
-把机构的说法归给机构。写推断时交代依据和成立条件。材料缺失时说明仍待确认之处。
-不要代写当事人的想法，不要杜撰采访、现场、数据或行业共识。删去换个话题也能用的句子。
-
-使用有实义的 ## 小标题和 > 摘要块，前后留空行，每段不超过三句话。
-全文 3–5 处核心判断用 **{{{{核心结论}}}}**，关键名词与数字用普通 **黑色加粗**。
-使用【此处插入配图：可检索的具体主体】单行配图标记。遵循本次任务的数量和长度要求。
+你是公众号「{BRAND_NAME}」的主笔，长期写 AI、硬核科技、产业政策与高校研学交叉领域的深度评论。
+开头前 3 句话直接抛出一处具体画面或尖锐反差，不写新闻通稿起手式。
+新闻事件中的人名、日期、数字、引述严格忠于调研简报，绝不杜撰；同时结合可靠的计算机、硬件、产业与考试现实常识讲透门道。
+严禁在正文中出现「材料未说明」「材料在此处截断」「下面按材料拆开」等 AI 审稿元话语，严禁空洞套话。
+全篇设 3–4 个有信息增量的 ## 小标题（末尾不加标点），每段 2–4 句，讲透就收。
 落款为 **关注「{BRAND_NAME}」。**
 """
 
@@ -36,11 +43,19 @@ def load_hotspots_skill_prompt() -> str:
             logger.warning("加载 hotspots_skill.md 失败: {}", e)
     return ""
 
-def call_deepseek(prompt, system_content=None):
+
+def call_deepseek(prompt, system_content=None, model=None, reasoning_effort=None, tools=None, max_tokens=None):
     if system_content is None:
         skill = load_hotspots_skill_prompt()
         system_content = skill if skill else SYSTEM_PROMPT
-    return call_deepseek_with_retry(prompt, system_content)
+    return call_deepseek_with_retry(
+        prompt,
+        system_content,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        tools=tools,
+        max_tokens=max_tokens,
+    )
 
 def parse_topic_list(raw: str):
     if not raw or "无" == raw.strip():
@@ -198,8 +213,8 @@ def validate_article_structure(text: str):
 
     missing = []
     h2_count = len(re.findall(r'^##\s+', text, re.MULTILINE))
-    if h2_count < 4:
-        missing.append(f"## 小标题不足 ({h2_count}/4)")
+    if h2_count < 3:
+        missing.append(f"## 小标题不足 ({h2_count}/3)")
 
     blockquote_count = len(re.findall(r'^>\s+', text, re.MULTILINE))
     if blockquote_count < 3:
@@ -292,17 +307,122 @@ def _auto_add_quotes(article, min_count=3):
     return "\n".join(new_lines)
 
 
+def research_topic_dossier(
+    topic_title: str,
+    topic_url: str = "",
+    raw_content: str = "",
+    summary: str = "",
+    today_str: str = "",
+) -> str:
+    """
+    Stage 1: 使用 DeepSeek 原生联网搜索 (deepseek_web_search + deepseek_read_url)
+    交叉核验多信源，生成高密度结构化调研简报。
+    """
+    today_label = today_str or datetime.now().strftime("%Y年%m月%d日")
+    seed_parts = []
+    if topic_url:
+        seed_parts.append(f"初始报道链接：{topic_url}")
+    if summary:
+        seed_parts.append(f"初始摘要：{summary[:800]}")
+    if raw_content:
+        seed_parts.append(f"已抓取正文节选：{raw_content[:1500]}")
+    seed_block = "\n".join(seed_parts) if seed_parts else "无初始链接，请直接联网检索最新权威报道。"
+
+    research_prompt = (
+        f"请对以下新闻热点进行多信源深度联网调研（今天是 {today_label}）：\n"
+        f"话题：{topic_title}\n"
+        f"{seed_block}\n\n"
+        "请调用联网搜索和网页阅读工具，核实并汇总以下信息（只写可查证的事实与出处，不编造、不自行估算未出现的价格或数字）：\n"
+        "1. 完整事件脉络与准确时间线（核对年份与前后关联事件，避免把旧闻或不同年份混为一谈）。\n"
+        "2. 核心硬数据、技术细节与机制拆解（具体规格、指标口径、技术实现或执行方式）。\n"
+        "3. 各方真实反应与争议焦点（官方/机构声明、当事群体、专家或行业媒体有署名的真实观点）。\n"
+        "4. 1 个最尖锐、最有穿透力的文章核心切口（点明这件事真正触及的底层矛盾或对读者/行业的现实意义）。\n\n"
+        "输出为精炼、高密度的中文结构化调研简报。"
+    )
+    logger.info("  [Stage 1/3] 正在启动原生联网多信源深调研 ({}): {}", LLM_RESEARCH_MODEL, topic_title)
+    try:
+        dossier = call_deepseek_with_retry(
+            research_prompt,
+            system_content="你是一名严谨的科技与政策调查记者，擅长使用联网搜索核查一手信源并整理高密度调研简报。",
+            model=LLM_RESEARCH_MODEL,
+            reasoning_effort="low",
+            tools=[{"type": "deepseek_web_search"}, {"type": "deepseek_read_url"}],
+            max_tokens=8192,
+        )
+        cleaned = (dossier or "").strip()
+        if cleaned:
+            logger.info("  [Stage 1/3] 深度调研简报就绪 ({} 字)", len(cleaned))
+        return cleaned
+    except Exception as e:
+        logger.warning("  [Stage 1/3] 原生联网深调研降级: {}", e)
+        return ""
+
+
+def _strip_leading_h1(article: str) -> str:
+    """移除正文首行多余的一级标题（微信草稿箱标题由独立字段展示）。"""
+    lines = article.lstrip().splitlines()
+    if lines and re.match(r"^#\s+\S+", lines[0]):
+        return "\n".join(lines[1:]).lstrip()
+    return article.strip()
+
+
+def format_article_for_wechat(article: str, topic_title: str, brand: str = BRAND_NAME) -> str:
+    """
+    Stage 3: 轻量微信排版与视觉标注 Pass（默认使用快速 Flash 关思考模型）。
+    严禁改写叙事腔调或新增事实，仅在保留原文的基础上完成红字高亮、黑色加粗、金句摘录与配图标记。
+    """
+    formatter_model = LLM_FORMATTER_MODEL or LLM_MODEL
+    logger.info("  [Stage 3/3] 正在执行轻量微信排版与视觉标注 ({})...", formatter_model)
+    fmt_system = (
+        f"你是公众号「{brand}」的排版编辑。你只负责在不破坏作者行文和事实的前提下，"
+        "为已定稿的 Markdown 长文添加微信扫读所需的视觉标注与配图标记。"
+    )
+    fmt_prompt = (
+        f"选题：{topic_title}\n\n"
+        "请对下面这篇已完成的正文做轻量微信排版标注，严格遵守以下规则：\n"
+        "1. **严禁改写作者的观点、叙事节奏或删减实质内容**，严禁编造新事实，严禁加入「材料未说明」类审稿元话语。\n"
+        "2. 保留原有的 `## ` 二级小标题（确保末尾无标点），必要时保证全文有 3–4 个 `## ` 小标题。\n"
+        "3. **红色高亮（3–4 处）**：从作者原有最有穿透力的判断句中挑选 3–4 句，用 `**{{核心判断}}**` 包裹（保留原有条件限定）。\n"
+        "4. **黑色加粗（不少于 12 处）**：用 `**关键词**`（不含花括号）自然标出关键数字、专有名词、机构/产品名与核心技术概念。\n"
+        "5. **独立金句引用块（3 处）**：在关键小节后插入独立的 `> ` 引用块（每处 35–85 字），用凝练视角点出本节核心反差或结论，**严禁把上一段正文原样复制一遍**。\n"
+        "6. **配图标记（3 处）**：在 3 个关键小节后独立成行放置 `【此处插入配图：简短具体主体】`（优先简洁具体的实体/设备/场景英文或中文专名，不写画风或运镜）。\n"
+        f"7. 文末保持唯一落款：`**关注「{brand}」。**`\n\n"
+        "直接输出排版后的完整 Markdown 正文（不要输出 `# 一级标题`，不要加任何解释）：\n\n"
+        f"=== 待排版正文 ===\n{article}\n=== 结束 ==="
+    )
+    try:
+        formatted = call_deepseek_with_retry(
+            fmt_prompt,
+            system_content=fmt_system,
+            model=formatter_model,
+            reasoning_effort="none",
+            max_tokens=8192,
+        )
+        cleaned = _strip_leading_h1(formatted or "")
+        # 安全护栏：仅在排版稿未发生大幅缩水时采纳
+        if cleaned and len(cleaned) >= int(len(article) * 0.78):
+            if f"关注「{brand}」" not in cleaned[-120:]:
+                cleaned = cleaned.rstrip() + f"\n\n**关注「{brand}」。**"
+            return cleaned
+        logger.warning("  [Stage 3/3] 排版输出长度异常 ({} vs 原稿 {})，回退保留原稿并走本地补强", len(cleaned), len(article))
+    except Exception as e:
+        logger.warning("  [Stage 3/3] 轻量排版阶段异常，回退本地补强: {}", e)
+    return article
+
+
 def generate_article(topic, raw_content: str = "", search_results: Optional[List[Dict[str, str]]] = None):
     # 支持 HotspotItem 或常规字符串
     if hasattr(topic, "title") and isinstance(getattr(topic, "title"), str):
         topic_title = topic.title
         raw_content = getattr(topic, "raw_content", "") or raw_content
         topic_url = getattr(topic, "url", "")
+        topic_summary = getattr(topic, "summary", "")
     else:
         topic_title = str(topic)
         topic_url = ""
+        topic_summary = ""
 
-    logger.info("DeepSeek 正在以「{}」视角创作深度长文: {}", BRAND_NAME, topic_title)
+    logger.info("三段式热点引擎启动（「{}」视角）: {}", BRAND_NAME, topic_title)
     brand = BRAND_NAME
     today_str = datetime.now().strftime("%Y年%m月%d日")
 
@@ -320,27 +440,35 @@ def generate_article(topic, raw_content: str = "", search_results: Optional[List
         except Exception as e:
             logger.warning("  抓取一手信源正文失败: {}", e)
 
-    # 1. 动态加载叙事母题与黄金切入点 (Hook)
-    archetype = select_narrative_archetype(topic_title)
-    hook = select_dynamic_hook(archetype["id"])
-    logger.info("  🎭 选中叙事母题: 「{}」, 黄金 Hook: 「{}」", archetype["name"], hook["name"])
+    # 1. Stage 1：多信源事实调研（优先原生联网深调研；单测显式传入 search_results 或关闭开关时沿用本地检索基座）
+    research_dossier = ""
+    if search_results is None and LLM_ENABLE_WEB_SEARCH:
+        research_dossier = research_topic_dossier(
+            topic_title=topic_title,
+            topic_url=topic_url,
+            raw_content=raw_content,
+            summary=topic_summary,
+            today_str=today_str,
+        )
 
-    # 2. 真实性事实基座构建 (Grounding)
     fact_context = raw_content
-    try:
-        from core.hotspots.searcher import build_fact_context, search_topic_facts
-        if search_results is None:
-            search_results = search_topic_facts(topic_title)
-        fact_context = build_fact_context(topic_title, raw_content=raw_content, search_results=search_results)
-    except Exception as e:
-        logger.debug("构建事实基座降级: {}", e)
+    if not research_dossier:
+        try:
+            from core.hotspots.searcher import build_fact_context, search_topic_facts
+            if search_results is None:
+                search_results = search_topic_facts(topic_title)
+            fact_context = build_fact_context(topic_title, raw_content=raw_content, search_results=search_results)
+        except Exception as e:
+            logger.debug("构建事实基座降级: {}", e)
 
     references = []
+    if research_dossier:
+        references.append(f"### 多信源深度调研简报\n{research_dossier}")
     if topic_url:
         references.append(f"采集条目链接：{topic_url}")
-    if getattr(topic, "summary", ""):
-        references.append(f"采集条目摘要：{topic.summary}")
-    if fact_context:
+    if topic_summary:
+        references.append(f"采集条目摘要：{topic_summary}")
+    if fact_context and (not research_dossier or raw_content):
         references.append(fact_context)
     fact_context = "\n\n".join(references)
     if hasattr(topic, "fact_check_result") or hasattr(topic, "__dict__"):
@@ -349,85 +477,99 @@ def generate_article(topic, raw_content: str = "", search_results: Optional[List
         except (AttributeError, TypeError):
             pass
 
-    # 3. 动态组装 Prompt
-    guidelines_text = "\n".join(f"- {g}" for g in archetype.get("guidelines", []))
-
+    # 2. Stage 2：无紧箍咒纯写作（默认由 LLM_WRITER_MODEL=deepseek-v4-pro + low 思考档位执笔）
     initial_prompt = (
-        f"## 选题\n{topic_title}\n\n"
-        f"## 叙事母题与风格要求\n"
-        f"**母题类型**：{archetype['name']}\n"
-        f"**核心穿透视角**：{archetype['core_perspective']}\n"
-        f"**叙事推进法则**：\n{guidelines_text}\n\n"
-        f"## 黄金 Hook 开篇切入\n"
-        f"**切入方式**：{hook['name']}\n"
-        f"**写作指引**：{hook['instruction']}\n\n"
-    )
-
-    initial_prompt += (
-        f"## 本篇参考材料\n{fact_context or '目前只有选题标题。'}\n\n"
-        f"## 任务\n为微信公众号「{brand}」解读这个事件。今天是{today_str}，采集时间不能当作事件日期。\n"
-        "先交代主体、动作和对象。每节选一项材料中的变化，解释它会改变谁的哪一步，或如何核对。"
-        "报道、公司宣称和作者推断分开表达，重要引述就近注明材料中给出的出处。"
-        "数字保留单位、比较基准和时间范围。资料只支持一部分时，写清适用条件或尚缺的信息。\n"
-        "上述母题和开场只在材料能支撑时采用。不得补写采访、现场、人物动机、趋势或预测。"
-        "资料有限时，可解释文中术语、核对路径与待证问题，勿用套话、改述同一结论或新增事实凑字数。\n\n"
-        "## 硬性排版与结构要求（必须完全满足！）：\n"
-        "1. **小标题**：必须使用至少 4 个 `## ` 二级标题进行分段切割。小标题说清该节解释的具体变化或读者问题，严禁使用'背景介绍'、'深度拆解'等刻板标签！末尾严禁添加任何标点符号。\n"
-        "2. **引用金句**：必须包含至少 3 处以 `> ` 开头的独立要点块（每处 50-100 字），提炼已有论据或条件；只有逐字引述原文才加引号。\n"
-        "3. **配图占位符**：必须包含至少 3 处 `【此处插入配图：具体主体】`（紧跟在关键论述段落之后）。每处只填简短可搜的名称，优先用相关产品、设备、地点的英文专名，不填画风或运镜。\n"
-        "4. **正文字数**：总字数必须严格在 2500 - 3500 字，绝不能少于 2000 字！\n"
-        "5. **重点标注**（最关键！读者靠加粗扫读抓核心，绝不能吝啬！）：\n"
-        "   - **红色重点**（全文 3-5 处）：用 **{{你的核心结论}}** 格式（系统会渲染为醒目红底微光高亮卡片）\n"
-        "   - **黑色加粗**（强制每段 1-2 处，全文不少于 12 处！）：用 `**关键词或核心判断**`（不含花括号）标注关键数字（如 `**3400 亿美元**`、`**48%**`）、核心技术概念（如 `**光刻胶**`）、关键公司/人物（如 `**台积电**`）及转折金句。绝不能只写红字而不写普通黑色加粗！\n"
-        "6. **微光卡片语法支持**：如涉及风险避坑、技术洞察或实操清单，可使用 `> ⚠️ **避坑指南**：`、`> 💡 **核心洞察**：`、`> 📌 **行动清单**：`。\n\n"
-        f"文末结尾：**关注「{brand}」。**\n"
+        f"今天是 {today_str}（请准确锚定当前年份，切勿将当年新闻错写成去年）。\n"
+        f"请为微信公众号「{brand}」写一篇深度解读文章，话题：{topic_title}\n\n"
+        f"=== 调研素材与信源 ===\n{fact_context or '目前只有选题标题。'}\n=== 素材结束 ===\n\n"
+        "## 写作要求（专注内容质量与可读性，不要做机械格式打卡）\n"
+        "1. **抓人开篇**：前 3 句话直接抛出一处具体画面、真实细节或尖锐反差，严禁「据某某报道，X 月 X 日某人宣布……」的通稿开头。\n"
+        "2. **事实克制 + 深度讲透**：新闻事件里的人名、时间、数字、价格与引述严格以素材为准，绝不编造采访、心理描写或未出现的价格数字；但要充分结合可靠的计算机/AI 硬件/产业/国内高校与考试现实常识，把底层逻辑与现实镜鉴讲深讲透。\n"
+        "3. **零审稿腔、零套话**：严禁在正文中写「材料未说明」「材料没有说明」「材料在此处截断」「报道未列出」「下面按材料拆开」「判断这条消息时可核对」等内部审稿词；缺细节自然略过。严禁「值得注意的是」「不可否认」「赋能」「重塑格局」「双刃剑」「让我们拭目以待」。\n"
+        "4. **篇幅与结构**：目标 **1,600–2,400 字**（信息密度决定篇幅，绝不车轱辘复述凑字数，但核心内容不少于 1,500 字）。全篇设 **3–4 个**短小锋利、有信息增量的 `## ` 二级小标题（末尾不加标点），每段 2–4 句，留足呼吸感。\n"
+        f"5. **自然收束**：结尾落回事件折射的底层命题或读者启发，最后一行统一落款：`**关注「{brand}」。**`\n\n"
+        "直接输出 Markdown 正文（无需输出 `# 一级标题`）。"
     )
 
     max_attempts = 4
     current_prompt = initial_prompt
+    writer_model = LLM_WRITER_MODEL or LLM_MODEL
+    writer_effort = LLM_WRITER_REASONING_EFFORT or None
 
     for attempt in range(1, max_attempts + 1):
-        logger.info("  正在发起第 {}/{} 次文章生成/重写请求...", attempt, max_attempts)
-        article = call_deepseek(current_prompt)
+        logger.info(
+            "  [Stage 2/3] 正在发起第 {}/{} 次纯写作请求 (model={}, effort={})...",
+            attempt, max_attempts, writer_model, writer_effort or "default",
+        )
+        article = call_deepseek(
+            current_prompt,
+            model=writer_model,
+            reasoning_effort=writer_effort,
+        )
         if not article:
             logger.warning("  第 {} 次生成请求未返回有效内容，自动重新尝试...", attempt)
             current_prompt = initial_prompt
             continue
+
+        article = _strip_leading_h1(article)
 
         # 检测 API 静默截断
         if _is_article_truncated(article):
             logger.warning("  文章疑似被 API 截断（结尾不完整），退回重新生成...")
             current_prompt = (
                 f"{initial_prompt}\n\n"
-                "【紧急纠错】上一稿在结尾处被 API 截断了！请重新撰写完整的全篇文章，确保文末输出结尾标注："
+                "【紧急纠错】上一稿在结尾处被截断了！请重新输出完整的全篇文章，确保文末落款为："
                 f"**关注「{brand}」。**"
             )
             continue
 
-        # 格式微调增强
+        # 先检查 Stage 2 主体深度（字数与小标题），避免把半成品送入 Stage 3
+        draft_word_count, _, _ = validate_article_length(article)
+        draft_h2_count = len(re.findall(r'^##\s+', article, re.MULTILINE))
+        draft_issues = []
+        if draft_word_count < 1500:
+            draft_issues.append(f"正文字数严重不足 ({draft_word_count} < 1500 字)")
+        if draft_h2_count < 3:
+            draft_issues.append(f"## 小标题不足 ({draft_h2_count}/3)")
+
+        if draft_issues:
+            fix_hint = "；".join(draft_issues)
+            logger.warning("  ⚠️ 第 {}/{} 次纯写作未达基础要求: {}，退回重写！", attempt, max_attempts, fix_hint)
+            current_prompt = (
+                f"{initial_prompt}\n\n"
+                f"## 修订上一稿\n上一稿未达标项目：{fix_hint}。保留参考素材与事实边界，补充实质技术与背景拆解后重写完整正文。\n\n"
+                f"=== 上一稿 ===\n{article}\n=== 上一稿结束 ===\n"
+            )
+            continue
+
+        # Stage 3：独立轻量微信排版与视觉标注 Pass
+        article = format_article_for_wechat(article, topic_title, brand=brand)
+
+        # 确定性本地兜底补齐（占位符 / 引用 / 黑色加粗）
         article = _auto_add_placeholders(article, topic_title)
         article = _auto_add_quotes(article)
+        from core.shared.article_utils import _apply_bold_fallback, count_black_bold
+        if count_black_bold(article) < 6:
+            article = _apply_bold_fallback(article, as_html=False)
 
-        word_count, ok, msg = validate_article_length(article)
+        word_count, _, _ = validate_article_length(article)
         structure_ok, missing = validate_article_structure(article)
 
         issues = []
-        if word_count < 2000:
-            issues.append(f"正文字数严重不足 ({word_count} < 2000 字)")
+        if word_count < 1500:
+            issues.append(f"正文字数严重不足 ({word_count} < 1500 字)")
         if not structure_ok:
             issues.extend(missing)
 
         if not issues:
-            logger.info("✅ 文稿成功通过硬性合规校验 (字数: {}, H2/引用/占位符全量达标)", word_count)
+            logger.info("✅ 三段式成稿成功通过硬性合规校验 (字数: {}, H2/引用/加粗/占位符全量达标)", word_count)
             return article
 
-        logger.warning("  ⚠️ 第 {}/{} 次生成的文章未达硬性要求: {}，退回重新生成！", attempt, max_attempts, "；".join(issues))
-
+        logger.warning("  ⚠️ 第 {}/{} 次成稿结构未达标: {}，退回重新生成！", attempt, max_attempts, "；".join(issues))
         fix_hint = "；".join(issues)
         current_prompt = (
             f"{initial_prompt}\n\n"
-            f"## 修订上一稿\n上一稿未达标项目：{fix_hint}。保留参考材料及其限定条件，按原排版要求重写完整正文。"
-            "上一稿只供定位问题，不能用作事实来源。删除其中找不到依据的断言，补充材料能回答的问题。\n\n"
+            f"## 修订上一稿\n上一稿未达标项目：{fix_hint}。保留参考素材及其事实边界，按要求重写完整正文。\n\n"
             f"=== 上一稿 ===\n{article}\n=== 上一稿结束 ===\n"
         )
 

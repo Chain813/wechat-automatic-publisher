@@ -111,8 +111,19 @@ def _interruptible_sleep(seconds):
         time.sleep(0.5)
 
 
-def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backoff_base=1.0, timeout=None, max_tokens=None, model=None, enable_thinking=None):
-    """带指数退避的 API 调用。timeout/max_tokens/model/enable_thinking 可覆盖全局默认值。支持中断和暂停。"""
+def call_deepseek_with_retry(
+    prompt,
+    system_content="",
+    max_retries=None,
+    backoff_base=1.0,
+    timeout=None,
+    max_tokens=None,
+    model=None,
+    enable_thinking=None,
+    reasoning_effort=None,
+    tools=None,
+):
+    """带指数退避的 API 调用。支持模型覆盖、思考档位(reasoning_effort)与原生服务端工具(tools)。支持中断和暂停。"""
     from core.shared.runtime import check_cancelled, WorkflowCancelled
 
     check_cancelled()
@@ -125,8 +136,17 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
         max_tokens = LLM_MAX_TOKENS
 
     target_model = model or LLM_MODEL
-    target_thinking = LLM_ENABLE_THINKING if enable_thinking is None else bool(enable_thinking)
-    strip_thinking_field = False
+    effort_val = (reasoning_effort or "").strip().lower()
+    if effort_val == "none":
+        target_thinking = False
+        effort_val = ""
+    elif effort_val in ("minimal", "low", "medium", "high", "xhigh", "max", "ultra"):
+        target_thinking = True
+    else:
+        target_thinking = LLM_ENABLE_THINKING if enable_thinking is None else bool(enable_thinking)
+        effort_val = ""
+
+    strip_optional_fields = False
     key_pool = _get_llm_key_pool()
     if key_pool.size == 0:
         logger.error("未配置 LLM_API_KEY / LLM_API_KEYS")
@@ -152,8 +172,13 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
                 "temperature": LLM_TEMPERATURE,
                 "max_tokens": max_tokens
             }
-            if not target_thinking and not strip_thinking_field:
-                data["thinking"] = {"type": "disabled"}
+            if not strip_optional_fields:
+                if effort_val:
+                    data["reasoning_effort"] = effort_val
+                elif not target_thinking:
+                    data["thinking"] = {"type": "disabled"}
+                if tools:
+                    data["tools"] = tools
 
             start_t = time.time()
             response = API_SESSION.post(
@@ -181,9 +206,14 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
             # 控制台实时打出 Prompt Cache 命中与加速监控日志
             if prompt_tokens > 0:
                 stats = cache_metrics.get_stats()
+                tool_info = usage.get('server_tool_use') or {}
+                tool_note = (
+                    f" | 联网检索: {tool_info.get('tool_search', 0)} 次, 读网页: {tool_info.get('tool_fetch', 0)} 次"
+                    if tool_info else ""
+                )
                 logger.info(
-                    "⚡ [DeepSeek Cache] 响应: {}ms | 缓存命中: {} tokens | 未命中: {} tokens | 累计命中率: {}% (估算已省 ¥{})",
-                    latency_ms, hit_tokens, miss_tokens, stats['hit_rate_pct'], stats['saved_cny']
+                    "⚡ [DeepSeek Cache] 响应: {}ms | 缓存命中: {} tokens | 未命中: {} tokens | 累计命中率: {}% (估算已省 ¥{}){}",
+                    latency_ms, hit_tokens, miss_tokens, stats['hit_rate_pct'], stats['saved_cny'], tool_note
                 )
 
             choice = result['choices'][0]
@@ -200,6 +230,7 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
                 if not content.strip() and finish_reason == "length" and reasoning_tokens > 0 and target_thinking and attempt < max_retries:
                     logger.warning("思考 Token 耗尽 max_tokens 导致正文为空，自动关闭 thinking 重试...")
                     target_thinking = False
+                    effort_val = ""
                     continue
 
             return content
@@ -215,9 +246,10 @@ def call_deepseek_with_retry(prompt, system_content="", max_retries=None, backof
                 continue
             if isinstance(e, requests.exceptions.HTTPError):
                 status = getattr(e.response, 'status_code', 500)
-                if status == 400 and "thinking" in data and not strip_thinking_field:
-                    logger.warning("上游接口返回 400，移除 thinking 字段后兼容重试")
-                    strip_thinking_field = True
+                has_optional = any(k in data for k in ("thinking", "reasoning_effort", "tools"))
+                if status == 400 and has_optional and not strip_optional_fields:
+                    logger.warning("上游接口返回 400，移除可选扩展字段 (thinking/reasoning_effort/tools) 后兼容重试")
+                    strip_optional_fields = True
                     continue
                 if status == 429:
                     logger.warning("AI 限流 429 (第 {}/{} 次)，切换 Key 退避重试", attempt, max_retries)
@@ -283,10 +315,10 @@ def validate_article_length(text: str):
     返回 (实际字数, 是否达标, 消息)
     """
     word_count = len(text.replace('\n', '').replace(' ', ''))
-    if word_count < 2000:
-        return word_count, False, f"字数不足 ({word_count} < 2000)"
-    elif word_count < 2500:
-        return word_count, True, f"字数略低 ({word_count})"
+    if word_count < 1500:
+        return word_count, False, f"字数不足 ({word_count} < 1500)"
+    elif word_count < 2000:
+        return word_count, True, f"字数精炼达标 ({word_count})"
     elif word_count > 4000:
         return word_count, True, f"字数偏多 ({word_count} > 4000，微信阅读体验可能不佳)"
     else:
