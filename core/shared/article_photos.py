@@ -7,7 +7,7 @@ from tempfile import TemporaryDirectory
 from loguru import logger
 
 from core.shared.runtime import WorkflowCancelled, check_cancelled
-from utils.image_handler import download_image, generate_default_cover, label_ai_cover
+from utils.image_handler import download_image, generate_default_cover, label_ai_cover, qwen_prompt_context
 from utils.source_photos import find_source_photo, prepare_photo_cover
 
 
@@ -44,14 +44,32 @@ def _image_result(future, keyword):
         return None
 
 
-def _select_images(slots, directory, use_ai_first):
-    """按原文顺序匹配实图，空缺的槽位并行生图。返回顺序优先排列实图以供选封面。"""
+def _is_infographic_brief(keyword):
+    """判断配图占位符是否为结构化中文信息图主题（含｜分隔符），此类配图直走 AI 信息图生成，不查实拍图库。"""
+    return isinstance(keyword, str) and ("｜" in keyword or "|" in keyword)
+
+
+def _generate_with_context(keyword, directory, article_title="", section_context="", slot_index=0):
+    with qwen_prompt_context(
+        article_title=article_title,
+        section_context=section_context,
+        slot_index=slot_index,
+    ):
+        return download_image(keyword, directory, allow_title_card=False)
+
+
+def _select_images(slots, directory, use_ai_first, cover_title="", section_contexts=None):
+    """按原文顺序匹配实图，结构化信息图或实图空缺的槽位并行生图。返回顺序优先排列实图以供选封面。"""
     images = {}
     seen = set()
+    ctx_map = section_contexts or {}
     with ThreadPoolExecutor(max_workers=min(3, len(slots))) as pool:
         if not use_ai_first:
-            searches = {index: pool.submit(find_source_photo, keyword, directory)
-                        for index, keyword in slots.items()}
+            searches = {
+                index: pool.submit(find_source_photo, keyword, directory)
+                for index, keyword in slots.items()
+                if not _is_infographic_brief(keyword)
+            }
             for index, search in searches.items():
                 photo = _image_result(search, slots[index])
                 if photo and photo.source_url not in seen:
@@ -60,7 +78,14 @@ def _select_images(slots, directory, use_ai_first):
 
         check_cancelled()
         generations = {
-            index: pool.submit(download_image, keyword, directory / str(index), allow_title_card=False)
+            index: pool.submit(
+                _generate_with_context,
+                keyword,
+                directory / str(index),
+                cover_title or "",
+                ctx_map.get(index, ""),
+                index,
+            )
             for index, keyword in slots.items() if index not in images
         }
         for index, generation in generations.items():
@@ -83,15 +108,19 @@ def _upload_cover(path, directory, publisher, *, generated):
         return None
 
 
-def prepare_article_photos(keywords, publisher, cover_title=None, *, use_ai_first=False):
+def prepare_article_photos(keywords, publisher, cover_title=None, *, use_ai_first=False, section_contexts=None):
     figures = {}
     thumb_id = None
     cover_caption = ""
     slots = {}
+    slot_contexts = {}
     seen_keywords = set()
+    ctx_list = list(section_contexts) if section_contexts else []
     for index, keyword in enumerate(keywords):
         if use_ai_first or keyword not in seen_keywords:
             slots[index] = keyword
+            if index < len(ctx_list):
+                slot_contexts[index] = ctx_list[index]
         seen_keywords.add(keyword)
     if not slots and cover_title:
         slots[0] = cover_title
@@ -100,7 +129,9 @@ def prepare_article_photos(keywords, publisher, cover_title=None, *, use_ai_firs
 
     with TemporaryDirectory(prefix="wechat-photos-") as temp:
         directory = Path(temp)
-        for index, (path, photo) in _select_images(slots, directory, use_ai_first).items():
+        for index, (path, photo) in _select_images(
+            slots, directory, use_ai_first, cover_title=cover_title or "", section_contexts=slot_contexts,
+        ).items():
             check_cancelled()
             try:
                 cdn_url = publisher.upload_news_image(path) if keywords else None

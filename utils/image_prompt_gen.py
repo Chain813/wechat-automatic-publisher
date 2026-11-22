@@ -44,23 +44,23 @@ def generate_image_prompts(article_title: str, placeholders: list[str]) -> list[
 
     user_prompt = (
         f"文章标题：{article_title}\n\n"
-        f"以下是文章中需要配图的关键词列表：\n{keywords_text}\n\n"
-        f"请为每个关键词生成一段适合 {IMAGE_GEN_MODEL} 模型的英文生图 Prompt。\n\n"
+        f"以下是文章中需要配图的信息图/主题列表：\n{keywords_text}\n\n"
+        f"请为每一项生成一段适合 {IMAGE_GEN_MODEL} 模型的高级浅色编辑信息图中文提示词。\n\n"
         "要求：\n"
-        "1. 每个 Prompt 为 1-2 句精炼英文，描述一幅高清 16:9 科技感/现代感图片\n"
-        "2. 包含画面风格、色彩感与视角（如 cinematic, 8k, modern tech style）\n"
-        "3. 与文章主题和关键词语义高度契合\n"
+        "1. 采用纯净浅灰白底色（#F8FAFC）、瑞士网格现代扁平编辑信息图风格（对标《经济学人》/ Linear），严禁赛博黑底霓虹与写实人脸\n"
+        "2. 画面必须包含清晰可读的简体中文主标题（6-12字）及 2-4 个核心要点卡片标签（用中文双引号“...”写死，全图总汉字 25-55 字），四周留白充足、无水印\n"
+        "3. 每张图采用差异化版式（架构流转、左右对比、核心指标卡片），与文章主题高度契合且不杜撰数字\n"
         "4. 严格按 JSON 数组格式输出，不要多余文字\n\n"
         "输出格式：\n"
         "```json\n"
         '[\n'
-        '  {"index": 1, "prompt": "英文提示词..."},\n'
-        '  {"index": 2, "prompt": "英文提示词..."}\n'
+        '  {"index": 1, "prompt": "中文编辑信息图提示词..."},\n'
+        '  {"index": 2, "prompt": "中文编辑信息图提示词..."}\n'
         ']\n'
         "```"
     )
 
-    system = "你是一个专业 AI 绘图提示词专家。将中文关键词转化为高质量英文图片生成提示词。严格输出 JSON 数组。"
+    system = "你是一位顶级科技商业杂志的信息图视觉导演，擅长编写带精准简体中文标题与卡片标注的浅色编辑信息图生图提示词。严格输出 JSON 数组。"
 
     try:
         result = call_deepseek_with_retry(

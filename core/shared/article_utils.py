@@ -35,6 +35,30 @@ def _extract_image_placeholders(article_text):
     return placeholders
 
 
+def _extract_placeholder_contexts(article_text, window_chars=360):
+    """为每个配图占位符提取其所在小节标题与前后正文摘录，供 AI 信息图视觉导演提炼真实文字信息。"""
+    text = article_text or ""
+    contexts = []
+    headings = [(m.start(), m.group(0).strip()) for m in re.finditer(r"(?m)^##\s+[^\n]+", text)]
+    for match in PLACEHOLDER_PATTERN.finditer(text):
+        pos = match.start()
+        sec_heading = ""
+        for h_pos, h_text in headings:
+            if h_pos <= pos:
+                sec_heading = h_text
+            else:
+                break
+        before = text[max(0, pos - window_chars):pos]
+        after = text[match.end():min(len(text), match.end() + window_chars // 2)]
+        raw_snippet = f"{sec_heading}\n{before}\n{after}".strip()
+        clean_snippet = PLACEHOLDER_PATTERN.sub("", raw_snippet)
+        clean_snippet = re.sub(r"</?redbold>", "", clean_snippet)
+        clean_snippet = re.sub(r"[*_`>]+", "", clean_snippet)
+        clean_snippet = re.sub(r"\n{2,}", "\n", clean_snippet).strip()
+        contexts.append(clean_snippet[:520])
+    return contexts
+
+
 def _replace_placeholder(html_body, keyword, replacement):
     # 替换单个占位符（首个匹配项）
     pattern = re.compile(rf"【\s*此处插入配图\s*[：:]\s*{re.escape(keyword)}\s*】")
@@ -575,6 +599,7 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
         cleaned = GITHUB_IMAGE_PATTERN.sub('', cleaned)
 
     placeholders = _extract_image_placeholders(cleaned)
+    placeholder_contexts = _extract_placeholder_contexts(cleaned)
 
     github_images = []
     seen_gh = set()
@@ -618,7 +643,11 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
     cover_caption = ""
     if not skip_photo_images and (placeholders or cover_title):
         photo_figures, thumb_id, cover_caption = prepare_article_photos(
-            placeholders, publisher, cover_title, use_ai_first=use_ai_first,
+            placeholders,
+            publisher,
+            cover_title,
+            use_ai_first=use_ai_first,
+            section_contexts=placeholder_contexts,
         )
 
     image_count = 0

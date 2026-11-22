@@ -8,6 +8,7 @@ import os
 import re
 import time
 import threading
+from contextlib import contextmanager
 from PIL import Image, ImageDraw, ImageFont
 
 # 屏蔽 OpenCV 的损坏图片警告
@@ -625,10 +626,10 @@ def generate_article_images_batch(title, article_text, keywords, save_dir="asset
     
     prompt_parts = [f"图#{i+1}主题：{kw}" for i, kw in enumerate(kws)]
     prompt = (
-        f"为公众号文章《{title}》生成一组风格统一但画面主体完全不同的高清配图插画。\n"
+        f"为公众号文章《{title}》生成一组风格统一但构图与信息焦点各不相同的高清浅色科技编辑信息图。\n"
         f"文章摘要：{excerpt}。\n"
         f"共需 {len(kws)} 张图：\n" + "；".join(prompt_parts) + "\n"
-        "要求：每张图必须紧扣对应主题，画风现代简洁，色调统一，无文字与水印。"
+        "要求：纯净浅灰白底色，瑞士网格现代扁平信息图设计，每张图包含 1 句醒目简短简体中文主标题与 2-4 个核心中文要点标签，字体清晰无乱码，四周留白充足，严禁赛博黑底霓虹与水印。"
     )
     clean_title = _sanitize_path(title)[:24] if title else "batch"
     target_dir = os.path.join(save_dir, clean_title or "batch")
@@ -652,15 +653,164 @@ def generate_article_images_batch(title, article_text, keywords, save_dir="asset
     return result
 
 
-def _build_qwen_image_prompt(keyword):
-    """为关键词构建具体、个性化且不重复的通义万相 AI 插画生图提示词"""
-    if not keyword or not keyword.strip():
-        return "高清科技感公众号插画，现代概念，无文字水印"
-    clean_kw = keyword.strip()
+_qwen_prompt_tls = threading.local()
+
+_SLOT_LAYOUT_ARCHETYPES = (
+    (
+        "全景机制/分层架构信息图",
+        "采用居中对称的横版三层架构信息图布局，核心视觉与文字聚焦在画幅中轴 72% 安全区内（兼顾封面缩略图与正文阅读）。浅灰蓝微点阵纸面底色上放置 3 张高质感纯白立体圆角卡片（清晰浅灰边框+细腻柔和投影），每张卡片顶部配一枚精致的扁平轴测矢量图标（如服务器/加密锁盾/算力芯片/数据节点），卡片间用粗细得当的科技靛蓝渐变流向箭头串联。",
+    ),
+    (
+        "左右双栏对比/博弈信息图",
+        "采用左右双栏杂志对比海报布局：顶部主标题配靛蓝主题标签；左侧浅灰白卡片配灰色/珊瑚红扁平轴测插画图标展示旧模式或一方制约，右侧纯白高光卡片配科技靛蓝扁平轴测插画图标展示新架构或破局方向，中间以醒目的对比徽章与流向箭头连接，层次分明。",
+    ),
+    (
+        "核心指标/机制纵深信息图",
+        "采用「左侧视觉主图 + 右侧结构化要点卡片」或「顶部主标题 + 下方三枚带迷你数据可视化图形（柱状条/环形进度/节点网络）的白底卡片」杂志信息图布局，将关键数据或技术链路转化为有视觉重量感的几何图形与简洁中文标注。",
+    ),
+)
+
+
+@contextmanager
+def qwen_prompt_context(article_title="", section_context="", slot_index=0):
+    """线程局部生图上下文：在不破坏 download_image 签名的前提下，将文章标题、所在小节正文与图位序号透传给提示词导演。"""
+    prev = getattr(_qwen_prompt_tls, "ctx", None)
+    _qwen_prompt_tls.ctx = {
+        "article_title": (article_title or "").strip(),
+        "section_context": (section_context or "").strip(),
+        "slot_index": int(slot_index or 0),
+    }
+    try:
+        yield
+    finally:
+        if prev is None:
+            if hasattr(_qwen_prompt_tls, "ctx"):
+                delattr(_qwen_prompt_tls, "ctx")
+        else:
+            _qwen_prompt_tls.ctx = prev
+
+
+def get_qwen_prompt_context():
+    """读取当前线程的生图上下文（若未设置则返回默认空结构）。"""
+    ctx = getattr(_qwen_prompt_tls, "ctx", None)
+    if not isinstance(ctx, dict):
+        return {"article_title": "", "section_context": "", "slot_index": 0}
+    return ctx
+
+
+def _can_use_llm_prompt_director():
+    """是否允许调用轻量 DeepSeek 模型为通义万相 3.0 深化编辑信息图提示词。"""
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return False
+    if os.getenv("QWEN_IMAGE_LLM_PROMPT", "1").strip().lower() in ("0", "false", "no", "off"):
+        return False
+    from config import LLM_API_KEY, LLM_API_KEYS
+    return bool(LLM_API_KEY or LLM_API_KEYS)
+
+
+def _build_local_infographic_prompt(keyword, article_title="", slot_index=0):
+    """本地确定性高质量浅色编辑信息图提示词（带清晰简体中文主标题与结构化节点标签）。"""
+    clean_kw = re.sub(r"\s+", " ", (keyword or "").strip())
+    if not clean_kw:
+        clean_kw = (article_title or "前沿科技机制拆解").strip()[:16]
+
+    parts = [p.strip() for p in re.split(r"[｜|]", clean_kw, maxsplit=1) if p.strip()]
+    main_title = parts[0][:16]
+    raw_detail = parts[1] if len(parts) > 1 else ""
+
+    node_labels = []
+    if raw_detail:
+        for seg in re.split(r"(?:→|->|=>|\bvs\b|\bVS\b|对比|、|/|；|;)", raw_detail):
+            s = seg.strip(" ：:，,。")
+            if s and len(s) >= 2:
+                node_labels.append(s[:12])
+    node_labels = node_labels[:4]
+
+    layout_name, layout_desc = _SLOT_LAYOUT_ARCHETYPES[int(slot_index or 0) % len(_SLOT_LAYOUT_ARCHETYPES)]
+
+    if len(node_labels) >= 2:
+        quoted_nodes = "、".join(f"“{n}”" for n in node_labels)
+        content_spec = (
+            f"顶部粗体黑字主标题为“{main_title}”，主体展示 {len(node_labels)} 个清晰的纯白圆角信息卡片，"
+            f"依次标注简体中文标签 {quoted_nodes}，卡片之间用简洁科技靛蓝箭头与极简线性矢量图标连接。"
+        )
+    else:
+        sub_label = (article_title or "").strip()[:14]
+        sub_clause = f"，辅助副标题小字为“{sub_label}”" if sub_label and sub_label != main_title else ""
+        content_spec = (
+            f"顶部粗体黑字主标题为“{main_title}”{sub_clause}，"
+            f"下方以 3 个极简白底信息卡片配线性矢量图标和箭头拆解核心机制与关键影响，每张卡片配有醒目简短简体中文关键词。"
+        )
+
     return (
-        f"一幅高清 16:9 现代科技概念插画，主题内容：【{clean_kw}】。"
-        "画面效果：视角独特，构图大气，色彩调和细腻，具有强烈的视觉冲击力与空间层次感，画面中绝对不包含任何文字、字母或水印。"
+        f"一幅16:9顶级科技商业杂志编辑信息图（{layout_name}），融合《经济学人》数据新闻美学与 Linear 现代浅色几何插画质感。"
+        f"画布采用柔和浅灰蓝微点阵纸面底色，四周预留至少10%充足安全留白，衬托出高质感纯白圆角卡片（清晰细灰边框与柔和投影）。{layout_desc}"
+        f"{content_spec}"
+        "每个模块卡片内必须配有精致统一的扁平轴测科技插画元素（如立体数据节点、加密棱镜、服务器机柜、信号链路或极简数据柱状图），避免光秃秃的纯文字白板。"
+        "配色高度克制且富有质感：深墨黑主文字、板岩灰次级标注、科技靛蓝主色配少量珊瑚红或琥珀橙视觉焦点；"
+        "所有简体中文采用现代粗黑无衬线字体，大字号、笔画清晰工整、零错别字。"
+        "严禁赛博朋克深黑霓虹背景、严禁发光大脑或写实人脸会议室照片、严禁把色号代码写进画面、严禁密集小字段落、无平台水印。"
     )
+
+
+def _build_qwen_image_prompt(keyword, context=None, article_title=None, slot_index=None):
+    """
+    为通义万相 Qwen-Image-3.0 构建杂志级浅色中文编辑信息图提示词。
+    优先使用轻量 LLM 结合文章标题与所在小节上下文提炼真实文字标签与版式构图，失败时平滑回退本地结构化信息图模板。
+    """
+    tls_ctx = get_qwen_prompt_context()
+    eff_title = (article_title if article_title is not None else tls_ctx.get("article_title", "")) or ""
+    eff_section = (context if context is not None else tls_ctx.get("section_context", "")) or ""
+    eff_slot = int(slot_index if slot_index is not None else tls_ctx.get("slot_index", 0))
+
+    if not keyword or not keyword.strip():
+        return _build_local_infographic_prompt(eff_title or "前沿科技洞察", eff_title, eff_slot)
+
+    clean_kw = keyword.strip()
+    layout_name, layout_desc = _SLOT_LAYOUT_ARCHETYPES[eff_slot % len(_SLOT_LAYOUT_ARCHETYPES)]
+
+    if _can_use_llm_prompt_director():
+        try:
+            from config import LLM_MODEL
+            from core.shared.llm import call_deepseek_with_retry
+
+            system_prompt = (
+                "你是顶级科技与商业专栏（对标《经济学人》、Stripe Press、Linear 视觉图解）的首席信息图视觉导演，"
+                "专门为中文文字渲染能力极强的通义万相 Qwen-Image-3.0 编写 16:9 杂志级浅色编辑信息图提示词。\n"
+                "必须严格遵守以下美学、视觉丰富度与文字排版铁律：\n"
+                "1. **拒绝光秃秃的纯文字 PPT，必须兼具杂志插画美感与信息密度**：\n"
+                "   - 画布采用柔和浅灰蓝微点阵/细网格纸面底色，四周预留 ≥10% 安全留白，让纯白圆角信息卡片（清晰细灰边框 + 细腻柔和投影）立体浮现。\n"
+                "   - **每个核心模块卡片必须配有具体、精致的扁平轴测科技插画或图形元素**（例如：立体加密棱镜、微缩数据中心机架、芯片晶圆纹理、光纤信号路径、极简柱状对比条、安全锁盾等），绝不画成空荡荡的纯文字框。\n"
+                "   - 配色高级克制：深墨黑主字 + 板岩灰辅字 + 科技靛蓝主色 + 局部珊瑚红/琥珀橙作关键高亮，顶部可配一枚小巧的靛蓝圆角分类胶囊（如“机制拆解”“格局对比”“核心数据”）。\n"
+                "2. **精准克制的简体中文文字**：\n"
+                "   - 画面中**只有需要真正渲染出来的简体中文文案才能放在双引号“...”里**，严禁把颜色色号（如 #F8FAFC）放进引号或写进提示词！\n"
+                "   - 包含 1 个顶部醒目粗体主标题（6-12字）和 2-4 个核心模块卡片（每卡仅含 3-8 字短标题 + ≤10 字核心要点或正文真实数字）。\n"
+                "   - 全图引号内总汉字严格控制在 **25-50 字**之间，保证字号大、留白呼吸感强、零乱码、绝不拥挤。\n"
+                "3. **事实绝对保真**：所有专有名词、机构名与数字严格来自输入标题与正文片段，严禁杜撰任何未出现的数字或年份。\n"
+                "4. **强力去土味黑名单**：严禁赛博朋克深黑霓虹、严禁蓝紫发光大脑/光球、严禁写实人物头像/领导座谈/会议室照片、严禁随机伪英文、水印或小字长段落。\n"
+                "5. **输出格式**：直接输出一段 200-340 字的完整简体中文生图提示词，不要输出标题、解释、编号或 Markdown 代码块。"
+            )
+            user_prompt = (
+                f"文章标题：{eff_title or '未提供'}\n"
+                f"本图主题锚点：{clean_kw}\n"
+                f"推荐版式原型：{layout_name}（{layout_desc}）\n"
+                f"所在小节正文摘录：\n{eff_section[:500] if eff_section else '（无额外摘录，请紧扣主题锚点提炼结构化信息）'}\n\n"
+                "请据此写出一段直接发给 Qwen-Image-3.0 的高审美浅色编辑信息图中文提示词，务必用“...”明确标出画面中需要渲染的每一处简体中文标题与卡片要点。"
+            )
+            enhanced = call_deepseek_with_retry(
+                user_prompt,
+                system_content=system_prompt,
+                model=LLM_MODEL,
+                reasoning_effort="none",
+                max_tokens=650,
+            )
+            cleaned = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", (enhanced or "").strip()).strip()
+            if len(cleaned) >= 80 and ("“" in cleaned or '"' in cleaned):
+                return cleaned
+        except Exception as e:
+            logger.warning("  LLM 视觉导演生成 Qwen-Image 提示词失败，回退本地信息图模板: {}", e)
+
+    return _build_local_infographic_prompt(clean_kw, eff_title, eff_slot)
 
 
 def _parse_qwen_image_response(data, target_dir, prefix):
@@ -692,6 +842,11 @@ def _try_qwen_image_gen(keyword, target_dir, width=900, height=500):
     """通义万相 Qwen-Image-3.0 文本生图（DashScope/百炼，国内直连）"""
     from config import QWEN_IMAGE_API_BASE, QWEN_IMAGE_MODEL, QWEN_IMAGE_TIMEOUT, QWEN_IMAGE_PROMPT_EXTEND, QWEN_IMAGE_SIZE
     prompt = _build_qwen_image_prompt(keyword)
+    # 当提示词已包含明确引号标注的简体中文信息图布局时，关闭云端二次改写以防中文标签被篡改或丢字
+    has_structured_text = len(prompt) >= 90 and ("“" in prompt or '"' in prompt)
+    force_extend = os.getenv("QWEN_IMAGE_FORCE_PROMPT_EXTEND", "").strip().lower() in ("1", "true", "yes")
+    use_prompt_extend = bool(QWEN_IMAGE_PROMPT_EXTEND) if (force_extend or not has_structured_text) else False
+    logger.info("  [Qwen-Image Prompt] (extend={}) {}", use_prompt_extend, prompt[:140])
     body = {
         "model": QWEN_IMAGE_MODEL,
         "input": {
@@ -699,7 +854,7 @@ def _try_qwen_image_gen(keyword, target_dir, width=900, height=500):
                 {"role": "user", "content": [{"text": prompt}]}
             ]
         },
-        "parameters": {"prompt_extend": QWEN_IMAGE_PROMPT_EXTEND, "size": QWEN_IMAGE_SIZE},
+        "parameters": {"prompt_extend": use_prompt_extend, "size": QWEN_IMAGE_SIZE},
     }
     status, data = _qwen_post_with_rotation(QWEN_IMAGE_API_BASE, body, QWEN_IMAGE_TIMEOUT)
     if status != 200 or not data:
@@ -824,9 +979,8 @@ def _download_free_image(keyword, save_dir, purpose="body", max_retries=3):
         for attempt in range(1, max_retries + 1):
             check_cancelled()
             try:
-                # 重试时如果上一轮未成功，变体微调关键词
-                current_kw = keyword if attempt == 1 else f"{keyword} 画面视角{attempt}"
-                path = _try_qwen_image_gen(current_kw, target_dir, width, height)
+                # 保持原始关键词纯净，避免把“画面视角2”等技术字样污染进信息图中文文字
+                path = _try_qwen_image_gen(keyword, target_dir, width, height)
                 if path:
                     mark_source_success("qwen")
                     return path
