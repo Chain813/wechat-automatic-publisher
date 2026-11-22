@@ -61,9 +61,11 @@ class TestDeepenedImagePrompts(unittest.TestCase):
         self.assertIn("切断直连意味着什么", captured_args["prompt"])
         self.assertIn("对比", captured_args["prompt"])
 
-        # Verify rich Chinese infographic prompt disables prompt_extend so DashScope preserves exact quoted Chinese labels
+        # Verify rich Chinese infographic prompt preserves exact labels, appends landscape guardrail, and disables prompt_extend
         posted_body = mock_post.call_args.args[1]
-        self.assertEqual(posted_body["input"]["messages"][0]["content"][0]["text"], rich_prompt)
+        sent_text = posted_body["input"]["messages"][0]["content"][0]["text"]
+        self.assertIn(rich_prompt, sent_text)
+        self.assertIn("严禁竖版", sent_text)
         self.assertFalse(posted_body["parameters"]["prompt_extend"])
 
     def test_article_pipeline_propagates_section_context_and_skips_openverse_for_infographics(self):
@@ -125,6 +127,40 @@ class TestDeepenedImagePrompts(unittest.TestCase):
 
         self.assertIn("｜", captured["prompt"])
         self.assertIn("信息图", captured["prompt"])
+
+    def test_prompts_strictly_enforce_horizontal_landscape_and_ban_vertical_stacks(self):
+        from utils import image_handler
+
+        # Slot 0 archetype must enforce horizontal left-to-right layout, never vertical top-to-bottom stacking
+        slot0_name, slot0_desc = image_handler._SLOT_LAYOUT_ARCHETYPES[0]
+        self.assertIn("横向", slot0_desc)
+        self.assertIn("从左到右", slot0_desc)
+        self.assertIn("严禁", slot0_desc)
+        self.assertNotIn("三层架构", slot0_name)
+
+        with patch.object(image_handler, "_can_use_llm_prompt_director", return_value=False):
+            local_p = image_handler._build_qwen_image_prompt(
+                "资本在岸，控制权在水下｜资本登岸 → PropCo分离 → 控制链穿透",
+                slot_index=0,
+            )
+        self.assertIn("横向", local_p)
+        self.assertIn("严禁竖版", local_p)
+
+        captured_sys = {}
+
+        def fake_llm(prompt, system_content="", **kwargs):
+            captured_sys["sys"] = system_content
+            return "16:9 宽屏横向三栏编辑信息图，主标题“测试”，左中右并排三张卡片，严禁竖版堆叠。"
+
+        with (
+            patch.object(image_handler, "_can_use_llm_prompt_director", return_value=True),
+            patch("core.shared.llm.call_deepseek_with_retry", side_effect=fake_llm),
+        ):
+            image_handler._build_qwen_image_prompt("测试主题｜要点A → 要点B → 要点C", slot_index=0)
+
+        self.assertIn("严禁竖版", captured_sys["sys"])
+        self.assertIn("自上而下", captured_sys["sys"])
+        self.assertIn("多行", captured_sys["sys"])
 
 
 if __name__ == "__main__":
