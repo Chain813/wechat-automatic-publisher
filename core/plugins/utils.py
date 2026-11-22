@@ -1,11 +1,15 @@
 import os
 import random
 import threading
+import time
 from datetime import datetime, timezone, timedelta
 import re
 from loguru import logger
 from utils.http_client import build_cached_session
+import config as _config
 from config import HOTSPOT_CACHE_TTL_SECONDS, NEWS_FRESHNESS_HOURS
+
+SOURCE_CIRCUIT_COOLDOWN_SECONDS = getattr(_config, "SOURCE_CIRCUIT_COOLDOWN_SECONDS", 1800)
 
 _CN_TZ = timezone(timedelta(hours=8))
 
@@ -19,50 +23,104 @@ _source_health = {}
 _source_health_lock = threading.Lock()
 HTTP_SESSION = build_cached_session(os.path.join("data", "cache", "hotspots", "hotspot_cache"), HOTSPOT_CACHE_TTL_SECONDS)
 
+
+def _new_health_entry():
+    return {
+        "failures": 0,
+        "disabled": False,
+        "disabled_until": 0.0,
+        "latency_ms": None,
+        "detail": "",
+    }
+
+
+def _maybe_recover_source(name, h):
+    if h.get("disabled"):
+        disabled_until = h.get("disabled_until", 0.0)
+        if disabled_until > 0 and time.time() >= disabled_until:
+            h["disabled"] = False
+            h["failures"] = 0
+            h["disabled_until"] = 0.0
+            h["detail"] = "冷却期满，已自动恢复半开探测"
+            logger.info(f"  {name} 熔断冷却已到期，自动恢复半开探测")
+
+
 def get_source_health_report():
     from config import NEWS_SOURCES
+    display_names = {}
+    try:
+        from core.plugins.manager import plugin_manager
+        for sid, plugin in plugin_manager.get_all_plugins().items():
+            display_names[sid] = getattr(plugin, "display_name", sid)
+    except Exception:
+        pass
+
     report = {}
     with _source_health_lock:
         # 预先用配置的信源初始化健康状态，避免初始状态为空
         for src in NEWS_SOURCES:
             if src not in _source_health:
-                _source_health[src] = {"failures": 0, "disabled": False}
-                
+                _source_health[src] = _new_health_entry()
+
         for k, v in _source_health.items():
+            _maybe_recover_source(k, v)
             if v["disabled"]:
                 status = "disabled"
             elif v["failures"] > 0:
                 status = "degraded"
             else:
                 status = "healthy"
-            report[k] = {
+            entry = {
                 "failures": v["failures"],
-                "status": status
+                "status": status,
             }
+            if k in display_names:
+                entry["display_name"] = display_names[k]
+            if v.get("latency_ms") is not None:
+                entry["latency_ms"] = v["latency_ms"]
+            if v.get("detail"):
+                entry["detail"] = v["detail"]
+            report[k] = entry
     return report
+
 
 def _get_source_health(name):
     if name not in _source_health:
-        _source_health[name] = {"failures": 0, "disabled": False}
+        _source_health[name] = _new_health_entry()
     return _source_health[name]
 
-def _mark_source_failure(name):
+
+def _mark_source_failure(name, detail=""):
     with _source_health_lock:
         h = _get_source_health(name)
         h["failures"] += 1
+        if detail:
+            h["detail"] = detail
         if h["failures"] >= 3:
             h["disabled"] = True
-            logger.warning(f"  {name} 连续失败 3 次，已自动降级跳过")
+            h["disabled_until"] = time.time() + max(1, int(SOURCE_CIRCUIT_COOLDOWN_SECONDS))
+            logger.warning(
+                f"  {name} 连续失败 {h['failures']} 次，已自动熔断冷却 {SOURCE_CIRCUIT_COOLDOWN_SECONDS} 秒后恢复"
+            )
 
-def _mark_source_success(name):
+
+def _mark_source_success(name, latency_ms=None, detail=""):
     with _source_health_lock:
         h = _get_source_health(name)
         h["failures"] = 0
         h["disabled"] = False
+        h["disabled_until"] = 0.0
+        if latency_ms is not None:
+            h["latency_ms"] = int(latency_ms)
+        if detail:
+            h["detail"] = detail
+
 
 def _is_source_disabled(name):
     with _source_health_lock:
-        return _get_source_health(name)["disabled"]
+        h = _get_source_health(name)
+        _maybe_recover_source(name, h)
+        return h["disabled"]
 
 def reset_source_health():
     """重置所有数据源的健康状态（每次运行开始时调用）"""

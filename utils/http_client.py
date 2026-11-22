@@ -22,7 +22,7 @@ def _mount_retry(session: requests.Session) -> requests.Session:
         allowed_methods=frozenset({"GET", "POST"}),
         raise_on_status=False,
     )
-    adapter = HTTPAdapter(max_retries=retry, pool_connections=10, pool_maxsize=10)
+    adapter = HTTPAdapter(max_retries=retry, pool_connections=32, pool_maxsize=32)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
     return session

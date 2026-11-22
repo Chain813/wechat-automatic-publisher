@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 - 修复 `deepseek-v4-flash` 默认思考模式占用全部 `max_tokens=8192` 导致长文正文为空或被截断的问题：新增 `LLM_ENABLE_THINKING`（默认 `False`）并将默认 `LLM_MAX_TOKENS` 提升至 `16384`，补充 `finish_reason`/`reasoning_tokens` 诊断日志与思考耗尽自动降级重试。
 - 热点内容引擎重构为三段式解耦架构：Stage 1 使用 `deepseek-flash` 原生 `deepseek_web_search` + `deepseek_read_url` 进行多信源深调研；Stage 2 使用 `deepseek-v4-pro`（`reasoning_effort="low"`）执行无格式紧箍咒纯写作（去审稿笔录腔、自然字数下限 1500 字）；Stage 3 由快速模型独立完成红字/加粗/金句/配图排版标注；`Critic` 新增 AI 内部审稿元话语拦截。
 - 统一各工作流文末落款为可配置项 `ARTICLE_SIGNATURE`（默认 `**关注「极研JiYan」，只讲有出处的科技门道与深度拆解。**`），并对齐「终极钻研」品牌定位。
+- 热点信源扩容至 14 路中国大陆直连采集并加固长效连通性：新增带三层容灾兜底（Algolia → 官方 RSS → Firebase）的 `HackerNewsPlugin` 与双通道兜底的 `WallStreetCNPlugin`；升级 `ThirtySixKrPlugin`（官方 Gateway 快讯 JSON API 优先 + WAF 校验过滤）与 `HuxiuPlugin`（官方 RSS 优先 + `articleList` API 兜底）绕过网页端 WAF 拦截；`RSS_FEEDS` 清理失效/重复源并扩充至 10 路国内直连高质量科技 RSS（InfoQ / Solidot / 开源中国 / 量子位 / 爱范儿 / 极客公园 / 钛媒体 / 雷峰网 / 少数派 / GitHub Blog）；重构 `RssPlugin` 为并发抓取 + 单源故障隔离 + 轮询公平交错合并；升级信源熔断器支持冷却到期（默认 `SOURCE_CIRCUIT_COOLDOWN_SECONDS=1800`）自动半开恢复；扩容 HTTP 连接池至 32 并优化 `/api/sources/test` 实测延迟与展示名上报。
 
 ### 🔍 事实核查、动态叙事与 AI Critic 质量门禁 (Fact Grounding & Quality Gate)
 - **联网事实核查与正文深抓**：新增 `core/hotspots/scraper.py`（基于 `trafilatura` 与浏览器伪装请求提取原始网页正文）及 `core/hotspots/searcher.py`（DuckDuckGo HTML/Lite 与 Bing 网页事实检索，由 `ENABLE_FACT_SEARCH` / `MAX_FACT_SNIPPETS` 控制），为深度创作提供可核查事实现场。

@@ -117,8 +117,9 @@ class TestPluginHotspotItemOutput:
         assert "全新芯片" in first.summary
         assert first.source_id == "ithome"
 
+    @patch("core.plugins.hotspots_sources.HTTP_SESSION.post", side_effect=RuntimeError("gateway unavailable"))
     @patch("core.plugins.hotspots_sources.HTTP_SESSION.get")
-    def test_36kr_rss_returns_hotspot_items(self, mock_get):
+    def test_36kr_rss_returns_hotspot_items(self, mock_get, _mock_post):
         from email.utils import format_datetime
         from datetime import timezone, datetime
         now_gmt = format_datetime(datetime.now(timezone.utc))

@@ -5,7 +5,7 @@
 在 AutoWeChat 的全自动采集、文章生成、配图排版、发布流水线与 WebUI 开发中，智能体必须恪守以下八条行为底线：
 
 1. **以瞎猜接口为耻，以认真查询为荣**：
-   严禁凭直觉瞎猜微信 Official Account API 字段、12源热点采集器结构、DashScope/Qwen 生图接口或 Token 刷新参数，调用前必查代码与文档。
+   严禁凭直觉瞎猜微信 Official Account API 字段、14源热点采集器结构、DashScope/Qwen 生图接口或 Token 刷新参数，调用前必查代码与文档。
 2. **以模糊执行为耻，以寻求确认为荣**：
    面对选题偏好、发文频次、知识库节点更新、敏感词风控等不明确要求，严禁暗自盲目推进，必须主动向用户确认。
 3. **以臆想业务为耻，以人类确认为荣**：
@@ -23,7 +23,7 @@
 
 ## 项目概述
 
-AutoWeChat 是企业级微信公众号 AI 全流程创作与合规发布工作台，采用 Human-in-the-Loop（人机协同审核）架构。集成 12 路热点采集、网页深抓与联网事实核查、动态叙事写作、Critic 质量门禁、可追溯来源的资料照片与技术图表，最终安全推送至微信草稿箱并经 Audit 审稿台终审。
+AutoWeChat 是企业级微信公众号 AI 全流程创作与合规发布工作台，采用 Human-in-the-Loop（人机协同审核）架构。集成 14 路国内直连热点采集（含 Hacker News / 华尔街见闻 / 10 路并行 RSS 轮询聚合与熔断自动恢复）、网页深抓与联网事实核查、动态叙事写作、Critic 质量门禁、可追溯来源的资料照片与技术图表，最终安全推送至微信草稿箱并经 Audit 审稿台终审。
 
 ## 技术栈
 
@@ -51,7 +51,7 @@ AutoWeChat 是企业级微信公众号 AI 全流程创作与合规发布工作�
 │   ├── engine.py                  # 统一任务调度总线 (4 类工作流)
 │   ├── db/                        # ORM 模型 (`models.py`) 与连接池 (`manager.py`)
 │   ├── pipeline/                  # PipelineEngine (`engine.py`)、节点协议 (`nodes.py`) 与 Critic 门禁 (`critic.py`)
-│   ├── plugins/                   # 12 路热点数据源与 GitHub 插件注册 (`hotspots_sources.py`, `manager.py`)
+│   ├── plugins/                   # 14 路热点数据源与 GitHub 插件注册 (`hotspots_sources.py`, `manager.py`)
 │   ├── hotspots/                  # `processor.py` / `workflow.py` / `scraper.py` / `searcher.py` / `narrative.py`
 │   ├── github/                    # GitHub 采集、截图与深潜成文 (`collector.py`, `processor.py`, `workflow.py`)
 │   ├── aikepu/                    # 知识图谱解析 (`skill_tree.py`)、并发 Sub-Agent 写作 (`processor.py`, `workflow.py`)

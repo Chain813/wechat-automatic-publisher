@@ -1081,26 +1081,47 @@ def get_sources():
 @app.route('/api/sources/test', methods=['POST', 'GET'])
 def test_sources():
     try:
-        from core.plugins.manager import plugin_manager
-        from core.plugins.utils import _mark_source_success, _mark_source_failure, get_source_health_report
         import concurrent.futures
-        
-        plugins = plugin_manager.get_all_plugins()
+        import time as _time
+        from config import NEWS_SOURCES
+        from core.plugins.manager import plugin_manager
+        from core.plugins.utils import (
+            _mark_source_success,
+            _mark_source_failure,
+            get_source_health_report,
+            reset_source_health,
+            _source_health,
+            _source_health_lock,
+        )
+
+        # 手动探测时清空历史熔断计数，确保所有配置信源都得到真实重测
+        reset_source_health()
+        plugins = {
+            sid: plugin_manager.get_plugin(sid)
+            for sid in NEWS_SOURCES
+            if plugin_manager.get_plugin(sid) is not None
+        }
+
         def check_plugin(source_id, plugin):
+            t0 = _time.monotonic()
             try:
                 data = plugin.fetch_data()
+                elapsed_ms = int((_time.monotonic() - t0) * 1000)
                 if data:
-                    _mark_source_success(source_id)
+                    _mark_source_success(source_id, latency_ms=elapsed_ms, detail=f"实测 {len(data)} 条")
                 else:
-                    _mark_source_failure(source_id)
-            except Exception:
-                _mark_source_failure(source_id)
+                    with _source_health_lock:
+                        already_failed = _source_health.get(source_id, {}).get("failures", 0) > 0
+                    if not already_failed:
+                        _mark_source_failure(source_id, detail="返回空数据")
+            except Exception as exc:
+                _mark_source_failure(source_id, detail=str(exc)[:80])
 
-        workers = max(1, min(len(plugins), 12))
+        workers = max(1, min(len(plugins), 14))
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             futures = [executor.submit(check_plugin, sid, p) for sid, p in plugins.items()]
-            concurrent.futures.wait(futures, timeout=10)
-            
+            concurrent.futures.wait(futures, timeout=15)
+
         report = get_source_health_report()
         return jsonify({"status": "success", "sources": report})
     except Exception as e:

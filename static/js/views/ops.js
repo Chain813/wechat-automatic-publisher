@@ -111,10 +111,12 @@ async function loadSourcesMatrix(isBg = false) {
       const text = isOk ? '健康运行' : isWarn ? '延迟稍高' : '连接异常';
       const dot = isOk ? 'var(--status-success)' : isWarn ? 'var(--status-warning)' : 'var(--status-danger)';
 
+      const displayLabel = info.display_name ? `${info.display_name} (${name})` : name;
+
       html += `
         <div class="source-item-card">
           <div class="source-item-header">
-            <span class="source-item-name">${escapeHtml(name)}</span>
+            <span class="source-item-name">${escapeHtml(displayLabel)}</span>
             <span class="badge ${cls}"><span style="width:5px;height:5px;border-radius:50%;background:${dot};"></span>${text}</span>
           </div>
           <div class="source-item-meta">

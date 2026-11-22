@@ -61,21 +61,41 @@ WECHAT_DRAFT_SCAN_COUNT = int(os.getenv("WECHAT_DRAFT_SCAN_COUNT", "50"))
 TITLE_DUPLICATE_RATIO = int(float(os.getenv("TITLE_DUPLICATE_RATIO", "88")))
 
 # 9. 新闻采集源配置
-NEWS_SOURCES = ["weibo", "ithome", "36kr", "baidu", "zhihu", "csdn", "rss", "politics", "toutiao", "thepaper", "huxiu", "douyin"]
+NEWS_SOURCES = [
+    "hackernews",
+    "wallstreetcn",
+    "ithome",
+    "rss",
+    "36kr",
+    "weibo",
+    "baidu",
+    "zhihu",
+    "csdn",
+    "politics",
+    "toutiao",
+    "thepaper",
+    "huxiu",
+    "douyin",
+]
 NEWS_FRESHNESS_HOURS = 24     # 仅保留 N 小时内的热点 (0 = 不限)
 NEWS_MAX_PER_SOURCE = 15      # 每源最大条数
+SOURCE_CIRCUIT_COOLDOWN_SECONDS = int(os.getenv("SOURCE_CIRCUIT_COOLDOWN_SECONDS", "1800"))  # 信源连续失败熔断后的自动恢复冷却(秒)
 
 # 60s API 配置（用于微博/知乎/抖音/头条，比直接爬更稳定）
 API_60S_BASE = "https://60s.viki.moe/v2"
 
-# 自定义 RSS 订阅源 (直接源，不依赖 rsshub)
+# 自定义 RSS 订阅源 (中国大陆服务器直连可用，不依赖 rsshub 或代理)
 RSS_FEEDS = [
-    "https://www.ithome.com/rss/",                      # IT之家 RSS (直接)
-    "https://sspai.com/feed",                           # 少数派
-    "https://36kr.com/feed",                            # 36氪 RSS (直接)
-    "https://www.ifanr.com/feed",                       # 爱范儿 (直接)
-    "https://www.geekpark.net/rss",                     # 极客公园 (直接)
-    "https://www.qbitai.com/feed",                      # 量子位 (直接)
+    "https://www.infoq.cn/feed",          # InfoQ 中文（前沿架构与 AI 工程）
+    "https://www.solidot.org/index.rss",  # Solidot 奇客资讯（开源与硬核科技）
+    "https://www.oschina.net/news/rss",   # 开源中国（开源生态与基础软件）
+    "https://www.qbitai.com/feed",        # 量子位（AI 前沿）
+    "https://www.ifanr.com/feed",         # 爱范儿（消费科技与硬件）
+    "https://www.geekpark.net/rss",       # 极客公园（AI 与科技商业）
+    "https://www.tmtpost.com/rss.xml",    # 钛媒体（科技产业与资本）
+    "https://www.leiphone.com/feed",      # 雷峰网（AI / 半导体 / 产业深度）
+    "https://sspai.com/feed",             # 少数派（数字工具与科技趋势）
+    "https://github.blog/feed/",          # GitHub 官方博客（一手工程与 AI 动态）
 ]
 
 # 9c. 知识体系连载（原 AI 科普技能树）主题包配置
