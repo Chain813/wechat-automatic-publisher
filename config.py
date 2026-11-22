@@ -24,12 +24,15 @@ QYWECHAT_WEBHOOK = os.getenv("QYWECHAT_WEBHOOK", "")
 
 # 5. 品牌信息
 BRAND_NAME = os.getenv("BRAND_NAME", "").strip() or "极研JiYan"
-BRAND_SLOGAN = "追踪 AI 前沿与科技政策，服务计算机与研学成长"
+BRAND_SLOGAN = "只讲有出处的科技门道与深度拆解"
 BRAND_DESC = (
-    "聚焦硬核 AI 与前沿科技突破、科技政策与产业博弈，以及高校科研、考研升学与技术人才动向，"
-    "为开发者、理工科学生与技术关注者提供有出处、可落地的深度解读。"
+    "终极钻研前沿 AI、硬核科技与产业政策变局，只讲有出处的科技门道与深度拆解。"
 )
 ARTICLE_AUTHOR = os.getenv("ARTICLE_AUTHOR", "").strip() or BRAND_NAME
+ARTICLE_SIGNATURE = (
+    os.getenv("ARTICLE_SIGNATURE", "").strip()
+    or f"**关注「{BRAND_NAME}」，只讲有出处的科技门道与深度拆解。**"
+)
 
 # 6. 超时设置 (秒)
 LLM_TIMEOUT = 180

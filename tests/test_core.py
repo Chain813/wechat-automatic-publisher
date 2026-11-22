@@ -62,6 +62,23 @@ class TestAccountBrand(unittest.TestCase):
                 settings = runpy.run_path(config.__file__)
                 self.assertEqual((settings["BRAND_NAME"], settings["ARTICLE_AUTHOR"]), expected)
 
+    def test_article_signature_configuration(self):
+        with patch.dict(os.environ, {}, clear=True), patch("dotenv.load_dotenv"):
+            settings = runpy.run_path(config.__file__)
+        self.assertEqual(
+            settings["ARTICLE_SIGNATURE"],
+            "**关注「极研JiYan」，只讲有出处的科技门道与深度拆解。**",
+        )
+        with patch.dict(os.environ, {"BRAND_NAME": "测试号"}, clear=True), patch("dotenv.load_dotenv"):
+            settings_brand = runpy.run_path(config.__file__)
+        self.assertEqual(
+            settings_brand["ARTICLE_SIGNATURE"],
+            "**关注「测试号」，只讲有出处的科技门道与深度拆解。**",
+        )
+        with patch.dict(os.environ, {"ARTICLE_SIGNATURE": "**自定义落款**"}, clear=True), patch("dotenv.load_dotenv"):
+            settings_custom = runpy.run_path(config.__file__)
+        self.assertEqual(settings_custom["ARTICLE_SIGNATURE"], "**自定义落款**")
+
     def test_builtin_system_prompts_use_configured_brand(self):
         from core.aikepu.processor import build_system_prompt
         from core.github.processor import SYSTEM_PROMPT as GITHUB_SYSTEM_PROMPT
@@ -315,7 +332,7 @@ class TestThreeStageHotspotPipeline(unittest.TestCase):
             "## 第一节具体冲突\n\n" + ("这是有事实依据的深度分析段落，拆解技术机制与实际影响。" * 25) + "\n\n"
             "## 第二节技术与制度博弈\n\n" + ("这是第二部分关于硬件识别与信号探测盲区的详细拆解。" * 25) + "\n\n"
             "## 第三节对国内考试与研学的镜鉴\n\n" + ("这是第三部分关于标准化考试机制演进的理性讨论。" * 25) + "\n\n"
-            f"**关注「{config.BRAND_NAME}」。**"
+            f"{config.ARTICLE_SIGNATURE}"
         )
         formatted = (
             "## 第一节具体冲突\n\n"
@@ -331,7 +348,7 @@ class TestThreeStageHotspotPipeline(unittest.TestCase):
             + ("这是第三部分关于 **标准化考试** 与 **考研安检** 演进的理性讨论。" * 22)
             + "\n\n> 第三条凝练的观点摘录，聚焦人才筛选本身。\n\n"
             "【此处插入配图：university examination room】\n\n"
-            f"**关注「{config.BRAND_NAME}」。**"
+            f"{config.ARTICLE_SIGNATURE}"
         )
 
         topic = HotspotItem(title="测试热点话题", url="https://example.org/news", raw_content="原始短快讯。")
@@ -350,7 +367,7 @@ class TestThreeStageHotspotPipeline(unittest.TestCase):
         self.assertIn("多信源深调研简报内容", mock_writer.call_args.args[0])
         mock_fmt.assert_called_once()
         self.assertIn("【此处插入配图：", result)
-        self.assertIn(f"**关注「{config.BRAND_NAME}」。**", result)
+        self.assertIn(config.ARTICLE_SIGNATURE, result)
 
     def test_critic_penalizes_ai_meta_language_disclaimers(self):
         from core.pipeline.critic import evaluate_article_quality

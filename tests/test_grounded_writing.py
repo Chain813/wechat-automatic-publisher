@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from config import BRAND_NAME
+from config import ARTICLE_SIGNATURE, BRAND_NAME
 from core.github.processor import generate_github_article
 from core.hotspots.processor import _auto_add_placeholders, generate_article
 from core.pipeline.critic import auto_repair_article
@@ -22,7 +22,7 @@ def test_hotspot_structure_retry_keeps_original_evidence():
         assert source_url in prompt
         assert search[0]["snippet"] in prompt
         assert search[0]["url"] in prompt
-        assert f"**关注「{BRAND_NAME}」。**" in prompt
+        assert ARTICLE_SIGNATURE in prompt
     assert "小标题不足" in retry
 
 
@@ -39,8 +39,8 @@ def test_github_writer_uses_repo_materials_and_configured_signature():
         body, title = generate_github_article([project])
     prompt = generate.call_args.args[0]
     assert project["readme_excerpt"] in prompt
-    assert f"**关注「{BRAND_NAME}」。**" in prompt
-    assert f"**关注「{BRAND_NAME}」。**" in generate.call_args.kwargs["system_content"]
+    assert ARTICLE_SIGNATURE in prompt
+    assert ARTICLE_SIGNATURE in generate.call_args.kwargs["system_content"]
     assert body == "正文"
     assert title.endswith(" | 文件导出")
 

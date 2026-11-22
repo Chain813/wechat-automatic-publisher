@@ -12,7 +12,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from loguru import logger
 
-from config import BRAND_NAME
+from config import ARTICLE_SIGNATURE, BRAND_NAME
 from core.shared.llm import call_deepseek_with_retry
 
 def _active_theme():
@@ -504,7 +504,7 @@ def generate_aikepu_article(topic_info):
     # 强制清理可能误输出的普通照片配图占位符，落实“科普长文主要以图表为主，避免AI生图”的原则
     final_article = re.sub(r"【\s*此处插入配图\s*[：:]\s*.*?\s*】", "", final_article)
 
-    final_article += f"\n\n**关注「{BRAND_NAME}」。**"
+    final_article += f"\n\n{ARTICLE_SIGNATURE}"
 
     # 统计
     word_count = len(final_article.replace(" ", "").replace("\n", ""))

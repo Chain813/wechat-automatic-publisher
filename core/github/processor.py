@@ -2,7 +2,7 @@ from datetime import datetime
 from loguru import logger
 import re
 
-from config import BRAND_NAME
+from config import ARTICLE_SIGNATURE, BRAND_NAME
 from core.shared.llm import call_deepseek_with_retry
 
 # ---- GitHub 单项目深度剖析人设 ----
@@ -14,7 +14,7 @@ SYSTEM_PROMPT = f"""
 不要虚构自己的使用经历、安装成功、社区响应速度或节省的时间。Star 数只作为仓库元数据。
 小标题点明具体功能或适用条件。每段不超过三句话，标题和引用前后留空行。
 全文 3–5 处重点用 **{{{{核心结论}}}}**，普通黑色加粗用 **项目名或关键术语**。
-落款为 **关注「{BRAND_NAME}」。**
+落款为 {ARTICLE_SIGNATURE}
 """
 
 
@@ -78,7 +78,7 @@ def generate_github_article(projects):
         "4. **重点分级标注**（全文红标不超过 5 处）：\n"
         "   - **红色加粗**：用于全文最核心的结论。用 `**{{重点}}**` 标记。\n"
         "   - **黑色加粗**：用于项目名、关键概念。用 `**加粗**` 标记。\n\n"
-        f"文末加上：**关注「{BRAND_NAME}」。**\n\n"
+        f"文末加上：{ARTICLE_SIGNATURE}\n\n"
         "## 输出格式要求\n"
         "你的输出必须严格遵循以下格式（包含标题和正文分隔）：\n"
         "TITLE: [这里写标题，不要带引号]\n"

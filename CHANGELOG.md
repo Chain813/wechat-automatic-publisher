@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 - 热点选题梯队重构为 `config.py` 中的 `HOTSPOT_TIERS` 唯一配置源（同步更新 AI/科技政策、硬核 AI/开源工程与高校科研/考研升学/科技财经三梯队关键词）并接入 `filter_tech_hotspots()` 动态生效；补齐私有云端增量部署闭环规范。
 - 修复 `deepseek-v4-flash` 默认思考模式占用全部 `max_tokens=8192` 导致长文正文为空或被截断的问题：新增 `LLM_ENABLE_THINKING`（默认 `False`）并将默认 `LLM_MAX_TOKENS` 提升至 `16384`，补充 `finish_reason`/`reasoning_tokens` 诊断日志与思考耗尽自动降级重试。
 - 热点内容引擎重构为三段式解耦架构：Stage 1 使用 `deepseek-flash` 原生 `deepseek_web_search` + `deepseek_read_url` 进行多信源深调研；Stage 2 使用 `deepseek-v4-pro`（`reasoning_effort="low"`）执行无格式紧箍咒纯写作（去审稿笔录腔、自然字数下限 1500 字）；Stage 3 由快速模型独立完成红字/加粗/金句/配图排版标注；`Critic` 新增 AI 内部审稿元话语拦截。
+- 统一各工作流文末落款为可配置项 `ARTICLE_SIGNATURE`（默认 `**关注「极研JiYan」，只讲有出处的科技门道与深度拆解。**`），并对齐「终极钻研」品牌定位。
 
 ### 🔍 事实核查、动态叙事与 AI Critic 质量门禁 (Fact Grounding & Quality Gate)
 - **联网事实核查与正文深抓**：新增 `core/hotspots/scraper.py`（基于 `trafilatura` 与浏览器伪装请求提取原始网页正文）及 `core/hotspots/searcher.py`（DuckDuckGo HTML/Lite 与 Bing 网页事实检索，由 `ENABLE_FACT_SEARCH` / `MAX_FACT_SNIPPETS` 控制），为深度创作提供可核查事实现场。

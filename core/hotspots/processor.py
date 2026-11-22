@@ -5,6 +5,7 @@ from typing import Optional, List, Dict, Any
 from loguru import logger
 
 from config import (
+    ARTICLE_SIGNATURE,
     BRAND_NAME,
     HOTSPOT_TIERS,
     LLM_ENABLE_WEB_SEARCH,
@@ -23,12 +24,12 @@ from core.hotspots.narrative import (
 )
 
 SYSTEM_PROMPT = f"""
-你是公众号「{BRAND_NAME}」的主笔，长期写 AI、硬核科技、产业政策与高校研学交叉领域的深度评论。
+你是公众号「{BRAND_NAME}」的主笔，秉持「终极钻研」底色，长期写 AI、硬核科技与产业政策的深度评论。
 开头前 3 句话直接抛出一处具体画面或尖锐反差，不写新闻通稿起手式。
-新闻事件中的人名、日期、数字、引述严格忠于调研简报，绝不杜撰；同时结合可靠的计算机、硬件、产业与考试现实常识讲透门道。
+新闻事件中的人名、日期、数字、引述严格忠于调研简报，绝不杜撰；同时结合可靠的计算机、硬件、产业与工程实践常识讲透门道。
 严禁在正文中出现「材料未说明」「材料在此处截断」「下面按材料拆开」等 AI 审稿元话语，严禁空洞套话。
 全篇设 3–4 个有信息增量的 ## 小标题（末尾不加标点），每段 2–4 句，讲透就收。
-落款为 **关注「{BRAND_NAME}」。**
+落款为 {ARTICLE_SIGNATURE}
 """
 
 
@@ -38,7 +39,12 @@ def load_hotspots_skill_prompt() -> str:
     if os.path.exists(skill_path):
         try:
             with open(skill_path, "r", encoding="utf-8") as f:
-                return f.read().strip().replace("{BRAND_NAME}", BRAND_NAME)
+                return (
+                    f.read()
+                    .strip()
+                    .replace("{BRAND_NAME}", BRAND_NAME)
+                    .replace("{ARTICLE_SIGNATURE}", ARTICLE_SIGNATURE)
+                )
         except Exception as e:
             logger.warning("加载 hotspots_skill.md 失败: {}", e)
     return ""
@@ -366,7 +372,7 @@ def _strip_leading_h1(article: str) -> str:
     return article.strip()
 
 
-def format_article_for_wechat(article: str, topic_title: str, brand: str = BRAND_NAME) -> str:
+def format_article_for_wechat(article: str, topic_title: str, brand: str = BRAND_NAME, signature: str = ARTICLE_SIGNATURE) -> str:
     """
     Stage 3: 轻量微信排版与视觉标注 Pass（默认使用快速 Flash 关思考模型）。
     严禁改写叙事腔调或新增事实，仅在保留原文的基础上完成红字高亮、黑色加粗、金句摘录与配图标记。
@@ -386,7 +392,7 @@ def format_article_for_wechat(article: str, topic_title: str, brand: str = BRAND
         "4. **黑色加粗（不少于 12 处）**：用 `**关键词**`（不含花括号）自然标出关键数字、专有名词、机构/产品名与核心技术概念。\n"
         "5. **独立金句引用块（3 处）**：在关键小节后插入独立的 `> ` 引用块（每处 35–85 字），用凝练视角点出本节核心反差或结论，**严禁把上一段正文原样复制一遍**。\n"
         "6. **配图标记（3 处）**：在 3 个关键小节后独立成行放置 `【此处插入配图：简短具体主体】`（优先简洁具体的实体/设备/场景英文或中文专名，不写画风或运镜）。\n"
-        f"7. 文末保持唯一落款：`**关注「{brand}」。**`\n\n"
+        f"7. 文末保持唯一落款：`{signature}`\n\n"
         "直接输出排版后的完整 Markdown 正文（不要输出 `# 一级标题`，不要加任何解释）：\n\n"
         f"=== 待排版正文 ===\n{article}\n=== 结束 ==="
     )
@@ -402,7 +408,7 @@ def format_article_for_wechat(article: str, topic_title: str, brand: str = BRAND
         # 安全护栏：仅在排版稿未发生大幅缩水时采纳
         if cleaned and len(cleaned) >= int(len(article) * 0.78):
             if f"关注「{brand}」" not in cleaned[-120:]:
-                cleaned = cleaned.rstrip() + f"\n\n**关注「{brand}」。**"
+                cleaned = cleaned.rstrip() + f"\n\n{signature}"
             return cleaned
         logger.warning("  [Stage 3/3] 排版输出长度异常 ({} vs 原稿 {})，回退保留原稿并走本地补强", len(cleaned), len(article))
     except Exception as e:
@@ -484,10 +490,10 @@ def generate_article(topic, raw_content: str = "", search_results: Optional[List
         f"=== 调研素材与信源 ===\n{fact_context or '目前只有选题标题。'}\n=== 素材结束 ===\n\n"
         "## 写作要求（专注内容质量与可读性，不要做机械格式打卡）\n"
         "1. **抓人开篇**：前 3 句话直接抛出一处具体画面、真实细节或尖锐反差，严禁「据某某报道，X 月 X 日某人宣布……」的通稿开头。\n"
-        "2. **事实克制 + 深度讲透**：新闻事件里的人名、时间、数字、价格与引述严格以素材为准，绝不编造采访、心理描写或未出现的价格数字；但要充分结合可靠的计算机/AI 硬件/产业/国内高校与考试现实常识，把底层逻辑与现实镜鉴讲深讲透。\n"
+        "2. **事实克制 + 深度讲透**：新闻事件里的人名、时间、数字、价格与引述严格以素材为准，绝不编造采访、心理描写或未出现的价格数字；但要充分结合可靠的计算机/AI 硬件/产业规律与工程实践常识，把底层逻辑与现实影响讲深讲透。\n"
         "3. **零审稿腔、零套话**：严禁在正文中写「材料未说明」「材料没有说明」「材料在此处截断」「报道未列出」「下面按材料拆开」「判断这条消息时可核对」等内部审稿词；缺细节自然略过。严禁「值得注意的是」「不可否认」「赋能」「重塑格局」「双刃剑」「让我们拭目以待」。\n"
         "4. **篇幅与结构**：目标 **1,600–2,400 字**（信息密度决定篇幅，绝不车轱辘复述凑字数，但核心内容不少于 1,500 字）。全篇设 **3–4 个**短小锋利、有信息增量的 `## ` 二级小标题（末尾不加标点），每段 2–4 句，留足呼吸感。\n"
-        f"5. **自然收束**：结尾落回事件折射的底层命题或读者启发，最后一行统一落款：`**关注「{brand}」。**`\n\n"
+        f"5. **自然收束**：结尾落回事件折射的底层命题或读者启发，最后一行统一落款：`{ARTICLE_SIGNATURE}`\n\n"
         "直接输出 Markdown 正文（无需输出 `# 一级标题`）。"
     )
 
@@ -519,7 +525,7 @@ def generate_article(topic, raw_content: str = "", search_results: Optional[List
             current_prompt = (
                 f"{initial_prompt}\n\n"
                 "【紧急纠错】上一稿在结尾处被截断了！请重新输出完整的全篇文章，确保文末落款为："
-                f"**关注「{brand}」。**"
+                f"{ARTICLE_SIGNATURE}"
             )
             continue
 
