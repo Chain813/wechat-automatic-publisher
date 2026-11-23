@@ -511,10 +511,6 @@ class WeChatPublisher:
 
     def add_draft(self, title, html_content, thumb_media_id, digest=""):
         """同步草稿箱，带高级容器样式和指数退避重试"""
-        self._ensure_valid_token()
-        if not self.access_token:
-            return {"errcode": -1, "errmsg": "No Token"}
-
         styled_html = (
             '<section style="padding: 15px; font-family: -apple-system, BlinkMacSystemFont, '
             "'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif; "
@@ -527,13 +523,13 @@ class WeChatPublisher:
         content_bytes = len(styled_html.encode('utf-8'))
         max_bytes = 10 * 1024 * 1024  # 10MB
         if content_bytes > max_bytes:
-            logger.warning(
-                "  ⚠️ 文章正文体积 ({:.2f} MB) 超过微信 10MB (10,485,760 字节) 限制，正在执行安全截断保护...",
-                content_bytes / (1024 * 1024)
-            )
-            safe_limit = max_bytes - 102400
-            truncated_bytes = styled_html.encode('utf-8')[:safe_limit]
-            styled_html = truncated_bytes.decode('utf-8', errors='ignore') + '</section>'
+            error = f"排版后正文为 {content_bytes:,} 字节，超过 10 MiB 上限（{max_bytes:,} 字节），请缩减正文后重试"
+            logger.warning("草稿提交失败: {}", error)
+            return {"errcode": -1, "errmsg": error}
+
+        self._ensure_valid_token()
+        if not self.access_token:
+            return {"errcode": -1, "errmsg": "No Token"}
 
         if not digest:
             digest = title[:60]
