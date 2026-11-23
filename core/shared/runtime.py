@@ -3,14 +3,78 @@ Runtime bootstrap helpers for console encoding and logging.
 """
 from __future__ import annotations
 
+from collections import deque
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from uuid import uuid4
+
 import sys
 import queue
 import threading
 
 from loguru import logger
 
-# Global queue to store logs for the Web UI (bounded to prevent memory leak)
-log_queue = queue.Queue(maxsize=5000)
+def _now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+@dataclass
+class WorkflowOutcome:
+    task_type: str
+    status: str
+    run_id: str = field(default_factory=lambda: uuid4().hex)
+    attempted: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    uncertain: int = 0
+    skipped: int = 0
+    summary: str = ""
+    error: str = ""
+    started_at: str = field(default_factory=_now)
+    finished_at: str = field(default_factory=_now)
+
+    def to_dict(self):
+        return asdict(self)
+
+
+class LogBuffer:
+    """Thread-safe sequence cursor shared by independent Web UI readers."""
+
+    def __init__(self, maxlen=5000):
+        self._entries = deque(maxlen=maxlen)
+        self._seq = 0
+        self._legacy_cursor = 0
+        self._lock = threading.Lock()
+
+    def put_nowait(self, message):
+        with self._lock:
+            self._seq += 1
+            self._entries.append((self._seq, str(message)))
+
+    def read_since(self, since=0):
+        with self._lock:
+            return [msg for seq, msg in self._entries if seq > since], self._seq
+
+    append = put_nowait
+    get_since = read_since
+
+    def drain(self):
+        with self._lock:
+            messages = [msg for seq, msg in self._entries if seq > self._legacy_cursor]
+            self._legacy_cursor = self._seq
+            return messages
+
+    def get_nowait(self):
+        with self._lock:
+            for seq, msg in self._entries:
+                if seq > self._legacy_cursor:
+                    self._legacy_cursor = seq
+                    return msg
+            raise queue.Empty
+
+
+log_buffer = LogBuffer()
+log_queue = log_buffer
 
 # ---- 全局控制信号 ----
 cancel_event = threading.Event()
@@ -25,16 +89,11 @@ class WorkflowCancelled(Exception):
 
 def check_cancelled():
     """在工作流关键节点调用，处理中断和暂停"""
-    # 1. 检查中断
+    while not pause_event.is_set() and not cancel_event.is_set():
+        pause_event.wait(timeout=0.1)
     if cancel_event.is_set():
-        logger.warning("⛔ 用户已中断任务，正在终止...")
         raise WorkflowCancelled("用户手动中断")
 
-    # 2. 检查暂停
-    if not pause_event.is_set():
-        logger.info("⏸️ 任务已暂停，等待恢复...")
-        pause_event.wait()  # 阻塞直到 pause_event.set() 被调用
-        logger.info("▶️ 任务已恢复。")
 
 def _queue_sink(message):
     try:
@@ -50,12 +109,12 @@ def _reconfigure_stdio():
             stream.reconfigure(encoding="utf-8")
 
 
-def _validate_config():
+def _validate_config(strict=True):
     """启动时校验必要配置项，缺失则立即报错退出"""
-    from config import LLM_API_KEY, WECHAT_APP_ID, WECHAT_APP_SECRET
+    from config import LLM_API_KEY, LLM_API_KEYS, WECHAT_APP_ID, WECHAT_APP_SECRET
 
     missing = []
-    if not LLM_API_KEY:
+    if not (LLM_API_KEY or LLM_API_KEYS):
         missing.append("LLM_API_KEY")
     if not WECHAT_APP_ID:
         missing.append("WECHAT_APP_ID")
@@ -63,11 +122,14 @@ def _validate_config():
         missing.append("WECHAT_APP_SECRET")
 
     if missing:
-        logger.error("以下必要配置项缺失，请在 .env 文件中设置: {}", ", ".join(missing))
-        sys.exit(1)
+        message = "缺少必要配置项: " + ", ".join(missing)
+        if strict:
+            raise ValueError(message)
+        logger.warning(message)
+    return missing
 
 
-def configure_runtime():
+def configure_runtime(validate=True):
     """Prepare stdio encoding and a consistent Loguru console sink."""
     _reconfigure_stdio()
 
@@ -87,7 +149,7 @@ def configure_runtime():
         colorize=False,
     )
 
-    _validate_config()
+    _validate_config(strict=validate)
 
 
-__all__ = ["configure_runtime", "log_queue", "cancel_event", "pause_event", "check_cancelled", "WorkflowCancelled"]
+__all__ = ["configure_runtime", "WorkflowOutcome", "LogBuffer", "log_buffer", "log_queue", "cancel_event", "pause_event", "check_cancelled", "WorkflowCancelled"]
