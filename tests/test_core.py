@@ -91,7 +91,7 @@ class TestAccountBrand(unittest.TestCase):
     def test_aikepu_file_prompt_uses_custom_brand(self):
         from core.aikepu import processor
 
-        with patch.dict(os.environ, KNOWLEDGE_TREE="aikepu"), patch.object(processor, "BRAND_NAME", "测试号"):
+        with patch("core.aikepu.skill_tree.get_active_tree_name", return_value="aikepu"), patch.object(processor, "BRAND_NAME", "测试号"):
             prompt = processor.load_aikepu_skill_prompt()
         self.assertIn("「测试号」AI 科普长文写作 Skill", prompt.splitlines()[0])
         self.assertIn("你是「测试号」的资深 AI 技术专栏作者", prompt)
@@ -120,7 +120,7 @@ class TestAccountBrand(unittest.TestCase):
 
         with (
             TemporaryDirectory() as temp,
-            patch.object(image_handler, "BRAND_NAME", "测试号"),
+            patch("config.BRAND_NAME", "测试号"),
             patch.object(ImageDraw.ImageDraw, "text", autospec=True, side_effect=ImageDraw.ImageDraw.text) as draw_text,
         ):
             cover = Path(temp) / "cover.jpg"
@@ -210,7 +210,7 @@ class TestLLMThinkingAndTokenBudget(unittest.TestCase):
         fake_pool.get_key.return_value = "test-only-key"
 
         with (
-            patch.object(llm, "LLM_ENABLE_THINKING", False),
+            patch("config.LLM_ENABLE_THINKING", False),
             patch.object(llm, "_get_llm_key_pool", return_value=fake_pool),
             patch.object(llm.API_SESSION, "post", side_effect=fake_post),
         ):

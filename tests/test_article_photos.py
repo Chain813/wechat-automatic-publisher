@@ -108,7 +108,7 @@ def test_model_only_download_never_returns_local_title_card(tmp_path):
     from utils import image_handler
 
     with patch.object(image_handler, "_get_qwen_key_pool", return_value=SimpleNamespace(size=0)), \
-         patch.object(image_handler, "SD_ENABLED", False), \
+         patch("config.SD_ENABLED", False), \
          patch.object(image_handler, "generate_default_cover") as card:
         assert image_handler.download_image("storage", tmp_path, allow_title_card=False) is None
     card.assert_not_called()

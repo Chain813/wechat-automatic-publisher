@@ -1,21 +1,19 @@
 import re
 import time
+import threading
+import config
 import requests
 from loguru import logger
 from utils.http_client import build_api_session
 from utils.key_pool import ApiKeyPool
-
-from config import (
-    LLM_API_KEY, LLM_BASE_URL, LLM_TIMEOUT,
-    LLM_MODEL, LLM_TEMPERATURE, LLM_MAX_TOKENS, LLM_ENABLE_THINKING, LLM_MAX_RETRIES,
-    WECHAT_TITLE_MAX_LEN, SENSITIVE_WORDS
-)
 
 API_SESSION = build_api_session()
 
 
 class LLMCacheMetrics:
     def __init__(self):
+        self._lock = threading.Lock()
+        self._total_latency_ms = 0
         self.total_requests = 0
         self.prompt_cache_hit_tokens = 0
         self.prompt_cache_miss_tokens = 0
@@ -23,26 +21,35 @@ class LLMCacheMetrics:
         self.last_warmup_time = None
 
     def record(self, hit_tokens, miss_tokens, latency_ms):
-        self.total_requests += 1
-        self.prompt_cache_hit_tokens += hit_tokens
-        self.prompt_cache_miss_tokens += miss_tokens
-        self.last_latency_ms = latency_ms
+        with self._lock:
+            self._total_latency_ms += latency_ms
+            self.total_requests += 1
+            self.prompt_cache_hit_tokens += hit_tokens
+            self.prompt_cache_miss_tokens += miss_tokens
+            self.last_latency_ms = latency_ms
+
+    def mark_warm(self):
+        with self._lock:
+            self.last_warmup_time = time.time()
 
     def get_stats(self):
-        total_tokens = self.prompt_cache_hit_tokens + self.prompt_cache_miss_tokens
-        hit_rate = (self.prompt_cache_hit_tokens / total_tokens * 100) if total_tokens > 0 else 0.0
-        saving_rate = calculate_cache_saving_rate()
-        saved_cny = round(self.prompt_cache_hit_tokens * saving_rate, 4)
-        return {
-            "total_requests": self.total_requests,
-            "hit_tokens": self.prompt_cache_hit_tokens,
-            "miss_tokens": self.prompt_cache_miss_tokens,
-            "hit_rate_pct": round(hit_rate, 1),
-            "saved_cny": saved_cny,
-            "last_latency_ms": self.last_latency_ms,
-            "is_warm": self.last_warmup_time is not None and (time.time() - self.last_warmup_time < 300),
-            "is_peak_hour": is_beijing_peak_hour()
-        }
+        with self._lock:
+            total_tokens = self.prompt_cache_hit_tokens + self.prompt_cache_miss_tokens
+            hit_rate = (self.prompt_cache_hit_tokens / total_tokens * 100) if total_tokens > 0 else 0.0
+            saving_rate = calculate_cache_saving_rate()
+            saved_cny = round(self.prompt_cache_hit_tokens * saving_rate, 4)
+            return {
+                "total_requests": self.total_requests,
+                "hit_tokens": self.prompt_cache_hit_tokens,
+                "saved_tokens": self.prompt_cache_hit_tokens,
+                "avg_latency_ms": round(self._total_latency_ms / self.total_requests, 1) if self.total_requests else 0,
+                "miss_tokens": self.prompt_cache_miss_tokens,
+                "hit_rate_pct": round(hit_rate, 1),
+                "saved_cny": saved_cny,
+                "last_latency_ms": self.last_latency_ms,
+                "is_warm": self.last_warmup_time is not None and (time.time() - self.last_warmup_time < 300),
+                "is_peak_hour": is_beijing_peak_hour()
+            }
 
 
 def is_beijing_peak_hour():
@@ -79,36 +86,45 @@ cache_metrics = LLMCacheMetrics()
 _llm_key_pool = None
 
 
-def _get_llm_key_pool():
-    """懒加载 DeepSeek Key 轮询池（LLM_API_KEYS 逗号分隔 > 单 LLM_API_KEY）"""
+_pool_lock = threading.Lock()
+
+
+def reset_llm_key_pool():
     global _llm_key_pool
-    if _llm_key_pool is None:
-        from config import LLM_API_KEYS
-        keys = list(LLM_API_KEYS) if LLM_API_KEYS else ([LLM_API_KEY] if LLM_API_KEY else [])
-        _llm_key_pool = ApiKeyPool(keys)
-    return _llm_key_pool
+    with _pool_lock:
+        _llm_key_pool = None
+
+
+def _get_llm_key_pool():
+    global _llm_key_pool
+    with _pool_lock:
+        if _llm_key_pool is None:
+            keys = config.LLM_API_KEYS or [config.LLM_API_KEY]
+            _llm_key_pool = ApiKeyPool(keys)
+        return _llm_key_pool
 
 
 def warmup_deepseek_cache():
     """轻量级预热 DeepSeek 节点 Prompt Cache"""
+    from core.shared.runtime import WorkflowCancelled
     try:
         from core.aikepu.processor import build_system_prompt
-        call_deepseek_with_retry("ping warmup", system_content=build_system_prompt(), max_tokens=1)
-        cache_metrics.last_warmup_time = time.time()
+        content = call_deepseek_with_retry("ping warmup", system_content=build_system_prompt(), max_tokens=1)
+        if not content:
+            return False
+        cache_metrics.mark_warm()
         return True
+    except WorkflowCancelled:
+        raise
     except Exception as e:
         logger.warning("DeepSeek 预热请求失败: {}", e)
         return False
 
 
 def _interruptible_sleep(seconds):
-    """可中断的 sleep：每 0.5 秒检查一次 cancel_event"""
-    from core.shared.runtime import cancel_event
-    steps = int(seconds / 0.5)
-    for _ in range(max(steps, 1)):
-        if cancel_event.is_set():
-            return
-        time.sleep(0.5)
+    from core.shared.runtime import cancel_event, check_cancelled
+    cancel_event.wait(seconds)
+    check_cancelled()
 
 
 def call_deepseek_with_retry(
@@ -122,6 +138,7 @@ def call_deepseek_with_retry(
     enable_thinking=None,
     reasoning_effort=None,
     tools=None,
+    temperature=None,
 ):
     """带指数退避的 API 调用。支持模型覆盖、思考档位(reasoning_effort)与原生服务端工具(tools)。支持中断和暂停。"""
     from core.shared.runtime import check_cancelled, WorkflowCancelled
@@ -129,13 +146,16 @@ def call_deepseek_with_retry(
     check_cancelled()
 
     if max_retries is None:
-        max_retries = LLM_MAX_RETRIES
+        max_retries = config.LLM_MAX_RETRIES
     if timeout is None:
-        timeout = LLM_TIMEOUT
+        timeout = config.LLM_TIMEOUT
     if max_tokens is None:
-        max_tokens = LLM_MAX_TOKENS
+        max_tokens = config.LLM_MAX_TOKENS
 
-    target_model = model or LLM_MODEL
+    base_url = config.LLM_BASE_URL.rstrip("/")
+    if temperature is None:
+        temperature = config.LLM_TEMPERATURE
+    target_model = model or config.LLM_MODEL
     effort_val = (reasoning_effort or "").strip().lower()
     if effort_val == "none":
         target_thinking = False
@@ -143,7 +163,7 @@ def call_deepseek_with_retry(
     elif effort_val in ("minimal", "low", "medium", "high", "xhigh", "max", "ultra"):
         target_thinking = True
     else:
-        target_thinking = LLM_ENABLE_THINKING if enable_thinking is None else bool(enable_thinking)
+        target_thinking = config.LLM_ENABLE_THINKING if enable_thinking is None else bool(enable_thinking)
         effort_val = ""
 
     strip_optional_fields = False
@@ -157,6 +177,9 @@ def call_deepseek_with_retry(
         check_cancelled()
 
         api_key = key_pool.get_key()
+        if not api_key:
+            logger.warning("All LLM credentials are cooling down")
+            return ""
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}"
@@ -169,7 +192,7 @@ def call_deepseek_with_retry(
                     {"role": "system", "content": system_content},
                     {"role": "user", "content": prompt}
                 ],
-                "temperature": LLM_TEMPERATURE,
+                "temperature": temperature,
                 "max_tokens": max_tokens
             }
             if not strip_optional_fields:
@@ -182,7 +205,7 @@ def call_deepseek_with_retry(
 
             start_t = time.time()
             response = API_SESSION.post(
-                f"{LLM_BASE_URL}/chat/completions",
+                f"{base_url}/chat/completions",
                 headers=headers,
                 json=data,
                 timeout=timeout
@@ -262,7 +285,7 @@ def call_deepseek_with_retry(
                     if attempt < max_retries:
                         _interruptible_sleep(backoff_base * (2 ** (attempt - 1)))
                     continue
-                if status in (401, 403) and attempt < max_retries:
+                if status in (401, 403):
                     logger.warning("AI 认证失败 {}，切换下一个 Key 重试", status)
                     key_pool.report_failure(api_key, cooldown_seconds=300)
                     continue
@@ -300,9 +323,9 @@ def validate_title(title: str):
         warnings.append(f"已自动剥离标题末尾禁止标点: '{clean_title[-1]}'")
         clean_title = clean_title[:-1].strip()
 
-    if len(clean_title) > WECHAT_TITLE_MAX_LEN:
-        warnings.append(f"标题超长 ({len(clean_title)} > {WECHAT_TITLE_MAX_LEN})，已截断")
-        clean_title = clean_title[:WECHAT_TITLE_MAX_LEN].strip()
+    if len(clean_title) > config.WECHAT_TITLE_MAX_LEN:
+        warnings.append(f"标题超长 ({len(clean_title)} > {config.WECHAT_TITLE_MAX_LEN})，已截断")
+        clean_title = clean_title[:config.WECHAT_TITLE_MAX_LEN].strip()
         while clean_title and clean_title.endswith(forbidden_endings):
             clean_title = clean_title[:-1].strip()
 
@@ -330,12 +353,12 @@ def filter_sensitive(text: str):
     敏感词检测与过滤（使用正则词边界，避免误匹配子串）。
     返回 (过滤后文本, 命中敏感词列表)
     """
-    if not SENSITIVE_WORDS:
+    if not config.SENSITIVE_WORDS:
         return text, []
 
     hit_words = []
     filtered = text
-    for word in SENSITIVE_WORDS:
+    for word in config.SENSITIVE_WORDS:
         if not word:
             continue
         if re.search(r'[一-鿿]', word):

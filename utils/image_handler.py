@@ -8,6 +8,10 @@ import os
 import re
 import time
 import threading
+import tempfile
+from pathlib import Path
+import config
+from core.shared.runtime import WorkflowCancelled, cancel_event, check_cancelled
 from contextlib import contextmanager
 from PIL import Image, ImageDraw, ImageFont
 
@@ -19,7 +23,7 @@ try:
 except (ImportError, AttributeError):
     pass
 
-from config import BRAND_NAME, SD_ENABLED, SD_TIMEOUT, SD_STEPS, SD_MAX_RETRIES, WECHAT_COVER_WIDTH, WECHAT_COVER_HEIGHT, WECHAT_BODY_WIDTH, WECHAT_BODY_HEIGHT, WECHAT_BODY_MAX_MB
+from config import WECHAT_COVER_WIDTH, WECHAT_COVER_HEIGHT, WECHAT_BODY_WIDTH, WECHAT_BODY_HEIGHT, WECHAT_BODY_MAX_MB
 
 from loguru import logger
 
@@ -122,7 +126,16 @@ def resize_for_wechat(img_path, purpose="body"):
                 img = img.convert('RGB')
 
         # 检查文件大小：超高分辨率/SD生图 (6-8MB) 严格压缩至 1.8MB 以内 (符合微信封面 ≤2MB 限制与移动端体验)
+        source = Path(img_path).resolve()
         out_path = img_path
+        if (source.suffix.lower() not in {".jpg", ".jpeg"}
+                or source.name.lower().startswith("default_")
+                or "static" in (part.lower() for part in source.parts)):
+            directory = Path("assets") / "_resized"
+            directory.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=directory, prefix=source.stem[:48] + "_",
+                                             suffix="_wechat.jpg", delete=False) as derived:
+                out_path = derived.name
         img.save(out_path, 'JPEG', quality=90, optimize=True)
 
         file_size_mb = os.path.getsize(out_path) / (1024 * 1024)
@@ -162,6 +175,8 @@ def _build_sd_image_prompt(keyword):
         enhanced_prompt = call_deepseek_with_retry(keyword, system_content=system_prompt)
         if enhanced_prompt and len(enhanced_prompt.strip()) > 10:
             return enhanced_prompt.strip()
+    except WorkflowCancelled:
+        raise
     except Exception as e:
         from loguru import logger
         logger.warning(f"LLM 生成 prompt 失败，使用本地映射: {e}")
@@ -243,6 +258,8 @@ def detect_sd_api_url():
     return None
 
 def get_sd_api_url():
+    if not config.SD_ENABLED:
+        return None
     global _detected_sd_url, _last_sd_check_time
     now = time.time()
     # 如果未探测到，或者探测失败后超过 60 秒，则重新进行探测
@@ -263,8 +280,11 @@ def _try_local_sd(keyword, directory, width=1024, height=576, max_retries=None, 
     import base64
     from core.shared.runtime import cancel_event, WorkflowCancelled
 
+    check_cancelled()
+    if not config.SD_ENABLED:
+        return None
     if max_retries is None:
-        max_retries = SD_MAX_RETRIES
+        max_retries = config.SD_MAX_RETRIES
 
     # ---- 1. 健康检查：SD 服务是否存活 ----
     sd_url = get_sd_api_url()
@@ -287,7 +307,7 @@ def _try_local_sd(keyword, directory, width=1024, height=576, max_retries=None, 
 
     if prompt is None:
         prompt = _build_image_prompt(keyword)
-    logger.info("  本地 Stable Diffusion 生图中 ({}x{}, steps={}): {}", width, height, SD_STEPS, prompt[:60])
+    logger.info("  本地 Stable Diffusion 生图中 ({}x{}, steps={}): {}", width, height, config.SD_STEPS, prompt[:60])
 
     payload = {
         "prompt": prompt,
@@ -295,7 +315,7 @@ def _try_local_sd(keyword, directory, width=1024, height=576, max_retries=None, 
                            "lowres, bad anatomy, bad hands, error, missing fingers, extra digit, fewer digits, "
                            "cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, "
                            "username, blurry, human face, portrait, person",
-        "steps": SD_STEPS,
+        "steps": config.SD_STEPS,
         "width": width,
         "height": height,
         "cfg_scale": 7.5,
@@ -310,7 +330,7 @@ def _try_local_sd(keyword, directory, width=1024, height=576, max_retries=None, 
 
         try:
             # ---- 2. 发起生图请求（120s 超时） ----
-            resp = requests.post(f"{sd_url}/sdapi/v1/txt2img", json=payload, timeout=SD_TIMEOUT)
+            resp = requests.post(f"{sd_url}/sdapi/v1/txt2img", json=payload, timeout=config.SD_TIMEOUT)
             if resp.status_code == 200:
                 data = resp.json()
                 if "images" in data and len(data["images"]) > 0:
@@ -335,7 +355,7 @@ def _try_local_sd(keyword, directory, width=1024, height=576, max_retries=None, 
             _detected_sd_url = None
             return None
         except requests.exceptions.Timeout:
-            logger.warning("  SD 生图超时 ({}s) (第 {}/{} 次)", SD_TIMEOUT, attempt, total_attempts)
+            logger.warning("  SD 生图超时 ({}s) (第 {}/{} 次)", config.SD_TIMEOUT, attempt, total_attempts)
         except Exception as e:
             if isinstance(e, WorkflowCancelled):
                 raise
@@ -398,6 +418,8 @@ def _build_github_project_prompt(repo_name, description, lang, topics=None):
         if enhanced_prompt and len(enhanced_prompt.strip()) > 10:
             logger.info("  DeepSeek 为项目 '{}' 生成 SD Prompt 成功", repo_name)
             return enhanced_prompt.strip()
+    except WorkflowCancelled:
+        raise
     except Exception as e:
         logger.warning("  DeepSeek 为 GitHub 项目生成 Prompt 失败: {}", e)
 
@@ -412,7 +434,8 @@ def download_project_image_for_github(repo_name, description, lang, topics=None,
     使用 DeepSeek 将项目信息转化为高质量 SD 提示词，然后调用本地 SD 生图。
     返回本地图片路径。
     """
-    if not repo_name:
+    check_cancelled()
+    if not repo_name or not config.SD_ENABLED:
         return None
 
     clean_name = _sanitize_path(f"gh_{repo_name.replace('/', '_')}")
@@ -490,6 +513,7 @@ def _save_image_from_url(url, target_dir, prefix="img", timeout=30):
     return None
 
 
+_qwen_pool_lock = threading.Lock()
 _qwen_key_pool = None
 _qwen_image_limiter = None
 _qwen_image_sem = None
@@ -498,21 +522,27 @@ _qwen_image_sem = None
 def _qwen_image_throttle():
     """懒加载生图节流器 + 并发信号量（按 config 可调）"""
     global _qwen_image_limiter, _qwen_image_sem
-    if _qwen_image_sem is None:
-        from config import QWEN_IMAGE_MIN_INTERVAL, QWEN_IMAGE_MAX_CONCURRENCY
-        _qwen_image_limiter = RateLimiter(QWEN_IMAGE_MIN_INTERVAL)
-        _qwen_image_sem = threading.Semaphore(max(1, QWEN_IMAGE_MAX_CONCURRENCY))
-    return _qwen_image_limiter, _qwen_image_sem
+    with _qwen_pool_lock:
+        if _qwen_image_sem is None:
+            from config import QWEN_IMAGE_MIN_INTERVAL, QWEN_IMAGE_MAX_CONCURRENCY
+            _qwen_image_limiter = RateLimiter(QWEN_IMAGE_MIN_INTERVAL)
+            _qwen_image_sem = threading.Semaphore(max(1, QWEN_IMAGE_MAX_CONCURRENCY))
+        return _qwen_image_limiter, _qwen_image_sem
 
 
 def _get_qwen_key_pool():
     """懒加载千问 Key 轮询池（DASHSCOPE_API_KEYS 逗号分隔 > 单 DASHSCOPE_API_KEY）"""
     global _qwen_key_pool
-    if _qwen_key_pool is None:
-        from config import DASHSCOPE_API_KEYS, QWEN_IMAGE_API_KEY
-        keys = list(DASHSCOPE_API_KEYS) if DASHSCOPE_API_KEYS else ([QWEN_IMAGE_API_KEY] if QWEN_IMAGE_API_KEY else [])
-        _qwen_key_pool = ApiKeyPool(keys)
-    return _qwen_key_pool
+    with _qwen_pool_lock:
+        if _qwen_key_pool is None:
+            _qwen_key_pool = ApiKeyPool(config.DASHSCOPE_API_KEYS or [config.QWEN_IMAGE_API_KEY])
+        return _qwen_key_pool
+
+
+def reset_qwen_key_pool():
+    global _qwen_key_pool
+    with _qwen_pool_lock:
+        _qwen_key_pool = None
 
 
 def _qwen_post_with_rotation(base_url, body, timeout):
@@ -524,25 +554,24 @@ def _qwen_post_with_rotation(base_url, body, timeout):
         return None, None
     max_attempts = min(max(2, pool.size), 5)
     for _ in range(max_attempts):
-        key = pool.get_key()
-        if not key:
-            break
+        check_cancelled()
         try:
-            resp = None
-            for inner in range(3):
+            limiter, sem = _qwen_image_throttle()
+            while not sem.acquire(timeout=0.1):
+                check_cancelled()
+            try:
+                limiter.wait()
+                check_cancelled()
+                key = pool.get_key()
+                if not key:
+                    break
                 resp = requests.post(
                     base_url,
                     headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
                     json=body, timeout=timeout,
                 )
-                if resp.status_code != 429:
-                    break
-                wait = 5 * (inner + 1)
-                logger.warning("  千问限流 429，等待 {}s 后就地重试（第 {}/3 次）", wait, inner + 1)
-                time.sleep(wait)
-            if resp is None:
-                pool.report_failure(key)
-                continue
+            finally:
+                sem.release()
             if resp.status_code == 200:
                 pool.report_success(key)
                 try:
@@ -564,7 +593,7 @@ def _qwen_post_with_rotation(base_url, body, timeout):
                 pool.report_failure(key, cooldown_seconds=120 if resp.status_code == 429 else 300)
                 continue
             return resp.status_code, None
-        except Exception as e:
+        except requests.RequestException as e:
             logger.debug("  千问接口请求异常（切换 Key）: {}", e)
             pool.report_failure(key)
     return None, None
@@ -583,10 +612,7 @@ def _try_qwen_image_batch(prompt, target_dir, count, width=900, height=500):
         },
         "parameters": {"prompt_extend": QWEN_IMAGE_PROMPT_EXTEND, "size": QWEN_IMAGE_SIZE, "n": int(count)},
     }
-    limiter, sem = _qwen_image_throttle()
-    with sem:
-        limiter.wait()
-        status, data = _qwen_post_with_rotation(QWEN_IMAGE_API_BASE, body, QWEN_IMAGE_TIMEOUT)
+    status, data = _qwen_post_with_rotation(QWEN_IMAGE_API_BASE, body, QWEN_IMAGE_TIMEOUT)
     if status != 200 or not data:
         logger.warning("  批量生图失败 HTTP {}", status)
         return []
@@ -618,8 +644,7 @@ def _try_qwen_image_batch(prompt, target_dir, count, width=900, height=500):
 def generate_article_images_batch(title, article_text, keywords, save_dir="assets", max_images=4):
     """每篇文章一次生图请求：用文章标题+各占位符主题构建分项提示词，一次生成多张配图。
     返回与 keywords 等长的本地路径列表（失败或重复项为 None），调用方回退逐关键词下载。"""
-    from config import QWEN_IMAGE_API_KEY
-    if not QWEN_IMAGE_API_KEY or not keywords:
+    if not keywords or not _get_qwen_key_pool().size:
         return [None] * len(keywords)
     kws = keywords[:max_images]
     excerpt = re.sub(r"[\n\r\t ]+", " ", article_text or "")[:300]
@@ -818,6 +843,8 @@ def _build_qwen_image_prompt(keyword, context=None, article_title=None, slot_ind
                 if "严禁竖版" not in cleaned:
                     cleaned = f"{cleaned} 严格16:9宽屏横版左右展开，严禁竖版堆叠与多行小字。"
                 return cleaned
+        except WorkflowCancelled:
+            raise
         except Exception as e:
             logger.warning("  LLM 视觉导演生成 Qwen-Image 提示词失败，回退本地信息图模板: {}", e)
 
@@ -1084,9 +1111,9 @@ def generate_default_cover(title, save_path, purpose="cover"):
     # 5. 绘制顶部分类/主题标签胶囊
     badge_y1 = 44 if purpose == "cover" else 52
     badge_y2 = badge_y1 + 26
-    badge_width = draw.textlength(BRAND_NAME, font=badge_font) + 32
+    badge_width = draw.textlength(config.BRAND_NAME, font=badge_font) + 32
     draw.rounded_rectangle([60, badge_y1, 60 + badge_width, badge_y2], radius=13, fill=(238, 242, 255), outline=(199, 210, 254), width=1)
-    draw.text((76, badge_y1 + 5), BRAND_NAME, fill=(79, 91, 213), font=badge_font)
+    draw.text((76, badge_y1 + 5), config.BRAND_NAME, fill=(79, 91, 213), font=badge_font)
 
     # 6. 文字自适应换行与垂直居中排版 (高对比度墨黑 #0C0D0E)
     max_char_per_line = 15 if purpose == "cover" else 17
@@ -1113,7 +1140,7 @@ def generate_default_cover(title, save_path, purpose="cover"):
         y_offset += line_height
         
     # 7. 绘制底部规范标注 (高清深灰 #5E6470)
-    draw.text((60, h - 48), f"{BRAND_NAME} • AI AUTOMATION", fill=(94, 100, 112), font=tag_font)  # #5E6470
+    draw.text((60, h - 48), f"{config.BRAND_NAME} • AI AUTOMATION", fill=(94, 100, 112), font=tag_font)  # #5E6470
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     base.save(save_path, "JPEG", quality=95)
@@ -1153,7 +1180,7 @@ def download_image(keyword, save_dir="assets", *, allow_title_card=True):
     # 2. 备选本地 Stable Diffusion AI 生图
     check_cancelled()
     logger.info("🎨 正在发起本地 Stable Diffusion AI 配图生成: '{}'...", keyword)
-    best = _try_local_sd(keyword, specific_dir, width=1024, height=576) if SD_ENABLED else None
+    best = _try_local_sd(keyword, specific_dir, width=1024, height=576) if config.SD_ENABLED else None
     if best:
         best = _finalize_image(best, "body")
         if best:
