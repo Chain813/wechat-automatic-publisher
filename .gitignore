@@ -20,8 +20,9 @@ data/gemini_chrome_profile/
 data/gemini_session/
 data/aikepu_history.json
 data/aikepu_history.json.tmp
-assets/
-assets/manual_images/
+assets/*
+!assets/default_aikepu_cover.png
+!assets/default_daily_cover.png
 *.log
 
 # IDE
