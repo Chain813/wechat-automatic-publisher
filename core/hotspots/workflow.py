@@ -9,14 +9,15 @@ from core.hotspots.processor import filter_tech_hotspots, generate_article, gene
 from core.shared.article_utils import process_article_content, _print_review_report
 from core.shared.llm import validate_title
 from utils.image_handler import reset_image_cache
-from core.shared.runtime import check_cancelled
+from core.pipeline.records import publish_article
+from core.pipeline.nodes import run_counted
+from core.shared.runtime import WorkflowCancelled, check_cancelled
 
 from core.shared.publisher import _to_clean_title_str
 from core.pipeline.nodes import BaseNode
 from core.pipeline.engine import PipelineEngine
 from core.db.manager import db_manager
 from core.db.models import ArticleHistory
-from core.hotspots.collector import fetch_all_hotspots
 
 # --- 辅助方法 ---
 
@@ -43,6 +44,8 @@ def _save_history(topics):
                 )
                 session.add(ah)
         session.commit()
+    except WorkflowCancelled:
+        raise
     except Exception as e:
         logger.warning("保存历史候选话题异常: {}", e)
     finally:
@@ -63,11 +66,15 @@ def _save_publish_result(topic, success, draft_id=None, error=None, quality_scor
                 preview_path = os.path.join("data", "previews", preview_filename)
                 with open(preview_path, "w", encoding="utf-8") as f:
                     f.write(preview_html)
+            except WorkflowCancelled:
+                raise
             except Exception as pe:
                 logger.debug("保存预览 HTML 异常: {}", pe)
 
         existing = session.query(ArticleHistory).filter(
             ArticleHistory.source_type == "hotspots",
+            ArticleHistory.media_id.is_(None),
+            ArticleHistory.delivery_attempt_id.is_(None),
             ArticleHistory.title.in_([clean_title, topic_str])
         ).order_by(ArticleHistory.id.desc()).first()
 
@@ -106,6 +113,8 @@ def _save_publish_result(topic, success, draft_id=None, error=None, quality_scor
                 ah.thumb_media_id = thumb_id
             session.add(ah)
         session.commit()
+    except WorkflowCancelled:
+        raise
     except Exception as e:
         logger.warning("保存发布结果异常: {}", e)
     finally:
@@ -120,7 +129,7 @@ def _get_past_topics(days=7):
         records = session.query(ArticleHistory).filter(
             ArticleHistory.source_type == "hotspots",
             ArticleHistory.publish_date >= cutoff_date,
-            ArticleHistory.success_status == False
+            ArticleHistory.status == "PENDING_REVIEW"
         ).all()
         return [HotspotItem(title=r.title, url=r.source_url or "") for r in records]
     finally:
@@ -162,16 +171,14 @@ class FetchAndSelectNode(BaseNode):
     def execute(self, context: dict) -> bool:
         publisher = context['publisher']
         check_cancelled()
-        from core.hotspots.collector import fetch_all_hotspot_items, fetch_all_hotspots
+        from core.hotspots.collector import fetch_all_hotspot_items
         hotspot_items = fetch_all_hotspot_items()
-        raw_data = hotspot_items if hotspot_items else fetch_all_hotspots()
+        raw_data = hotspot_items
         if not raw_data:
             print("❌ 数据源扫描失败，请检查网络连接")
             return False
 
         selected_topics = filter_tech_hotspots(raw_data)
-        if selected_topics:
-            _save_history(selected_topics)
 
         if not selected_topics:
             print("📭 今日暂无符合品牌调性的重磅 AI/科技话题，尝试从前几天最新的未发送热点中挑选...")
@@ -187,6 +194,7 @@ class FetchAndSelectNode(BaseNode):
                 print(f"✅ 成功找到前几天未发送的优质热点：{[_to_clean_title_str(t) for t in selected_topics]}")
             else:
                 print("📭 前几天也无符合条件的未发送热点，任务结束。")
+                context["counts"].skipped += 1
                 return False
 
         candidates = selected_topics[:MAX_TOPIC_CANDIDATES]
@@ -209,8 +217,10 @@ class FetchAndSelectNode(BaseNode):
 
         if not valid_topics:
             print("\n📭 所有候选话题均已存在，本次无新内容发布。")
+            context["counts"].skipped += 1
             return False
 
+        _save_history([topic for topic in selected_topics if topic not in candidates])
         context['valid_topics'] = valid_topics
         return True
 
@@ -218,7 +228,6 @@ class FetchAndSelectNode(BaseNode):
 class ParallelPublishNode(BaseNode):
     def _generate_article_assets(self, topic, publisher):
         check_cancelled()
-        reset_image_cache()
 
         topic_str = _to_clean_title_str(topic)
         article_text = generate_article(topic)
@@ -289,44 +298,19 @@ class ParallelPublishNode(BaseNode):
                 )
                 return topic_str, False, err
 
-            success, result = pub.publish_and_notify(clean_title, final_html, thumb_id, digest_text)
-            if success:
-                draft_id = result["media_id"]
-                print(f"\n✅ 「{clean_title}」发布成功 → {draft_id}")
-                _save_publish_result(
-                    topic,
-                    success=True,
-                    draft_id=draft_id,
-                    quality_score=review_res["score"],
-                    source_url=source_url,
-                    status="DRAFT",
-                    preview_html=final_html,
-                    thumb_id=thumb_id,
-                    fact_check_result=fact_check_res
-                )
-                return topic_str, True, None
-            else:
-                err = result.get("errmsg", "未知错误")
-                print(f"❌ 「{clean_title}」发布失败：{err}")
-                _save_publish_result(
-                    topic,
-                    success=False,
-                    error=err,
-                    quality_score=review_res["score"],
-                    source_url=source_url,
-                    status="FAILED",
-                    preview_html=final_html,
-                    thumb_id=thumb_id,
-                    fact_check_result=fact_check_res
-                )
-                return topic_str, False, err
-
+            check_cancelled()
+            ok, error = publish_article(pub, "hotspots", clean_title, final_html, thumb_id, digest_text, review_res["score"],
+                                      source_url=source_url, fact=fact_check_res)
+            return topic_str, ok, error
+        except WorkflowCancelled:
+            raise
         except Exception as exc:
             logger.warning("并行发布异常: {}", exc)
-            _save_publish_result(topic, success=False, error=str(exc), status="FAILED")
+
             return str(topic), False, str(exc)
 
     def execute(self, context: dict) -> bool:
+        reset_image_cache()
         valid_topics = context['valid_topics']
         publisher = context['publisher']
 
@@ -344,11 +328,15 @@ class ParallelPublishNode(BaseNode):
                 topic_item = futures[future]
                 try:
                     topic, success, error = future.result()
+                    context["counts"].record(success, error)
                     if success:
                         published_count += 1
                     elif error:
                         logger.warning("  「{}」发布失败: {}", topic, error)
+                except WorkflowCancelled:
+                    context["counts"].cancelled = True
                 except Exception as exc:
+                    context["counts"].record(False, str(exc))
                     t_str = _to_clean_title_str(topic_item)
                     logger.error("  热点话题处理出现未捕获异常 「{}」: {}", t_str, exc)
 
@@ -363,4 +351,4 @@ def run_hotspots_workflow(publisher):
     engine.add_node(FetchAndSelectNode())
     engine.add_node(ParallelPublishNode())
     
-    engine.run({"publisher": publisher})
+    return engine.run_workflow("hotspots", publisher)

@@ -4,21 +4,22 @@
   职责：安全 Token 管理、素材上传、草稿审计、精致排版
 ============================================================
 """
+import hashlib
 import os
 import json
 import re
 import time
 import threading
+import tempfile
+from pathlib import Path
 from difflib import SequenceMatcher
 
 from loguru import logger
 
-from config import (
-    WECHAT_API_TIMEOUT,
-    ARTICLE_AUTHOR,
-    WECHAT_DRAFT_SCAN_COUNT,
-    TITLE_DUPLICATE_RATIO,
-)
+import config
+from config import TITLE_DUPLICATE_RATIO
+from core.shared.runtime import check_cancelled, WorkflowCancelled
+from core.shared.delivery_journal import DeliveryJournal
 from utils.http_client import build_api_session
 
 try:
@@ -150,7 +151,7 @@ def _ai_semantic_check(new_title, existing_titles):
     
     # 强制将 AI 语义查重重载为轻量级 flash 模型（例如将 deepseek-v4-pro 降级为 deepseek-v4-flash）
     from config import LLM_MODEL
-    semantic_model = LLM_MODEL.replace("-pro", "-flash").replace("pro", "flash")
+    semantic_model = re.sub(r"-pro(?=-|$)", "-flash", LLM_MODEL)
     logger.info("  [AI查重] 使用轻量级模型 {} 进行快速判定...", semantic_model)
 
     try:
@@ -182,72 +183,47 @@ def _ai_semantic_check(new_title, existing_titles):
 
 
 class WeChatPublisher:
-    # 全局类变量缓存 Token，防止在多个模块重复实例化时反复请求微信 API 导致被限频或打爆
-    _global_access_token = None
-    _global_token_expires_at = 0
-    _global_lock = threading.Lock()
+    _tokens = {}
+    _global_lock = threading.RLock()
 
-    def __init__(self, app_id, app_secret):
+    def __init__(self, app_id, app_secret, *, journal=None):
         self.app_id = app_id
         self.app_secret = app_secret
+        self._credentials = (app_id, app_secret)
         self.session = build_api_session()
-        self.access_token = None
-        self._token_expires_at = 0
+        self.journal = journal if journal is not None else DeliveryJournal()
         self._draft_titles_cache = None
-        self._lock = threading.Lock()
-        
-        # 优先读取全局有效的 Token 缓存
-        with WeChatPublisher._global_lock:
-            if WeChatPublisher._global_access_token and time.time() < WeChatPublisher._global_token_expires_at:
-                self.access_token = WeChatPublisher._global_access_token
-                self._token_expires_at = WeChatPublisher._global_token_expires_at
+        self.access_token = None
+        self._ensure_valid_token()
 
-        if not self.access_token:
-            self._refresh_token()
+    @classmethod
+    def reset_token_cache(cls):
+        with cls._global_lock:
+            cls._tokens.clear()
 
     def _refresh_token(self):
-        """获取并验证微信调用凭证，记录过期时间"""
-        url = f"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={self.app_id}&secret={self.app_secret}"
-        try:
-            res = self.session.get(url, timeout=WECHAT_API_TIMEOUT).json()
-            if "access_token" in res:
-                self.access_token = res["access_token"]
-                # 微信 Token 有效期 7200 秒，提前 300 秒刷新
-                self._token_expires_at = time.time() + res.get("expires_in", 7200) - 300
-                logger.info("微信 Token 获取成功，有效至 {}", time.strftime("%H:%M:%S", time.localtime(self._token_expires_at)))
-                
-                # 同步更新到全局缓存中
-                with WeChatPublisher._global_lock:
-                    WeChatPublisher._global_access_token = self.access_token
-                    WeChatPublisher._global_token_expires_at = self._token_expires_at
-            else:
-                raise Exception(f"Token 授权失败: {res}")
-        except Exception as e:
-            logger.error("微信凭证获取失败: {}", e)
+        with self._global_lock:
+            self._tokens.pop(self._credentials, None)
             self.access_token = None
+            try:
+                response = self.session.get(
+                    "https://api.weixin.qq.com/cgi-bin/token",
+                    params={"grant_type": "client_credential", "appid": self.app_id,
+                            "secret": self.app_secret}, timeout=config.WECHAT_API_TIMEOUT).json()
+                token = response["access_token"]
+                expiry = time.time() + int(response.get("expires_in", 7200)) - 300
+                self._tokens[self._credentials] = (token, expiry)
+                self.access_token = token
+            except Exception as exc:
+                logger.warning("WeChat token acquisition failed ({})", type(exc).__name__)
 
     def _ensure_valid_token(self):
-        """检查 Token 是否即将过期，自动刷新（线程安全）"""
-        # 优先从全局缓存同步最新状态
-        with WeChatPublisher._global_lock:
-            if WeChatPublisher._global_access_token and time.time() < WeChatPublisher._global_token_expires_at:
-                self.access_token = WeChatPublisher._global_access_token
-                self._token_expires_at = WeChatPublisher._global_token_expires_at
-                return
-
-        if not self.access_token or time.time() >= self._token_expires_at:
-            with self._lock:
-                # 双重检查
-                with WeChatPublisher._global_lock:
-                    if WeChatPublisher._global_access_token and time.time() < WeChatPublisher._global_token_expires_at:
-                        self.access_token = WeChatPublisher._global_access_token
-                        self._token_expires_at = WeChatPublisher._global_token_expires_at
-                        return
-                
-                if not self.access_token or time.time() >= self._token_expires_at:
-                    logger.info("Token 已过期或即将过期，正在自动刷新...")
-                    self._draft_titles_cache = None  # Token 切换后缓存失效
-                    self._refresh_token()
+        with self._global_lock:
+            token, expiry = self._tokens.get(self._credentials, (None, 0))
+            if token and time.time() < expiry:
+                self.access_token = token
+            else:
+                self._refresh_token()
 
     def upload_image(self, image_path):
         """上传素材，返回 media_id（优先使用永久素材接口以适配草稿箱封面要求）"""
@@ -277,7 +253,7 @@ class WeChatPublisher:
                 with open(image_path, 'rb') as f:
                     safe_filename = f"cover{os.path.splitext(image_path)[1]}"
                     files = {'media': (safe_filename, f, mime_type)}
-                    res = self.session.post(url_perm, files=files, timeout=WECHAT_API_TIMEOUT).json()
+                    res = self.session.post(url_perm, files=files, timeout=config.WECHAT_API_TIMEOUT).json()
                 
                 if "media_id" in res:
                     return res.get("media_id")
@@ -300,7 +276,7 @@ class WeChatPublisher:
                 with open(image_path, 'rb') as f:
                     safe_filename = f"cover{os.path.splitext(image_path)[1]}"
                     files = {'media': (safe_filename, f, mime_type)}
-                    res = self.session.post(url_temp, files=files, timeout=WECHAT_API_TIMEOUT).json()
+                    res = self.session.post(url_temp, files=files, timeout=config.WECHAT_API_TIMEOUT).json()
                 
                 if "thumb_media_id" in res:
                     return res.get("thumb_media_id")
@@ -348,7 +324,7 @@ class WeChatPublisher:
                 with open(image_path, 'rb') as f:
                     safe_filename = f"image{os.path.splitext(image_path)[1]}"
                     files = {'media': (safe_filename, f, mime_type)}
-                    res = self.session.post(url, files=files, timeout=WECHAT_API_TIMEOUT).json()
+                    res = self.session.post(url, files=files, timeout=config.WECHAT_API_TIMEOUT).json()
                 
                 if "url" in res:
                     return res.get("url")
@@ -367,54 +343,66 @@ class WeChatPublisher:
 
         return None
 
-    def get_draft_titles(self, count=WECHAT_DRAFT_SCAN_COUNT):
-        """获取最近草稿标题列表，若接口失败返回 None"""
+    def _cloud_items(self, endpoint, count=None, *, content=False):
         self._ensure_valid_token()
         if not self.access_token:
             return None
-        url = f"https://api.weixin.qq.com/cgi-bin/draft/batchget?access_token={self.access_token}"
-        data = {"offset": 0, "count": count, "no_content": 1}
-        titles = []
+        items = []
+        identifiers = set()
+        total = None
+        refreshed = False
         try:
-            res = self.session.post(url, json=data, timeout=WECHAT_API_TIMEOUT)
-            res_data = json.loads(res.content.decode('utf-8'))
-            if res_data.get("errcode", 0) != 0:
-                logger.warning("获取草稿标题微信接口返回错误: {}", res_data)
-                return None
-            for item in res_data.get("item", []):
-                for news in item.get("content", {}).get("news_item", []):
-                    if news.get("title"):
-                        titles.append(news.get("title"))
-            return titles
+            while count is None or len(items) < count:
+                size = min(20, count - len(items)) if count is not None else 20
+                url = f"https://api.weixin.qq.com/cgi-bin/{endpoint}/batchget?access_token={self.access_token}"
+                response = self.session.post(url, json={"offset": len(items), "count": size,
+                    "no_content": int(not content)}, timeout=config.WECHAT_API_TIMEOUT).json()
+                code = response.get("errcode", 0)
+                if code in (40001, 42001) and not refreshed:
+                    refreshed = True
+                    self._refresh_token()
+                    if self.access_token:
+                        continue
+                if code:
+                    return None
+                current_total = response["total_count"]
+                if not isinstance(current_total, int) or current_total < 0:
+                    return None
+                if total is not None and current_total != total:
+                    return None
+                total = current_total
+                page = response["item"]
+                if not isinstance(page, list) or len(page) != min(size, total - len(items)):
+                    return None
+                for entry in page:
+                    key = entry["media_id" if endpoint == "draft" else "article_id"]
+                    if not key or key in identifiers:
+                        return None
+                    identifiers.add(key)
+                    news = entry["content"]["news_item"]
+                    if not news or not all(n.get("title") for n in news):
+                        return None
+                items.extend(page)
+                if len(items) == total:
+                    break
+            return items
         except Exception as exc:
-            logger.warning("获取草稿标题失败: {}", exc)
+            logger.warning("WeChat {} scan incomplete ({})", endpoint, type(exc).__name__)
             return None
 
-    def get_published_titles(self, count=WECHAT_DRAFT_SCAN_COUNT):
-        """获取最近已发布文章标题列表，若接口失败返回 None"""
-        self._ensure_valid_token()
-        if not self.access_token:
+    def _titles(self, endpoint, count):
+        items = self._cloud_items(endpoint, count)
+        if items is None:
             return None
-        url = f"https://api.weixin.qq.com/cgi-bin/freepublish/batchget?access_token={self.access_token}"
-        data = {"offset": 0, "count": count, "no_content": 1}
-        titles = []
-        try:
-            res = self.session.post(url, json=data, timeout=WECHAT_API_TIMEOUT)
-            res_data = json.loads(res.content.decode('utf-8'))
-            if res_data.get("errcode", 0) != 0:
-                logger.warning("获取发布标题微信接口返回错误: {}", res_data)
-                return None
-            for item in res_data.get("item", []):
-                for news in item.get("content", {}).get("news_item", []):
-                    if news.get("title"):
-                        titles.append(news.get("title"))
-            return titles
-        except Exception as exc:
-            logger.warning("获取发布标题失败: {}", exc)
-            return None
+        return [n["title"] for item in items for n in item["content"]["news_item"]]
 
-    def get_cloud_active_titles(self, count=WECHAT_DRAFT_SCAN_COUNT):
-        """仅拉取微信云端真实存在的草稿和已发布文章标题。如果请求接口失败返回 None。"""
+    def get_draft_titles(self, count=None):
+        return self._titles("draft", count)
+
+    def get_published_titles(self, count=None):
+        return self._titles("freepublish", count)
+
+    def get_cloud_active_titles(self, count=None):
         drafts = self.get_draft_titles(count=count)
         published = self.get_published_titles(count=count)
         if drafts is None or published is None:
@@ -509,8 +497,8 @@ class WeChatPublisher:
 
         return False, None
 
-    def add_draft(self, title, html_content, thumb_media_id, digest=""):
-        """同步草稿箱，带高级容器样式和指数退避重试"""
+    def add_draft(self, title, html_content, thumb_media_id, digest="", *, operation_id=None, context=None):
+        """Claim a logical operation before sending its non-idempotent draft request."""
         styled_html = (
             '<section style="padding: 15px; font-family: -apple-system, BlinkMacSystemFont, '
             "'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif; "
@@ -520,7 +508,7 @@ class WeChatPublisher:
         )
 
         # 校验微信公众号正文体积限制 (不得超过 10M 字节 / 10,485,760 字节)
-        content_bytes = len(styled_html.encode('utf-8'))
+        content_bytes = len(styled_html.encode('utf-8')) + len('<!--autowechat:-->') + 32
         max_bytes = 10 * 1024 * 1024  # 10MB
         if content_bytes > max_bytes:
             error = f"排版后正文为 {content_bytes:,} 字节，超过 10 MiB 上限（{max_bytes:,} 字节），请缩减正文后重试"
@@ -553,7 +541,7 @@ class WeChatPublisher:
         data = {
             "articles": [{
                 "title": title,
-                "author": ARTICLE_AUTHOR,
+                "author": config.ARTICLE_AUTHOR,
                 "digest": digest[:120],
                 "content": styled_html,
                 "thumb_media_id": thumb_media_id,
@@ -561,53 +549,123 @@ class WeChatPublisher:
             }]
         }
 
-        max_retries = 3
-        for attempt in range(1, max_retries + 1):
+        # Legacy callers have no durable article ID. Deduplicate identical payloads.
+        if operation_id is None:
+            operation_id = hashlib.sha256(json.dumps([title, html_content, digest],
+                ensure_ascii=False).encode()).hexdigest()
+        if not isinstance(operation_id, str) or not operation_id.strip():
+            raise ValueError("operation_id must be a nonempty string")
+        check_cancelled()
+        claim, owner = self.journal.claim(self.app_id, operation_id, title, context or {})
+        if not owner:
+            return dict(claim, reused=True)
+        attempt = claim["attempt_id"]
+        try:
+            self._write_preview(f"attempt_{attempt}", html_content)
+        except OSError as exc:
+            return self.journal.resolve(self.app_id, attempt,
+                                        rejection=f"Cannot persist preview: {type(exc).__name__}")
+        # Sanitizers may strip comments. Missing evidence leaves the attempt uncertain.
+        marker = f"<!--autowechat:{attempt}-->"
+        data["articles"][0]["content"] += marker
+        url_base = "https://api.weixin.qq.com/cgi-bin/draft/add"
+        body = json.dumps(data, ensure_ascii=False).encode()
+        for index in range(2):
             try:
-                url = f"https://api.weixin.qq.com/cgi-bin/draft/add?access_token={self.access_token}"
-                result = self.session.post(
-                    url,
-                    data=json.dumps(data, ensure_ascii=False).encode('utf-8'),
-                    timeout=WECHAT_API_TIMEOUT
-                ).json()
-
-                errcode = result.get("errcode", 0)
-                # Token 过期 (40001/42001) 或系统繁忙 (-1) 时重试
-                if errcode in (40001, 42001, -1):
-                    logger.warning("草稿发布失败 (errcode={})，第 {}/{} 次重试", errcode, attempt, max_retries)
-                    if errcode in (40001, 42001):
-                        self._refresh_token()
-                        if not self.access_token:
-                            return result
-                    time.sleep(1.5 * (2 ** (attempt - 1)))
-                    continue
-
-                if "media_id" in result:
+                try:
+                    check_cancelled()
+                except WorkflowCancelled:
+                    self.journal.resolve(self.app_id, attempt, rejection="Cancelled before draft submission")
+                    raise
+                response = self.session.post(f"{url_base}?access_token={self.access_token}",
+                    data=body, timeout=config.WECHAT_API_TIMEOUT, allow_redirects=False)
+                response.raise_for_status()
+                result = response.json()
+                code = result.get("errcode", 0)
+                if not code and isinstance(result.get("media_id"), str) and result["media_id"]:
                     self._draft_titles_cache = None
-                return result
+                    try:
+                        return self.journal.resolve(self.app_id, attempt, media_id=result["media_id"])
+                    except Exception:
+                        try:
+                            self.journal.save_fallback_receipt(self.app_id, attempt, result["media_id"])
+                        except OSError:
+                            logger.error("Failed to persist fallback receipt for attempt {}", attempt)
+                        return dict(claim, status="DRAFT_PENDING_RECORD", media_id=result["media_id"],
+                                    errmsg="Receipt journal write failed")
+                if code in (40001, 42001) and index == 0:
+                    self._refresh_token()
+                    if self.access_token:
+                        continue
+                if isinstance(code, int) and code > 0:
+                    return self.journal.resolve(self.app_id, attempt,
+                        rejection=result.get("errmsg") or str(code)) | {"errcode": code}
+            except WorkflowCancelled:
+                raise
+            except Exception as exc:
+                logger.warning("Draft receipt unknown ({})", type(exc).__name__)
+            break
+        return self.reconcile_delivery(attempt)
 
-            except Exception as e:
-                logger.warning("草稿发布异常: {}，第 {}/{} 次重试", e, attempt, max_retries)
-                if attempt < max_retries:
-                    time.sleep(1.5 * (2 ** (attempt - 1)))
+    @staticmethod
+    def _write_preview(preview_id, content):
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", preview_id):
+            raise ValueError("Invalid preview identifier")
+        directory = Path("data/previews")
+        directory.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=directory, delete=False) as stream:
+            temporary = Path(stream.name)
+        try:
+            temporary.write_text(content, encoding="utf8")
+            os.replace(temporary, directory / f"{preview_id}.html")
+        finally:
+            temporary.unlink(missing_ok=True)
 
-        return {"errcode": 99999, "errmsg": "重试耗尽"}
+    def restore_delivery_preview(self, attempt_id):
+        """Idempotently restore the media preview from the claimed article body."""
+        row = self.journal.get(self.app_id, attempt_id)
+        source = Path("data/previews") / f"attempt_{row['attempt_id']}.html"
+        self._write_preview(row["media_id"], source.read_text(encoding="utf8"))
 
-    def publish_and_notify(self, title, html_content, thumb_media_id, digest=""):
+    def reconcile_delivery(self, attempt_id):
+        row = self.journal.get(self.app_id, attempt_id)
+        if row["status"] != "CLOUD_UNCERTAIN":
+            return row
+        receipt = self.journal.fallback_receipt(self.app_id, attempt_id)
+        if receipt:
+            return self.journal.resolve(self.app_id, attempt_id, media_id=receipt)
+        marker = f"<!--autowechat:{attempt_id}-->"
+        items = self._cloud_items("draft", content=True)
+        matches = [item["media_id"] for item in items or []
+                   if any(marker in (n.get("content") or "")
+                          for n in item["content"]["news_item"])]
+        if len(matches) == 1:
+            return self.journal.resolve(self.app_id, attempt_id, media_id=matches[0])
+        return self.journal.get(self.app_id, attempt_id)
+
+    def pending_deliveries(self):
+        return self.journal.pending(self.app_id)
+
+    def mark_delivery_recorded(self, attempt_id):
+        return self.journal.recorded(self.app_id, attempt_id)
+
+    def publish_and_notify(self, title, html_content, thumb_media_id, digest="", *, operation_id=None, context=None):
         """发布草稿并发送企业微信通知，返回 (success, result)"""
-        result = self.add_draft(title, html_content, thumb_media_id, digest)
+        result = self.add_draft(title, html_content, thumb_media_id, digest,
+                                operation_id=operation_id, context=context)
         if "media_id" in result:
             draft_id = result["media_id"]
             logger.info("发布成功: {} → {}", title, draft_id)
             
             # 保存本地成功草稿预览文件
             try:
-                os.makedirs(os.path.join("data", "previews"), exist_ok=True)
-                preview_path = os.path.join("data", "previews", f"{draft_id}.html")
-                with open(preview_path, "w", encoding="utf-8") as f:
-                    f.write(html_content)
+                self.restore_delivery_preview(result["attempt_id"])
             except Exception as pe:
                 logger.warning("  保存本地预览 HTML 失败: {}", pe)
+                return False, dict(result, errmsg="Local preview write failed")
+
+            if result.get("reused"):
+                return True, result
 
             try:
                 from config import QYWECHAT_WEBHOOK, BRAND_NAME

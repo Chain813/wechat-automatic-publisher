@@ -27,6 +27,7 @@ from config import WECHAT_COVER_WIDTH, WECHAT_COVER_HEIGHT, WECHAT_BODY_WIDTH, W
 
 from loguru import logger
 
+from utils.redraw_transport import fetch_public
 from utils.key_pool import ApiKeyPool, RateLimiter
 
 # ---- 微信图片规格 ----
@@ -477,7 +478,6 @@ def _save_image_from_url(url, target_dir, prefix="img", timeout=30):
     """从网络 URL 下载图片并保存到 target_dir，包含防盗链头、大小检验及 PIL 完整性校验"""
     if not url:
         return None
-    import requests
     import io
     from PIL import Image
     os.makedirs(target_dir, exist_ok=True)
@@ -489,11 +489,11 @@ def _save_image_from_url(url, target_dir, prefix="img", timeout=30):
         headers["Referer"] = "https://mp.weixin.qq.com/"
 
     try:
-        resp = requests.get(url, timeout=timeout, headers=headers)
-        if resp.status_code == 200 and len(resp.content) >= 512:
+        content = fetch_public(url, timeout=timeout, headers=headers, max_bytes=16 * 1024 * 1024)
+        if len(content) >= 512:
             # 严格使用 PIL 校验图片字节流完整性，杜绝 HTML 403 页面伪装为图片
             try:
-                with Image.open(io.BytesIO(resp.content)) as test_img:
+                with Image.open(io.BytesIO(content)) as test_img:
                     test_img.verify()
                     format_name = (test_img.format or "").lower()
             except Exception as ve:
@@ -504,10 +504,10 @@ def _save_image_from_url(url, target_dir, prefix="img", timeout=30):
             filename = f"{prefix}_{int(time.time() * 1000)}{ext}"
             save_path = os.path.join(target_dir, filename)
             with open(save_path, "wb") as f:
-                f.write(resp.content)
+                f.write(content)
             return save_path
         else:
-            logger.warning("  下载图片 URL 失败 HTTP {} (bytes={}): {}", resp.status_code, len(resp.content) if resp else 0, url[:60])
+            logger.warning("Image too small ({} bytes)", len(content))
     except Exception as e:
         logger.warning("  从 URL 保存图片异常 ({}): {}", url[:60], e)
     return None
@@ -933,15 +933,11 @@ def _try_qwen_image_redraw(image_path, instruction, target_dir, width=900, heigh
 def scrape_article_images(article_url, limit=10):
     """抓取公众号文章内的图片 URL 列表（供参考图/合规重绘使用）"""
     try:
-        import requests
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                           "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
         }
-        resp = requests.get(article_url, headers=headers, timeout=15)
-        if resp.status_code != 200:
-            return []
-        html = resp.text
+        html = fetch_public(article_url, headers=headers, timeout=15, max_bytes=2 * 1024 * 1024).decode("utf-8", errors="replace")
         urls = re.findall(r'data-src="(https?://mmbiz\.qpic\.cn/[^"]+)"', html)
         if not urls:
             urls = re.findall(r'<img[^>]+src="(https?://[^"]+)"', html)

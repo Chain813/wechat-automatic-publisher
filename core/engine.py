@@ -1,129 +1,141 @@
-from loguru import logger
+from datetime import datetime, timezone
 
-from config import WECHAT_APP_ID, WECHAT_APP_SECRET
+from loguru import logger
+from sqlalchemy import text
+
+import config
 from core.shared.publisher import WeChatPublisher
 from core.shared.article_utils import _print_banner, cleanup_old_assets
 from core.hotspots.workflow import run_hotspots_workflow
 from core.github.workflow import run_github_workflow
 from core.aikepu.workflow import run_aikepu_workflow
 from daily_knowledge.workflow import run_daily_knowledge_workflow
-from core.shared.runtime import check_cancelled, WorkflowCancelled
+from core.shared.runtime import WorkflowCancelled, WorkflowOutcome, _validate_config, check_cancelled
+from core.db.manager import db_manager
+from core.db.models import ArticleHistory, ArticleRepoAssociation
+
+
+def _release_unowned_repos(session, article_id):
+    links = session.query(ArticleRepoAssociation.repo_name).filter_by(article_id=article_id)
+    active_links = (session.query(ArticleRepoAssociation.repo_name)
+                    .join(ArticleHistory, ArticleHistory.id == ArticleRepoAssociation.article_id)
+                    .filter((ArticleHistory.success_status.is_(True)) |
+                            (ArticleHistory.status == "DRAFT_PENDING_RECORD")))
+    session.query(ArticleHistory).filter(
+        ArticleHistory.source_type == "github_repo",
+        ArticleHistory.title.in_(links),
+        ~ArticleHistory.title.in_(active_links),
+    ).update({"success_status": False, "is_published": False}, synchronize_session=False)
+
 
 def sync_local_history_with_wechat(publisher):
-    """
-    对比本地 SQLite 记录和微信云端草稿/已发布列表，
-    如果发现某篇文章已经在云端被删除，则同步清理本地 SQLite 历史，释放被占用的项目或热点。
-    """
-    from loguru import logger
-    from core.db.manager import db_manager
-    from core.db.models import ArticleHistory
-    
-    print("\n🔄 正在同步云端状态，检测是否有推文被删除...")
-    try:
-        active_cloud_titles = publisher.get_cloud_active_titles()
-    except Exception as e:
-        logger.warning(f"获取微信云端状态失败，跳过历史同步: {e}")
+    """Release only version-matched records absent from both complete ID inventories."""
+    account = getattr(publisher, "app_id", None)
+    if not account:
         return
-
-    if active_cloud_titles is None:
-        logger.warning("获取微信云端草稿/已发布列表未成功，跳过本地历史同步以防误删")
-        return
-
-    def is_title_active(title):
-        for act in active_cloud_titles:
-            if title in act or act in title:
-                return True
-        return False
-
-    try:
-        session = db_manager.get_session()
-        # 查询所有成功发布的本地文章记录（包括 hotspots, github, aikepu）
-        records = session.query(ArticleHistory).filter(
+    with db_manager.session_factory() as session:
+        candidates = session.query(ArticleHistory.id, ArticleHistory.media_id).filter(
+            ArticleHistory.wechat_app_id == account,
             ArticleHistory.success_status.is_(True),
-            ArticleHistory.source_type.in_(["hotspots", "github", "aikepu"])
+            ArticleHistory.source_type.in_(("hotspots", "github", "aikepu", "daily_knowledge")),
+            ArticleHistory.status.in_(("DRAFT", "APPROVED")),
+            ArticleHistory.media_id.isnot(None),
         ).all()
+    if not candidates:
+        return
 
-        changed = False
-        for rec in records:
-            if not is_title_active(rec.title):
-                print(f"  🗑️ 云端已删除，本地释放文章: {rec.title}")
-                rec.success_status = False
-                rec.is_published = False
-                changed = True
-                
-                # 如果是 AI 科普推文被删除，自动重置并回滚技能树对应节点
+    try:
+        drafts = publisher._cloud_items("draft")
+        published = publisher._cloud_items("freepublish")
+        if drafts is None or published is None:
+            return
+        # freepublish normally supplies article_id, not the originating draft media_id.
+        # An unlinked published article could be a missing draft under an edited title.
+        if published:
+            logger.info("发布列表使用独立的文章 ID，保留可能已转为发布状态的历史")
+            return
+        active_ids = {entry["media_id"] for entry in drafts}
+        if not all(isinstance(value, str) and value for value in active_ids):
+            return
+    except WorkflowCancelled:
+        raise
+    except (KeyError, TypeError):
+        logger.info("云端记录缺少可比对的草稿 ID，保留本地历史")
+        return
+    except Exception as exc:
+        logger.warning("云端历史快照不可用，保留本地状态: {}", exc)
+        return
+
+    missing = [(pk, mid) for pk, mid in candidates if mid and mid not in active_ids]
+    if not missing:
+        return
+    check_cancelled()
+    with db_manager.session_factory.begin() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        for article_id, media_id in missing:
+            rec = session.query(ArticleHistory).filter(
+                ArticleHistory.id == article_id, ArticleHistory.media_id == media_id, ArticleHistory.wechat_app_id == account,
+                ArticleHistory.success_status.is_(True), ArticleHistory.status.in_(("DRAFT", "APPROVED")),
+            ).one_or_none()
+            if rec is None:
+                continue
+            if rec.delivery_attempt_id:
+                try:
+                    receipt = publisher.journal.get(account, rec.delivery_attempt_id)
+                except KeyError:
+                    continue
+                if receipt.get("media_id") != media_id or receipt["status"] not in ("DRAFT", "ARCHIVED"):
+                    continue
                 if rec.source_type == "aikepu":
-                    try:
-                        from core.aikepu.skill_tree import remove_node_from_history
-                        remove_node_from_history(title=rec.title)
-                        print(f"    🔄 已同步重置技能树对应节点历史: {rec.title}")
-                    except Exception as ak_err:
-                        logger.warning("同步重置 AI 科普技能节点失败: {}", ak_err)
-
-                # 如果是 GitHub 文章，同时释放当天记录 of github_repo 库历史
-                if rec.source_type == "github":
-                    repo_records = session.query(ArticleHistory).filter(
-                        ArticleHistory.source_type == "github_repo",
-                        ArticleHistory.publish_date == rec.publish_date,
-                        ArticleHistory.success_status.is_(True)
-                    ).all()
-                    for r_rec in repo_records:
-                        print(f"    🗑️ 同时释放当天开源项目历史: {r_rec.title}")
-                        r_rec.success_status = False
-                        r_rec.is_published = False
-        
-        if changed:
-            session.commit()
-            # 同步重置发布器的本地标题缓存，使其在接下来的运行中生效
-            publisher._draft_titles_cache = None
-            print("✅ 本地 SQLite 历史同步完成。")
-        else:
-            print("✅ 未检测到被删除的云端推文，无需同步。")
-            
-        db_manager.remove_session()
-    except Exception as e:
-        logger.exception("同步云端状态至本地 SQLite 失败: {}", e)
+                    from core.aikepu.skill_tree import remove_confirmed_draft
+                    extra = receipt["context"].get("workflow_record", {}).get("extra", {})
+                    if extra.get("tree_name") and extra.get("node_id"):
+                        remove_confirmed_draft(extra["tree_name"], extra["node_id"], media_id)
+                publisher.journal.retire_confirmed_draft(account, rec.delivery_attempt_id, media_id)
+            rec.success_status = False
+            rec.is_published = False
+            rec.status = "FAILED"
+            rec.error_log = "完整云端记录中已无该文章"
+            if rec.source_type == "github":
+                session.flush()
+                _release_unowned_repos(session, article_id)
+    publisher._draft_titles_cache = None
 
 
-def run_main(task_type="hotspots"):
+def run_main(task_type="hotspots", override_node_id=None):
     from core.hotspots.collector import reset_source_health
 
-    _print_banner()
-    cleanup_old_assets("assets")
-    reset_source_health()
-
+    started_at = datetime.now(timezone.utc).isoformat()
     try:
-        publisher = WeChatPublisher(WECHAT_APP_ID, WECHAT_APP_SECRET)
-        if not publisher.access_token:
-            print("❌ 微信发布组件初始化失败，请检查公众号凭证配置。")
-            return
-
+        workflows = {"hotspots": run_hotspots_workflow, "github": run_github_workflow,
+                     "aikepu": run_aikepu_workflow, "daily_knowledge": run_daily_knowledge_workflow}
+        if task_type not in workflows:
+            raise ValueError(f"未知的任务类型: {task_type}")
         check_cancelled()
-        
+        _validate_config()
+        _print_banner()
+        cleanup_old_assets("assets")
+        reset_source_health()
+        publisher = WeChatPublisher(config.WECHAT_APP_ID, config.WECHAT_APP_SECRET)
+        if not publisher.access_token:
+            raise RuntimeError("微信发布组件初始化失败，请检查公众号凭证配置")
         sync_local_history_with_wechat(publisher)
-
-        if task_type == "github":
-            run_github_workflow(publisher)
-            return
-
-        if task_type == "hotspots":
-            run_hotspots_workflow(publisher)
-            return
-
-        if task_type == "aikepu":
-            run_aikepu_workflow(publisher)
-            return
-
-        if task_type == "daily_knowledge":
-            run_daily_knowledge_workflow(publisher)
-            return
-
-        print(f"❌ 未知的任务类型: {task_type}")
-
-    except WorkflowCancelled:
-        logger.warning("任务已被用户中断")
-        raise
+        check_cancelled()
+        kwargs = {"override_node_id": override_node_id} if task_type == "aikepu" and override_node_id is not None else {}
+        result = workflows[task_type](publisher, **kwargs)
+        if not isinstance(result, WorkflowOutcome):
+            raise RuntimeError(f"{task_type} 未返回 WorkflowOutcome")
+        result.started_at = started_at
+        result.finished_at = datetime.now(timezone.utc).isoformat()
+        return result
+    except WorkflowCancelled as exc:
+        return WorkflowOutcome(task_type=task_type, status="cancelled", started_at=started_at, summary=str(exc))
     except Exception as exc:
-        logger.exception("系统核心崩溃: {}", exc)
+        logger.exception("任务执行失败: {}", exc)
+        return WorkflowOutcome(task_type=task_type, status="failed", started_at=started_at,
+                               error=str(exc), summary="任务执行失败")
+    finally:
+        db_manager.remove_session()
+
 
 __all__ = ["run_main"]

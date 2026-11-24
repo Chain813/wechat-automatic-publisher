@@ -13,8 +13,8 @@ def draft_delivery(monkeypatch, tmp_path):
     session = Mock()
     session.post.return_value.json.return_value = {"media_id": "test_draft"}
     monkeypatch.setattr(publisher, "build_api_session", lambda: session)
-    monkeypatch.setattr(publisher.WeChatPublisher, "_global_access_token", "test_token")
-    monkeypatch.setattr(publisher.WeChatPublisher, "_global_token_expires_at", float("inf"))
+    monkeypatch.setattr(publisher.WeChatPublisher, "_tokens", {})
+    session.get.return_value.json.return_value = {"access_token": "test_token"}
     notification = Mock()
     monkeypatch.setattr(publisher, "send_to_qywechat", notification)
     client = publisher.WeChatPublisher("test_app", "test_secret")
@@ -37,7 +37,7 @@ def test_draft_exactly_at_byte_limit_preserves_full_article(draft_delivery):
     client, session, _, body_budget = draft_delivery
     article = article_of_size(body_budget)
 
-    assert client.add_draft("边界测试", article, "cover") == {"media_id": "test_draft"}
+    assert client.add_draft("边界测试", article, "cover")["media_id"] == "test_draft"
     session.post.assert_called_once()
     sent = json.loads(session.post.call_args.kwargs["data"])["articles"][0]["content"]
     assert len(sent.encode("utf-8")) == 10 * 1024 * 1024

@@ -570,6 +570,17 @@ def reset_tree_cache():
         _tree_cache.clear()
 
 
+def remove_confirmed_draft(tree_name, node_id, media_id):
+    """Remove only the matching receipt, preserving newer drafts and published nodes."""
+    with _history_update() as history:
+        for entries in history.values():
+            entries[:] = [entry for entry in entries if not (
+                isinstance(entry, dict) and entry.get("tree", "aikepu") == tree_name
+                and entry.get("node_id") == node_id and entry.get("draft_id") == media_id
+                and entry.get("status") == "draft"
+            )]
+
+
 def remove_node_from_history(node_id=None, title=None, tree_name=None):
     name = tree_name or get_active_tree_name()
     removed = set()

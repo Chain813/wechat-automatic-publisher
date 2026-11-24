@@ -13,12 +13,14 @@ from loguru import logger
 from config import MAX_AIKEPU_PER_RUN
 from core.aikepu.skill_tree import (
     select_next_topic, mark_published, get_skill_tree_stats,
-    reset_tree_cache, release_reserved
+    get_active_tree_name, node_source_url, release_reserved
 )
 from core.aikepu.processor import generate_aikepu_article, generate_digest
 from core.shared.article_utils import process_article_content, _print_review_report
 from core.shared.llm import validate_title
-from core.shared.runtime import check_cancelled
+from core.pipeline.records import publish_article
+from core.pipeline.nodes import run_counted
+from core.shared.runtime import WorkflowCancelled, check_cancelled
 
 
 def _generate_article_assets(topic_info, publisher):
@@ -61,11 +63,14 @@ def _generate_article_assets(topic_info, publisher):
             print("⚠️ 封面上传失败，尝试压缩后重试...")
             try:
                 from PIL import Image as PILImage
-                with PILImage.open(cover_path) as img:
-                    if img.mode != 'RGB':
-                        img = img.convert('RGB')
-                    img.save(cover_path, 'JPEG', quality=60, optimize=True)
-                thumb_id = publisher.upload_image(cover_path)
+                from tempfile import TemporaryDirectory
+                with TemporaryDirectory() as directory:
+                    jpeg = os.path.join(directory, "cover.jpg")
+                    with PILImage.open(cover_path) as img:
+                        img.convert("RGB").save(jpeg, "JPEG", quality=60, optimize=True)
+                    thumb_id = publisher.upload_image(jpeg)
+            except WorkflowCancelled:
+                raise
             except Exception as e:
                 logger.warning("  封面压缩重试失败: {}", e)
     else:
@@ -79,6 +84,7 @@ def _publish_single_topic(topic_info, publisher):
     try:
         check_cancelled()
         topic_title = topic_info["title"]
+        tree_name = topic_info.get("tree_name") or get_active_tree_name()
         node_id = topic_info["node_id"]
 
         print(f"\n{'━' * 50}")
@@ -92,7 +98,6 @@ def _publish_single_topic(topic_info, publisher):
 
             generated = future_assets.result()
             if not generated:
-                release_reserved(node_id)  # 边界条件防护：生成失败也要释放锁
                 return topic_title, False, "文章生成失败", node_id
 
             final_html, review_data, thumb_id, article_text = generated
@@ -140,7 +145,7 @@ def _publish_single_topic(topic_info, publisher):
                         media_id=None,
                         error_log=err,
                         quality_score=review_res["score"],
-                        source_url=f"aikepu://node/{node_id}",
+                        source_url=node_source_url(tree_name, node_id),
                         thumb_media_id=thumb_id,
                         status="REJECTED"
                     )
@@ -148,111 +153,29 @@ def _publish_single_topic(topic_info, publisher):
                     session.commit()
                 finally:
                     db_manager.remove_session()
+            except WorkflowCancelled:
+                raise
             except Exception as e:
                 logger.warning("保存 AI科普 门禁拦截记录异常: {}", e)
 
-            release_reserved(node_id)
             return topic_title, False, err, node_id
 
         # 发布到微信草稿箱
-        success, result = publisher.publish_and_notify(
-            clean_title, final_html, thumb_id, digest_text
-        )
-
-        if success:
-            draft_id = result["media_id"]
-            print(f"\n✅ 「{clean_title}」发布成功 → {draft_id}")
-
-            # 保存本地 HTML 预览供 WebUI 人机工作台查看
-            try:
-                os.makedirs(os.path.join("data", "previews"), exist_ok=True)
-                with open(os.path.join("data", "previews", f"{draft_id}.html"), "w", encoding="utf-8") as f:
-                    f.write(final_html)
-            except Exception as pe:
-                logger.debug("保存 AI科普 预览 HTML 异常: {}", pe)
-
-            # 仅在发布成功后保存原始 Markdown 文档到本地
-            try:
-                import re as _re
-                os.makedirs(os.path.join("data", "markdown"), exist_ok=True)
-                safe_title = _re.sub(r'[^\w\u4e00-\u9fff\-]', '_', topic_info.get("title", "article"))
-                md_filename = f"{topic_info.get('node_id', 'topic')}_{safe_title}.md"
-                md_filepath = os.path.join("data", "markdown", md_filename)
-                with open(md_filepath, "w", encoding="utf-8") as f:
-                    f.write(article_text)
-                logger.info("  📄 原始 Markdown 文件已自动保存至: {}", md_filepath)
-            except Exception as md_err:
-                logger.warning("  保存 Markdown 文件失败: {}", md_err)
-            
-            # 写入 SQLite 数据库以供 WebUI 历史记录和查重使用
-            try:
-                from core.db.manager import db_manager
-                from core.db.models import ArticleHistory
-                session = db_manager.get_session()
-                try:
-                    ah = ArticleHistory(
-                        title=clean_title,
-                        source_type="aikepu",
-                        publish_date=datetime.now().strftime("%Y-%m-%d"),
-                        success_status=True,
-                        is_published=False,
-                        media_id=draft_id,
-                        quality_score=review_res["score"],
-                        source_url=f"aikepu://node/{node_id}",
-                        thumb_media_id=thumb_id,
-                        status="DRAFT"
-                    )
-                    session.add(ah)
-                    session.commit()
-                finally:
-                    db_manager.remove_session()
-            except Exception as db_err:
-                logger.warning("写入 SQLite 历史失败: {}", db_err)
-
-            mark_published(node_id, clean_title, draft_id=draft_id, status="draft")
-            return topic_title, True, None, node_id
-        else:
-            err = result.get("errmsg", "未知错误") if isinstance(result, dict) else str(result)
-            print(f"❌ 「{clean_title}」发布失败：{err}")
-            try:
-                title_hash = hashlib.md5(clean_title.encode('utf-8')).hexdigest()
-                os.makedirs(os.path.join("data", "previews"), exist_ok=True)
-                with open(os.path.join("data", "previews", f"fail_{title_hash}.html"), "w", encoding="utf-8") as f:
-                    f.write(final_html)
-
-                from core.db.manager import db_manager
-                from core.db.models import ArticleHistory
-                session = db_manager.get_session()
-                try:
-                    ah = ArticleHistory(
-                        title=clean_title,
-                        source_type="aikepu",
-                        publish_date=datetime.now().strftime("%Y-%m-%d"),
-                        success_status=False,
-                        media_id=None,
-                        error_log=err,
-                        quality_score=review_res["score"],
-                        source_url=f"aikepu://node/{node_id}",
-                        thumb_media_id=thumb_id,
-                        status="FAILED"
-                    )
-                    session.add(ah)
-                    session.commit()
-                finally:
-                    db_manager.remove_session()
-            except Exception as e:
-                logger.warning("保存 AI科普 失败记录异常: {}", e)
-
-            release_reserved(node_id)
-            return topic_title, False, err, node_id
-
+        import re
+        check_cancelled()
+        safe_title = re.sub(r'[^\w-]', '_', clean_title)
+        ok, error = publish_article(publisher, "aikepu", clean_title, final_html, thumb_id, digest_text, review_res["score"],
+                                  source_url=node_source_url(tree_name, node_id), node_id=node_id, tree_name=tree_name,
+                                  markdown=article_text, markdown_name=f"{node_id}_{safe_title}.md")
+        return topic_title, ok, error, node_id
+    except WorkflowCancelled:
+        raise
     except Exception as exc:
         logger.warning("  AI科普发布异常: {}", exc)
-        release_reserved(topic_info.get("node_id", ""))  # 异常时释放节点
         return topic_info.get("title", "未知"), False, str(exc), topic_info.get("node_id", "")
 
 
-def run_aikepu_workflow(publisher):
+def _run(publisher, counts, override_node_id):
     """
     体系连载发布主流水线：
     1. 从技能树中选择下一个可发布节点
@@ -261,17 +184,18 @@ def run_aikepu_workflow(publisher):
     4. 发布到微信草稿箱
     5. 标记节点已发布
     """
-    reset_tree_cache()
+    tree_name = get_active_tree_name()
 
     # 打印技能树统计
-    stats = get_skill_tree_stats()
+    stats = get_skill_tree_stats(tree_name=tree_name)
     print("\n🌳 AI 技能树状态:")
     print(f"   总节点: {stats['total']}")
     print(f"   已发布: {stats['published']}")
     print(f"   可发布: {stats['available']}")
     print(f"   进度: {stats['progress_pct']}%")
 
-    if stats["available"] == 0:
+    if not override_node_id and stats["available"] == 0:
+        counts.skipped += 1
         if stats["progress_pct"] >= 100:
             print("\n🎉 恭喜！AI 技能树所有节点已发布完毕！")
             print("   你可以向技能树添加新节点，或调整学习路线。")
@@ -281,47 +205,57 @@ def run_aikepu_workflow(publisher):
 
     # 选择 N 个选题（每次最多 MAX_AIKEPU_PER_RUN 篇，默认 1）
     topics = []
-    for _ in range(MAX_AIKEPU_PER_RUN):
-        topic = select_next_topic()
-        if topic:
-            topics.append(topic)
-            # 临时标记为「待发布」以解锁后续同级节点
-            # 注意：这里不写历史，只在线程内标记以支持一次发布多篇
-        else:
-            break
+    try:
+        for _ in range(1 if override_node_id else MAX_AIKEPU_PER_RUN):
+            topic = select_next_topic(override_node_id, tree_name=tree_name)
+            if override_node_id and topic and topic["node_id"] != override_node_id:
+                release_reserved(topic["node_id"], tree_name=tree_name)
+                raise ValueError("Unknown skill node")
+            if topic:
+                topics.append(topic)
+                # 临时标记为「待发布」以解锁后续同级节点
+                # 注意：这里不写历史，只在线程内标记以支持一次发布多篇
+            else:
+                break
 
-    if not topics:
-        print("\n📭 无可用选题，任务结束。")
-        return
+        if not topics:
+            counts.skipped += 1
+            print("\n📭 无可用选题，任务结束。")
+            return
 
-    print(f"\n🚀 AI科普：准备发布 {len(topics)} 篇文章")
-    for i, t in enumerate(topics):
-        print(f"   {i+1}. [{t['node_id']}] {t['title']}")
+        print(f"\n🚀 AI科普：准备发布 {len(topics)} 篇文章")
+        for i, t in enumerate(topics):
+            print(f"   {i+1}. [{t['node_id']}] {t['title']}")
 
-    # 预热微信活跃标题缓存
-    publisher.get_all_active_titles()
+        # 预热微信活跃标题缓存
+        publisher.get_all_active_titles()
 
-    published_count = 0
-    with ThreadPoolExecutor(max_workers=len(topics)) as executor:
-        futures = {
-            executor.submit(_publish_single_topic, topic, publisher): topic
-            for topic in topics
-        }
-        for future in as_completed(futures):
-            topic_item = futures[future]
-            try:
-                title, success, error, node_id = future.result()
-                if success:
-                    published_count += 1
-                elif error:
-                    logger.warning("  「{}」发布失败: {}", title, error)
-            except Exception as exc:
-                t_name = topic_item.get("title", "未知话题") if isinstance(topic_item, dict) else str(topic_item)
-                logger.error("  AI科普话题处理出现未捕获异常 「{}」: {}", t_name, exc)
+        published_count = 0
+        with ThreadPoolExecutor(max_workers=len(topics)) as executor:
+            futures = {
+                executor.submit(_publish_single_topic, topic, publisher): topic
+                for topic in topics
+            }
+            for future in as_completed(futures):
+                topic_item = futures[future]
+                try:
+                    title, success, error, node_id = future.result()
+                    counts.record(success, error)
+                    if success:
+                        published_count += 1
+                    elif error:
+                        logger.warning("  「{}」发布失败: {}", title, error)
+                except WorkflowCancelled:
+                    counts.cancelled = True
+                except Exception as exc:
+                    counts.record(False, str(exc))
+                    t_name = topic_item.get("title", "未知话题") if isinstance(topic_item, dict) else str(topic_item)
+                    logger.error("  AI科普话题处理出现未捕获异常 「{}」: {}", t_name, exc)
 
-    # 最终统计
-    final_stats = get_skill_tree_stats()
-    print(f"\n{'⭐' * 30}")
-    print(f"  AI科普本次运行：成功发布 {published_count}/{len(topics)} 篇")
-    print(f"  技能树进度：{final_stats['published']}/{final_stats['total']} ({final_stats['progress_pct']}%)")
-    print(f"{'⭐' * 30}")
+    finally:
+        for topic in topics:
+            release_reserved(topic["node_id"], tree_name=tree_name)
+
+
+def run_aikepu_workflow(publisher, override_node_id=None):
+    return run_counted("aikepu", lambda counts: _run(publisher, counts, override_node_id))

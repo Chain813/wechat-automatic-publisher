@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Float
+from sqlalchemy import Column, ForeignKey, Integer, String, Boolean, DateTime, Text, Float
 from sqlalchemy.orm import declarative_base
 from datetime import datetime
 
@@ -14,6 +14,8 @@ class ArticleHistory(Base):
     success_status = Column(Boolean, default=False)
     is_published = Column(Boolean, default=False)
     media_id = Column(String(255), nullable=True)
+    delivery_attempt_id = Column(String(64), nullable=True)
+    wechat_app_id = Column(String(255), nullable=True)
     error_log = Column(Text, nullable=True)
     source_url = Column(Text, nullable=True)
     quality_score = Column(Float, default=0.0)
@@ -22,4 +24,8 @@ class ArticleHistory(Base):
     fact_check_result = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
 
+class ArticleRepoAssociation(Base):
+    __tablename__ = "article_repo_association"
 
+    article_id = Column(Integer, ForeignKey("article_history.id", ondelete="CASCADE"), primary_key=True)
+    repo_name = Column(String(255), primary_key=True, index=True)

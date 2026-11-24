@@ -19,7 +19,7 @@ def _mount_retry(session: requests.Session) -> requests.Session:
         status=HTTP_RETRY_TOTAL,
         backoff_factor=HTTP_RETRY_BACKOFF,
         status_forcelist=(429, 500, 502, 503, 504),
-        allowed_methods=frozenset({"GET", "POST"}),
+        allowed_methods=frozenset({"GET", "HEAD", "OPTIONS"}),
         raise_on_status=False,
     )
     adapter = HTTPAdapter(max_retries=retry, pool_connections=32, pool_maxsize=32)
@@ -46,4 +46,8 @@ def build_cached_session(cache_name: str, expire_after: int) -> requests.Session
 
 
 def build_api_session() -> requests.Session:
-    return _mount_retry(requests.Session())
+    session = _mount_retry(requests.Session())
+    # urllib3 connection retries can precede its allowed_methods check.
+    session.mount("https://api.weixin.qq.com/cgi-bin/draft/add",
+                  HTTPAdapter(max_retries=0, pool_connections=32, pool_maxsize=32))
+    return session

@@ -20,12 +20,12 @@ HTTP_SESSION = build_api_session()
 def _load_github_history():
     try:
         session = db_manager.get_session()
-        records = session.query(ArticleHistory.title).filter_by(source_type="github_repo").all()
+        records = session.query(ArticleHistory.title).filter_by(source_type="github_repo", success_status=True).all()
         return set(r.title for r in records)
     finally:
         db_manager.remove_session()
 
-def save_github_history(new_repos):
+def save_github_history(new_repos, media_id=None):
     try:
         session = db_manager.get_session()
         today = datetime.now().strftime("%Y-%m-%d")
@@ -33,7 +33,12 @@ def save_github_history(new_repos):
             existing = session.query(ArticleHistory).filter_by(title=repo, source_type="github_repo").first()
             if not existing:
                 ah = ArticleHistory(title=repo, source_type="github_repo", publish_date=today, success_status=True)
+                existing = ah
                 session.add(ah)
+            existing.success_status = True
+            existing.publish_date = today
+            if media_id:
+                existing.media_id = media_id
         session.commit()
     finally:
         db_manager.remove_session()
@@ -317,6 +322,7 @@ def fetch_one_worthy_project():
         num_queries = _random.randint(2, 3)
         selected_queries = _random.sample(query_variants, min(num_queries, len(query_variants)))
 
+        completed_queries = 0
         for query in selected_queries:
             logger.info("  搜索: {}", query)
             try:
@@ -332,11 +338,14 @@ def fetch_one_worthy_project():
                         candidates.append(repo)
                         if len(candidates) >= 20:
                             break
+                completed_queries += 1
             except Exception as e:
                 logger.warning("  搜索失败: {} — {}", query, e)
             if len(candidates) >= 20:
                 break
 
+        if not completed_queries:
+            raise RuntimeError("GitHub search unavailable")
         if not candidates:
             return []
 
@@ -419,7 +428,7 @@ def fetch_one_worthy_project():
 
     except Exception as e:
         logger.error("  GitHub Search API 失败: {}", e)
-        return []
+        raise
 
 
 # ================================================================

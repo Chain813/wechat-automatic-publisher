@@ -18,8 +18,7 @@ class PipelineEngine:
         return self
 
     def run(self, initial_context: Dict[str, Any] = None) -> bool:
-        if initial_context:
-            self.context.update(initial_context)
+        self.context = dict(initial_context or {})
             
         logger.info(f"🚀 开始执行流水线: {self.name} (共 {len(self.nodes)} 个节点)")
         
@@ -41,3 +40,13 @@ class PipelineEngine:
                 
         logger.info(f"✅ 流水线 {self.name} 执行完毕！")
         return True
+
+    def run_workflow(self, task_type, publisher):
+        from core.pipeline.nodes import run_counted
+
+        def execute(counts):
+            ok = self.run({"publisher": publisher, "counts": counts})
+            if not ok and not counts.skipped and not (counts.failed or counts.uncertain):
+                counts.record(False, self.context.get("error", "Pipeline stopped"))
+
+        return run_counted(task_type, execute)

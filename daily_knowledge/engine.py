@@ -1,3 +1,4 @@
+from core.shared.runtime import WorkflowCancelled
 import os
 import re
 import logging
@@ -25,6 +26,8 @@ def generate_daily_knowledge(domain: str = "人工智能与深度学习", max_re
     try:
         with open(prompt_path, 'r', encoding='utf-8') as f:
             system_prompt = f.read().replace("{BRAND_NAME}", BRAND_NAME)
+    except WorkflowCancelled:
+        raise
     except Exception as e:
         logger.error(f"无法读取系统 Prompt: {e}")
         return "", ""
@@ -49,6 +52,8 @@ def generate_daily_knowledge(domain: str = "人工智能与深度学习", max_re
         # 3. 调用 LLM 生成文章
         try:
             article = client.generate(system_prompt, user_prompt)
+        except WorkflowCancelled:
+            raise
         except Exception as e:
             logger.error(f"LLM 生成文章失败: {e}")
             continue

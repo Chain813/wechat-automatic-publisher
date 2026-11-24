@@ -6,7 +6,9 @@ from loguru import logger
 
 from daily_knowledge.engine import generate_daily_knowledge
 from core.shared.article_utils import process_article_content, _print_review_report
-from core.shared.runtime import check_cancelled
+from core.pipeline.records import publish_article
+from core.pipeline.nodes import run_counted
+from core.shared.runtime import WorkflowCancelled, check_cancelled
 from core.shared.llm import validate_title
 from utils.image_handler import reset_image_cache
 from core.pipeline.critic import evaluate_and_repair_article, format_critic_report
@@ -37,7 +39,7 @@ def _normalize_and_cap_placeholders(text: str, max_images: int = 3) -> str:
         text = re.sub(r'【\s*此处插入配图\s*[：:](.*?)\s*】', _repl, text)
     return text
 
-def run_daily_knowledge_workflow(publisher):
+def _run(publisher, counts):
     """
     全链路推送工作流，将纯文本 Markdown 推送至微信草稿箱。
     上传带出处的资料照片和封面。
@@ -54,7 +56,8 @@ def run_daily_knowledge_workflow(publisher):
     
     if not article_text:
         print("❌ 每日小知识文章生成失败，跳过。")
-        return False
+        counts.record(False, "Daily knowledge generation or review failed")
+        return
         
     # 为了便于显示和后续存储，尝试从生成的 Markdown 中提取一级或二级标题作为文章标题
     # 如果没有找到，则使用默认标题
@@ -71,13 +74,14 @@ def run_daily_knowledge_workflow(publisher):
     thumb_id = review_data.get("thumb_id")
     if not final_html or not thumb_id:
         logger.warning("每日小知识缺少正文或封面，跳过草稿上传")
-        return False
+        counts.record(False, "Daily knowledge generation or review failed")
+        return
         
     # 构建简单的摘要
     digest_text = f"{topic_title}｜本期概念：{concept_name}"[:120]
 
     # 打印排版与安全审查报告
-    _print_review_report(
+    all_ok = _print_review_report(
         title=topic_title,
         word_count=review_data["word_count"],
         image_count=review_data["image_count"],
@@ -94,7 +98,7 @@ def run_daily_knowledge_workflow(publisher):
     final_html, review_res = evaluate_and_repair_article(clean_title, final_html, article_type="daily_knowledge")
     print(format_critic_report(review_res))
 
-    if not review_res["passed"]:
+    if not review_res["passed"] or not all_ok:
         err = f"未通过每日小知识质量门禁 ({review_res['score']}分): {'; '.join(review_res['critic_issues'])}"
         print(f"❌ 门禁拦截发布：「{clean_title}」— {err}")
         try:
@@ -120,97 +124,20 @@ def run_daily_knowledge_workflow(publisher):
                 session.commit()
             finally:
                 db_manager.remove_session()
+        except WorkflowCancelled:
+            raise
         except Exception as e:
             logger.warning("保存每日小知识门禁拦截记录异常: {}", e)
-        return False
+        counts.record(False, "Daily knowledge generation or review failed")
+        return
 
     # 5. 发布到微信草稿箱
-    success, result = publisher.publish_and_notify(
-        clean_title, final_html, thumb_id, digest_text
-    )
+    check_cancelled()
+    safe_title = re.sub(r'[^\w-]', '_', clean_title)
+    counts.record(*publish_article(publisher, "daily_knowledge", clean_title, final_html, thumb_id, digest_text, review_res["score"],
+                                 concept=concept_name, domain=domain_name,
+                                 markdown=article_text, markdown_name=f"daily_{safe_title}.md"))
 
-    if success:
-        draft_id = result["media_id"]
-        print(f"\n✅ 「{clean_title}」发布成功 → {draft_id}")
 
-        # 保存本地 HTML 预览供 WebUI 查看
-        try:
-            os.makedirs(os.path.join("data", "previews"), exist_ok=True)
-            with open(os.path.join("data", "previews", f"{draft_id}.html"), "w", encoding="utf-8") as f:
-                f.write(final_html)
-        except Exception as pe:
-            logger.debug("保存每日小知识预览 HTML 异常: {}", pe)
-
-        # 发布成功后，记录该概念到本地数据库防止后续重复
-        try:
-            from daily_knowledge.database import record_concept
-            record_concept(concept_name, domain_name)
-            logger.info(f"✅ 已将概念 '{concept_name}' 正式写入防重数据库")
-        except Exception as e:
-            logger.warning(f"  概念入库失败: {e}")
-
-        # 将生成的原始 MD 备份到共享的 markdown 文件夹中
-        try:
-            os.makedirs(os.path.join("data", "markdown"), exist_ok=True)
-            safe_title = re.sub(r'[^\w\u4e00-\u9fff\-]', '_', clean_title)
-            md_filepath = os.path.join("data", "markdown", f"daily_{safe_title}.md")
-            with open(md_filepath, "w", encoding="utf-8") as f:
-                f.write(article_text)
-            logger.info("  📄 原始 Markdown 文件已自动保存至: {}", md_filepath)
-        except Exception as md_err:
-            logger.warning("  保存 Markdown 文件失败: {}", md_err)
-            
-        # 写入主数据库的 ArticleHistory 表（为了 WebUI 的 History 页面显示与查重）
-        try:
-            from core.db.manager import db_manager
-            from core.db.models import ArticleHistory
-            session = db_manager.get_session()
-            try:
-                ah = ArticleHistory(
-                    title=clean_title,
-                    source_type="daily_knowledge",
-                    publish_date=datetime.now().strftime("%Y-%m-%d"),
-                    success_status=True,
-                    is_published=False,
-                    media_id=draft_id,
-                    thumb_media_id=thumb_id,
-                    quality_score=review_res["score"],
-                    status="DRAFT"
-                )
-                session.add(ah)
-                session.commit()
-            finally:
-                db_manager.remove_session()
-        except Exception as db_err:
-            logger.warning("写入 SQLite 历史记录失败: {}", db_err)
-            
-        return True
-    else:
-        err = result.get("errmsg", "未知错误")
-        print(f"❌ 「{topic_title}」发布失败：{err}")
-        try:
-            os.makedirs(os.path.join("data", "previews"), exist_ok=True)
-            with open(os.path.join("data", "previews", f"fail_{title_hash}.html"), "w", encoding="utf-8") as f:
-                f.write(final_html)
-            from core.db.manager import db_manager
-            from core.db.models import ArticleHistory
-            session = db_manager.get_session()
-            try:
-                ah = ArticleHistory(
-                    title=clean_title,
-                    source_type="daily_knowledge",
-                    publish_date=datetime.now().strftime("%Y-%m-%d"),
-                    success_status=False,
-                    media_id=None,
-                    error_log=err,
-                    quality_score=review_res["score"],
-                    thumb_media_id=thumb_id,
-                    status="FAILED"
-                )
-                session.add(ah)
-                session.commit()
-            finally:
-                db_manager.remove_session()
-        except Exception as db_err:
-            logger.warning("写入 SQLite 失败记录异常: {}", db_err)
-        return False
+def run_daily_knowledge_workflow(publisher):
+    return run_counted("daily_knowledge", lambda counts: _run(publisher, counts))

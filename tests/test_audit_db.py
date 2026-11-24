@@ -77,23 +77,9 @@ def test_db_migration_alter_table(tmp_path):
     conn.commit()
     conn.close()
 
-    # 模拟 DBManager 的 ALTER TABLE 执行
+    from core.db.manager import migrate_schema
     engine = create_engine(f"sqlite:///{db_file}")
-    # 调用 manager 的升级逻辑或直接检验连接
-    from sqlalchemy import text
-    with engine.connect() as conn:
-        for col, col_type in [
-            ("source_url", "TEXT"),
-            ("quality_score", "FLOAT DEFAULT 0.0"),
-            ("status", "VARCHAR(50) DEFAULT 'PENDING_REVIEW'"),
-            ("thumb_media_id", "VARCHAR(255)"),
-            ("fact_check_result", "TEXT"),
-        ]:
-            try:
-                conn.execute(text(f"ALTER TABLE article_history ADD COLUMN {col} {col_type};"))
-                conn.commit()
-            except Exception:
-                pass
+    migrate_schema(engine)
 
     # 验证新列已成功添加，可以正常插入和查询
     Session = sessionmaker(bind=engine)

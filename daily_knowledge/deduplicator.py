@@ -1,3 +1,4 @@
+from core.shared.runtime import WorkflowCancelled
 import json
 from daily_knowledge.llm_client import LLMClient
 from daily_knowledge.database import get_recent_concepts
@@ -51,6 +52,8 @@ def check_duplicate_with_llm(new_concept: str, historical_concepts: list[str]) -
         result = json.loads(response_clean.strip())
         return result.get("is_duplicate", False)
         
+    except WorkflowCancelled:
+        raise
     except Exception as e:
         # 如果 LLM 调用或解析失败，降级为字面量匹配
         print(f"语义查重解析失败，降级为字面量查重: {e}")

@@ -12,7 +12,9 @@ from core.github.processor import generate_github_article, generate_github_diges
 from core.shared.article_utils import process_article_content, _print_review_report
 from core.shared.llm import validate_title
 from utils.image_handler import reset_image_cache
-from core.shared.runtime import check_cancelled
+from core.pipeline.records import publish_article
+from core.pipeline.nodes import run_counted
+from core.shared.runtime import WorkflowCancelled, check_cancelled
 
 from core.pipeline.nodes import BaseNode
 from core.pipeline.engine import PipelineEngine
@@ -48,6 +50,8 @@ def _download_and_upload_url(url, publisher, prefix="remote"):
                 if r.status_code == 200 and len(r.content) > 5000:
                     res, used_url = r, cand
                     break
+            except WorkflowCancelled:
+                raise
             except Exception:
                 res = None
         if res is None or res.status_code != 200:
@@ -75,6 +79,8 @@ def _download_and_upload_url(url, publisher, prefix="remote"):
         if not img_url:
             logger.warning("  微信上传失败: {}", tmp_path)
         return img_url
+    except WorkflowCancelled:
+        raise
     except Exception as e:
         logger.warning("  下载/上传异常: {} — {}", str(e)[:80], url[:80])
         return None
@@ -102,6 +108,8 @@ def _ensure_deep_images(projects, publisher):
             check_cancelled()
             try:
                 img_url = make_fn()
+            except WorkflowCancelled:
+                raise
             except Exception as e:
                 logger.warning("  ❌ {} 异常: {}", label, e)
                 return None
@@ -163,6 +171,8 @@ def _ensure_deep_images(projects, publisher):
                 for future in as_completed(futures):
                     try:
                         future.result()
+                    except WorkflowCancelled:
+                        raise
                     except Exception as e:
                         logger.warning("  配图任务异常: {}", e)
                     if enough.is_set():
@@ -201,6 +211,7 @@ class FetchGithubNode(BaseNode):
             
         projects = plugin.fetch_data()
         if not projects:
+            context["counts"].skipped += 1
             print("📭 今日暂无获取到 GitHub 热门项目。")
             return False
 
@@ -312,83 +323,19 @@ class PublishGithubNode(BaseNode):
                     session.commit()
                 finally:
                     db_manager.remove_session()
+            except WorkflowCancelled:
+                raise
             except Exception as e:
                 logger.warning("保存 GitHub 门禁拦截记录异常: {}", e)
             return False
 
         print("\n🚀 正在同步至微信公众号云端草稿箱...")
-        success, result = publisher.publish_and_notify(clean_title, final_html, thumb_id, digest)
-        if not success:
-            err = result.get("errmsg", str(result)) if isinstance(result, dict) else str(result)
-            print(f"❌ 同步草稿箱失败：{err}")
-            try:
-                title_hash = hashlib.md5(clean_title.encode('utf-8')).hexdigest()
-                os.makedirs(os.path.join("data", "previews"), exist_ok=True)
-                with open(os.path.join("data", "previews", f"fail_{title_hash}.html"), "w", encoding="utf-8") as f:
-                    f.write(final_html)
-
-                primary_repo_url = f"https://github.com/{projects[0]['repo']}" if projects else ""
-                session = db_manager.get_session()
-                try:
-                    ah = ArticleHistory(
-                        title=clean_title,
-                        source_type="github",
-                        publish_date=datetime.now().strftime("%Y-%m-%d"),
-                        success_status=False,
-                        media_id=None,
-                        error_log=err,
-                        quality_score=review_res["score"],
-                        source_url=primary_repo_url,
-                        thumb_media_id=thumb_id,
-                        status="FAILED"
-                    )
-                    session.add(ah)
-                    session.commit()
-                finally:
-                    db_manager.remove_session()
-            except Exception as e:
-                logger.warning("保存 GitHub 发布失败记录异常: {}", e)
-            return False
-
-        draft_id = result['media_id']
-        print(f"\n{'⭐' * 30}\n  🎉 恭喜！发布成功\n  📄 标题：{clean_title}\n  🆔 草稿：{draft_id}\n{'⭐' * 30}")
-        
-        # 保存本地 HTML 预览供 WebUI 人机工作台查看
-        try:
-            os.makedirs(os.path.join("data", "previews"), exist_ok=True)
-            with open(os.path.join("data", "previews", f"{draft_id}.html"), "w", encoding="utf-8") as f:
-                f.write(final_html)
-        except Exception as pe:
-            logger.debug("保存 GitHub 预览 HTML 异常: {}", pe)
-
-        repo_names = [p['repo'] for p in projects]
-        save_github_history(repo_names)
-        
-        try:
-            primary_repo_url = f"https://github.com/{projects[0]['repo']}" if projects else ""
-            session = db_manager.get_session()
-            try:
-                ah = ArticleHistory(
-                    title=clean_title,
-                    source_type="github",
-                    publish_date=datetime.now().strftime("%Y-%m-%d"),
-                    success_status=True,
-                    media_id=draft_id,
-                    error_log=None,
-                    quality_score=review_res["score"],
-                    source_url=primary_repo_url,
-                    thumb_media_id=thumb_id,
-                    status="DRAFT"
-                )
-                session.add(ah)
-                session.commit()
-            finally:
-                db_manager.remove_session()
-        except Exception as e:
-            logger.warning("保存 GitHub 发布记录失败: {}", e)
-            
-        print(f"✅ 已将 {len(repo_names)} 个项目加入历史过滤名单。")
-        return True
+        check_cancelled()
+        ok, error = publish_article(publisher, "github", clean_title, final_html, thumb_id, digest, review_res["score"],
+                                  source_url=f"https://github.com/{projects[0]['repo']}",
+                                  repos=[project["repo"] for project in projects])
+        context["counts"].record(ok, error)
+        return ok
 
 # --- 主调度 ---
 
@@ -399,4 +346,4 @@ def run_github_workflow(publisher):
     engine.add_node(GenerateGithubArticleNode())
     engine.add_node(PublishGithubNode())
     
-    engine.run({"publisher": publisher})
+    return engine.run_workflow("github", publisher)
