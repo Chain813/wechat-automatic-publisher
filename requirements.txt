@@ -23,3 +23,4 @@ matplotlib>=3.8
 sqlalchemy
 apscheduler
 trafilatura>=2.0
+filelock>=3.12,<4

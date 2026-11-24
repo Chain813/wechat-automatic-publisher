@@ -57,7 +57,7 @@ function bindRedrawBar() {
           data.images.forEach((img) => {
             const card = document.createElement('div');
             card.style.cssText = 'width:130px;border:1px solid var(--border-color);border-radius:var(--radius-sm);overflow:hidden;background:var(--bg-elevated);cursor:pointer;';
-            card.innerHTML = `<img src="${img.url}" style="width:100%;height:80px;object-fit:cover;display:block;" title="点击复制图片链接"><div style="padding:4px 6px;font-size:11px;color:var(--text-secondary);text-align:center;">图 ${img.index} (点击复制)</div>`;
+            card.innerHTML = `<img src="${escapeHtml(img.url)}" style="width:100%;height:80px;object-fit:cover;display:block;" title="点击复制图片链接"><div style="padding:4px 6px;font-size:11px;color:var(--text-secondary);text-align:center;">图 ${escapeHtml(img.index)} (点击复制)</div>`;
             card.addEventListener('click', () => copyToClipboard(new URL(img.url, window.location.origin).href, '已复制重绘图片链接'));
             grid.appendChild(card);
           });
@@ -66,12 +66,12 @@ function bindRedrawBar() {
         showToast(`参考图重绘完成，成功生成 ${data.images.length} 张原创配图`, 'success');
       } else {
         const msg = data?.message || '未抓取到有效图片或重绘失败';
-        if (resultsBox) resultsBox.innerHTML = `<div style="padding:12px;font-size:13px;color:var(--status-danger);">${msg}</div>`;
+        if (resultsBox) resultsBox.innerHTML = `<div style="padding:12px;font-size:13px;color:var(--status-danger);">${escapeHtml(msg)}</div>`;
         showToast(msg, 'error');
       }
     } catch (err) {
       if (err?.message !== 'Unauthorized') {
-        if (resultsBox) resultsBox.innerHTML = `<div style="padding:12px;font-size:13px;color:var(--status-danger);">重绘异常: ${err.message}</div>`;
+        if (resultsBox) resultsBox.innerHTML = `<div style="padding:12px;font-size:13px;color:var(--status-danger);">重绘异常: ${escapeHtml(err.message)}</div>`;
         showToast(`重绘异常: ${err.message}`, 'error');
       }
     } finally {

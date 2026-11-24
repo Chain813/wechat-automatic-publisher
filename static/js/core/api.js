@@ -34,7 +34,17 @@ export function showToast(message, type = 'info') {
 function computeBodyHash(body) {
   if (!body) return '';
   if (typeof body === 'string') return body.slice(0, 100);
-  if (body instanceof FormData) return 'formdata';
+  if (body instanceof FormData) {
+    const parts = [];
+    for (const [key, val] of body.entries()) {
+      if (typeof File !== 'undefined' && val instanceof File) {
+        parts.push(`${key}:${val.name}:${val.size}:${val.lastModified}`);
+      } else {
+        parts.push(`${key}:${String(val).slice(0, 40)}`);
+      }
+    }
+    return `fd:${parts.join('|').slice(0, 120)}`;
+  }
   try {
     return JSON.stringify(body).slice(0, 100);
   } catch (_) {

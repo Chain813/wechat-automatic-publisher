@@ -492,6 +492,10 @@
                         <div style="display: flex; flex-direction: column; gap: 6px;">
                             <label for="llm-model" style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">LLM 模型</label>
                             <select id="llm-model" class="linear-select">
+                                <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+                                <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+                                <option value="deepseek-chat">deepseek-chat</option>
+                                <option value="deepseek-reasoner">deepseek-reasoner</option>
                                 <option value="deepseek-ai/DeepSeek-V3">deepseek-ai/DeepSeek-V3</option>
                                 <option value="deepseek-ai/DeepSeek-R1">deepseek-ai/DeepSeek-R1</option>
                                 <option value="qwen-plus">qwen-plus</option>
@@ -499,9 +503,10 @@
                             </select>
                         </div>
                         <div style="display: flex; flex-direction: column; gap: 6px;">
-                            <label for="qwen-image-model" style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">重绘视觉模型</label>
+                            <label for="qwen-image-model" style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">视觉生图模型</label>
                             <select id="qwen-image-model" class="linear-select">
-                                <option value="qwen-image-redraw">qwen-image-redraw</option>
+                                <option value="qwen-image-3.0">qwen-image-3.0</option>
+                                <option value="qwen-image-3.0-pro">qwen-image-3.0-pro</option>
                                 <option value="wanx2.1-t2i-turbo">wanx2.1-t2i-turbo</option>
                             </select>
                         </div>
@@ -516,7 +521,7 @@
                             <label for="image-gen-model" style="font-size: 12px; font-weight: 600; color: var(--text-secondary);">首选生图服务</label>
                             <select id="image-gen-model" class="linear-select">
                                 <option value="qwen-image-3.0">qwen-image-3.0</option>
-                                <option value="imagen-3">imagen-3</option>
+                                <option value="qwen-image-3.0-pro">qwen-image-3.0-pro</option>
                                 <option value="sd-local">sd-local</option>
                             </select>
                         </div>

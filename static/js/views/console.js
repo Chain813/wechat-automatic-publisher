@@ -8,6 +8,8 @@ import { createInitialPipelineModel, parseLogs } from '../core/log-parser.js';
 
 let statusPollTimer = null;
 let telemetryPollTimer = null;
+let logCursor = 0;
+let lastNotifiedRunId = null;
 
 export function initConsoleView() {
   bindWorkflowSelector();
@@ -110,7 +112,16 @@ function updateEngineButtonsUI({ current }) {
       text.textContent = '任务已暂停';
     } else if (current === WORKFLOW_STATES.ERROR) {
       dot.classList.add('error');
-      text.textContent = '执行异常';
+      text.textContent = '执行失败';
+    } else if (current === WORKFLOW_STATES.PARTIAL_SUCCESS) {
+      dot.classList.add('paused');
+      text.textContent = '部分成功';
+    } else if (current === WORKFLOW_STATES.SKIPPED) {
+      dot.classList.add('idle');
+      text.textContent = '本次跳过';
+    } else if (current === WORKFLOW_STATES.CANCELLED) {
+      dot.classList.add('idle');
+      text.textContent = '已手动中断';
     } else if (current === WORKFLOW_STATES.COMPLETED) {
       dot.classList.add('idle');
       text.textContent = '编排完成';
@@ -159,17 +170,19 @@ export async function refreshConsoleTelemetry() {
     const c = await api.get('/api/system/llm_cache_stats');
     if (c && !c.error) {
       const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-      setVal('stat-hit-rate', `${c.hit_rate_pct || '0'}%`);
-      setVal('stat-saved-tokens', `${c.saved_tokens || '0'}`);
-      setVal('stat-saved-cny', `¥${c.saved_cny || '0.00'}`);
-      setVal('stat-latency', `${c.avg_latency_ms || '0'}ms`);
+      setVal('stat-hit-rate', `${c.hit_rate_pct ?? 0}%`);
+      setVal('stat-saved-tokens', `${c.saved_tokens ?? c.hit_tokens ?? 0}`);
+      setVal('stat-saved-cny', `¥${c.saved_cny ?? '0.00'}`);
+      setVal('stat-latency', `${c.avg_latency_ms ?? c.last_latency_ms ?? 0}ms`);
     }
   } catch (_) {}
 
   try {
     const t = await api.get('/api/aikepu/tree_stats');
-    if (t && !t.error) {
-      const completed = t.published_count || 0, total = t.total_nodes || 30;
+    const st = (t && t.stats) ? t.stats : t;
+    if (st && !t?.error) {
+      const completed = st.published_count ?? st.published ?? 0;
+      const total = st.total_nodes ?? st.total ?? 30;
       const pct = Math.round((completed / (total || 1)) * 100);
       const str = `${completed}/${total} 篇 (${pct}%)`;
       const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
@@ -177,9 +190,9 @@ export async function refreshConsoleTelemetry() {
       setVal('side-tree-ratio', str);
       const bar = document.getElementById('skill-tree-progress-bar');
       if (bar) bar.style.width = `${pct}%`;
-      if (t.next_recommended_topic) {
-        setVal('skill-tree-next-topic', t.next_recommended_topic);
-        setVal('side-next-topic', t.next_recommended_topic);
+      if (st.next_recommended_topic) {
+        setVal('skill-tree-next-topic', st.next_recommended_topic);
+        setVal('side-next-topic', st.next_recommended_topic);
       }
     }
   } catch (_) {}
@@ -193,17 +206,38 @@ function startStatusPolling() {
   pollPipelineStatus();
 }
 
+function applyTerminalOutcome(lastRun, wasActive) {
+  if (!lastRun || !lastRun.status) {
+    if (wasActive) State.transitionEngine(WORKFLOW_STATES.COMPLETED);
+    return;
+  }
+  State.lastRun = lastRun;
+  const statusMap = {
+    success: [WORKFLOW_STATES.COMPLETED, 'success', '流水线执行完成'],
+    partial_success: [WORKFLOW_STATES.PARTIAL_SUCCESS, 'warning', '流水线部分成功，请核查失败或未知项'],
+    failed: [WORKFLOW_STATES.ERROR, 'error', '流水线执行失败'],
+    skipped: [WORKFLOW_STATES.SKIPPED, 'info', '本次运行已跳过（无新可发布内容）'],
+    cancelled: [WORKFLOW_STATES.CANCELLED, 'warning', '流水线已手动中断']
+  };
+  const [targetState, toastType, defaultMsg] = statusMap[lastRun.status] || [WORKFLOW_STATES.IDLE, 'info', ''];
+  if (wasActive || State.engineState !== targetState) State.transitionEngine(targetState);
+  const runKey = lastRun.run_id || `${lastRun.status}:${lastRun.finished_at || ''}`;
+  if (wasActive && runKey && runKey !== lastNotifiedRunId) {
+    lastNotifiedRunId = runKey;
+    showToast(lastRun.summary || lastRun.error || defaultMsg, toastType);
+  }
+}
+
 async function pollPipelineStatus() {
   try {
-    const data = await api.get('/api/status');
+    const data = await api.get(`/api/status?since=${logCursor}`);
     if (!data) return;
+    if (typeof data.next_cursor === 'number') logCursor = data.next_cursor;
 
+    const wasActive = [WORKFLOW_STATES.RUNNING, WORKFLOW_STATES.STARTING, WORKFLOW_STATES.STOPPING, WORKFLOW_STATES.PAUSED].includes(State.engineState);
     if (data.is_paused) State.transitionEngine(WORKFLOW_STATES.PAUSED);
     else if (data.is_running) State.transitionEngine(WORKFLOW_STATES.RUNNING);
-    else if (State.engineState === WORKFLOW_STATES.RUNNING || State.engineState === WORKFLOW_STATES.STOPPING) {
-      State.transitionEngine(WORKFLOW_STATES.COMPLETED);
-      setTimeout(() => { if (State.engineState === WORKFLOW_STATES.COMPLETED) State.transitionEngine(WORKFLOW_STATES.IDLE); }, 3000);
-    }
+    else if (wasActive || data.last_run) applyTerminalOutcome(data.last_run, wasActive);
 
     if (Array.isArray(data.logs) && data.logs.length > 0) {
       State.pipelineModel = parseLogs(data.logs, State.pipelineModel);
@@ -279,8 +313,8 @@ function renderPhase1Card(phase) {
 
   if (radarEl) {
     if (phase.status === 'active' || phase.status === 'completed' || (phase.items && phase.items.length > 0)) {
-      const count = phase.candidatesCount || (phase.items ? phase.items.length : 12);
-      radarEl.innerHTML = `<span class="badge badge-success">${getIcon('check', 11)} 微信历史库 0 冲突</span><span class="badge badge-indigo">${getIcon('radar', 11)} 全网 12 信源扫描</span><span class="badge badge-neutral">${count} 篇候选聚合</span>`;
+      const count = phase.candidatesCount || (phase.items ? phase.items.length : 14);
+      radarEl.innerHTML = `<span class="badge badge-success">${getIcon('check', 11)} 微信历史库 0 冲突</span><span class="badge badge-indigo">${getIcon('radar', 11)} 全网 14 信源扫描</span><span class="badge badge-neutral">${count} 篇候选聚合</span>`;
     } else {
       radarEl.innerHTML = '<span style="color: var(--text-muted);">等待信源扫描任务下发...</span>';
     }

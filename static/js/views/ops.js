@@ -120,7 +120,7 @@ async function loadSourcesMatrix(isBg = false) {
             <span class="badge ${cls}"><span style="width:5px;height:5px;border-radius:50%;background:${dot};"></span>${text}</span>
           </div>
           <div class="source-item-meta">
-            <span>协议: ${escapeHtml(info.type || 'RSS/API')}</span>
+            <span>协议: ${escapeHtml(info.type || 'RSS/API')}${info.failures > 0 ? ` · 失败 ${info.failures} 次` : ''}</span>
             <span class="mono">${info.latency_ms ? `${info.latency_ms}ms` : '就绪'}</span>
           </div>
           ${info.detail ? `<div style="font-size:11px;color:var(--text-muted);line-height:1.3;" class="truncate">${escapeHtml(info.detail)}</div>` : ''}
@@ -128,7 +128,7 @@ async function loadSourcesMatrix(isBg = false) {
     }
     container.innerHTML = html;
   } catch (err) {
-    if (!isBg) container.innerHTML = `<div style="grid-column:1/-1;padding:20px;text-align:center;color:var(--status-danger);font-size:13px;">加载信源异常: ${err.message}</div>`;
+    if (!isBg) container.innerHTML = `<div style="grid-column:1/-1;padding:20px;text-align:center;color:var(--status-danger);font-size:13px;">加载信源异常: ${escapeHtml(err.message)}</div>`;
   }
 }
 
@@ -196,7 +196,7 @@ async function loadScheduleJobs() {
     container.innerHTML = html;
     bindJobRowActions(container);
   } catch (err) {
-    container.innerHTML = `<div style="padding:20px;text-align:center;color:var(--status-danger);font-size:13px;">加载定时任务异常: ${err.message}</div>`;
+    container.innerHTML = `<div style="padding:20px;text-align:center;color:var(--status-danger);font-size:13px;">加载定时任务异常: ${escapeHtml(err.message)}</div>`;
   }
 }
 
@@ -301,7 +301,14 @@ async function loadSystemSettings() {
 
 function setSelect(id, val) {
   const el = document.getElementById(id);
-  if (el && val && Array.from(el.options).some((o) => o.value === val)) el.value = val;
+  if (!el || !val) return;
+  if (!Array.from(el.options).some((o) => o.value === val)) {
+    const opt = document.createElement('option');
+    opt.value = val;
+    opt.textContent = `${val} (当前配置)`;
+    el.appendChild(opt);
+  }
+  el.value = val;
 }
 
 function bindSettingsForm() {

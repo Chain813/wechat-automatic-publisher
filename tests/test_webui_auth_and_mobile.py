@@ -98,3 +98,18 @@ def test_mobile_scroll_and_touch_target_contracts():
     assert "window.location.replace('/login')" in api_js
     assert "pageshow" in main_js
     assert "visibilitychange" in main_js
+
+
+def test_cloud_blank_token_fails_closed_and_local_mode_stays_open(monkeypatch):
+    monkeypatch.setattr(webui, "CLOUD_MODE", True)
+    monkeypatch.setattr(webui, "WEBUI_TOKEN", "   ")
+    client = webui.app.test_client()
+    health = client.get("/api/status?since=0")
+    assert health.status_code == 200
+    assert set(health.json) == {"is_running", "is_paused", "logs"}
+    assert health.json["logs"] == []
+    assert client.get("/api/config").status_code == 503
+    assert client.post("/api/start?token=anything").status_code == 503
+    assert client.get("/").status_code == 503
+    monkeypatch.setattr(webui, "CLOUD_MODE", False)
+    assert client.get("/api/config").status_code == 200

@@ -44,3 +44,10 @@ deploy_to_server.py
 data/profile.json
 data/knowledge_trees/_active.txt
 data/markdown/transformer_attention_*.md
+
+# Account-scoped delivery recovery and local skill history coordination
+.autowechat_state/
+data/delivery_receipts/
+data/cache/aikepu/*.lock
+data/cache/aikepu/*.corrupt.*
+data/review_locks/

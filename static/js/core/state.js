@@ -11,6 +11,9 @@ export const WORKFLOW_STATES = {
   PAUSED: 'PAUSED',
   STOPPING: 'STOPPING',
   COMPLETED: 'COMPLETED',
+  PARTIAL_SUCCESS: 'PARTIAL_SUCCESS',
+  SKIPPED: 'SKIPPED',
+  CANCELLED: 'CANCELLED',
   ERROR: 'ERROR'
 };
 
@@ -47,6 +50,7 @@ class StateStore {
     this.logViewMode = Storage.get('aw_log_mode', 'timeline');
     this.hudCollapsed = Boolean(Storage.get('aw_hud_collapsed', false));
     this.selectedNode = null;
+    this.lastRun = null;
     this.pipelineModel = createDefaultPipelineModel();
 
     this._listeners = new Map();
@@ -113,13 +117,23 @@ class StateStore {
 
   async resyncRunningStatus() {
     try {
-      const data = await api.get('/api/status');
+      const data = await api.get('/api/status?since=0');
       const isPaused = Boolean(data && (data.is_paused || data.status === 'paused'));
       const isRunning = Boolean(data && (data.is_running || data.status === 'running'));
+      if (data && data.last_run) {
+        this.lastRun = data.last_run;
+      }
 
       let nextEngineState = WORKFLOW_STATES.IDLE;
       if (isPaused) nextEngineState = WORKFLOW_STATES.PAUSED;
       else if (isRunning) nextEngineState = WORKFLOW_STATES.RUNNING;
+      else if (data?.last_run?.status) {
+        const s = data.last_run.status;
+        if (s === 'partial_success') nextEngineState = WORKFLOW_STATES.PARTIAL_SUCCESS;
+        else if (s === 'failed') nextEngineState = WORKFLOW_STATES.ERROR;
+        else if (s === 'skipped') nextEngineState = WORKFLOW_STATES.SKIPPED;
+        else if (s === 'cancelled') nextEngineState = WORKFLOW_STATES.CANCELLED;
+      }
 
       if (this.engineState !== nextEngineState) {
         this.transitionEngine(nextEngineState);

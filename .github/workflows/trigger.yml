@@ -1,12 +1,11 @@
-name: "🚀 AutoWeChat 定时发布"
+name: "AutoWeChat 定时发布"
 
 on:
-  # 定时触发：每天早上 8:00 (北京时间) = 00:00 UTC
-  # 公开仓库免费无限额度；私有仓库每月 2000 分钟免费
+  # 定时触发：每天早上 8:00 (北京时间) = 00:00 UTC（默认执行 hotspots）
   schedule:
     - cron: "0 0 * * *"
 
-  # 手动触发（GitHub 手机 App 或网页 → Actions → Run workflow）
+  # 手动触发（GitHub 手机 App 或网页 -> Actions -> Run workflow）
   workflow_dispatch:
     inputs:
       task_type:
@@ -20,48 +19,174 @@ on:
           - aikepu
           - daily_knowledge
 
+permissions:
+  contents: write
+
+concurrency:
+  group: autowechat-publish
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 40
 
     steps:
-      - name: "📥 拉取代码"
+      - name: "拉取代码"
         uses: actions/checkout@v4
 
-      - name: "🐍 安装 Python"
+      - name: "安装 Python"
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: "📦 安装依赖"
+      - name: "安装依赖"
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq graphviz
           pip install -r requirements.txt
 
-      - name: "📡 运行 热点发布"
-        if: ${{ github.event.inputs.task_type == 'hotspots' }}
+      - name: "计算账号绑定隔离标识"
+        id: account_scope
         env:
           WECHAT_APP_ID: ${{ secrets.WECHAT_APP_ID }}
           WECHAT_APP_SECRET: ${{ secrets.WECHAT_APP_SECRET }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
-          SD_ENABLED: "False"
-        run: python main.py --task hotspots
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import hashlib, os
+          app_id = os.environ.get("WECHAT_APP_ID", "").strip()
+          if not app_id or not os.environ.get("WECHAT_APP_SECRET", "").strip():
+              raise RuntimeError("Missing account credentials")
+          digest = hashlib.sha256(app_id.encode("utf-8")).hexdigest()[:16]
+          print(f"account_hash={digest}")
+          PY
 
-      - name: "🐙 运行 GitHub Trending"
-        if: ${{ github.event.inputs.task_type == 'github' }}
+      - name: Load durable account snapshot
+        id: durable
+        env:
+          STATE_REF: refs/heads/autowechat-state-${{ steps.account_scope.outputs.account_hash }}
+        run: |
+          set -eu
+          if git ls-remote --exit-code --refs origin "$STATE_REF" > "$RUNNER_TEMP/state-ref"; then
+            git fetch --no-tags --depth=1 origin "$STATE_REF"
+            parent=$(git rev-parse FETCH_HEAD)
+            mkdir -m 700 .autowechat_state
+            for file in delivery.enc delivery.mac; do
+              git show "$parent:$file" > ".autowechat_state/$file"
+            done
+            echo "parent=$parent" >> "$GITHUB_OUTPUT"
+          else
+            rc=$?
+            [[ "$rc" == 2 ]] || exit "$rc"
+          fi
+
+      - name: "恢复账号绑定的加密 DeliveryJournal 与 Receipt"
+        id: restore_delivery_cache
+        if: steps.durable.outputs.parent == ''
+        uses: actions/cache/restore@v4
+        with:
+          path: .autowechat_state
+          key: autowechat-delivery-${{ steps.account_scope.outputs.account_hash }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            autowechat-delivery-${{ steps.account_scope.outputs.account_hash }}-
+
+      - name: "验签解密并恢复账号绑定状态"
+        if: ${{ steps.durable.outputs.parent != '' || steps.restore_delivery_cache.outputs.cache-matched-key != '' || hashFiles('.autowechat_state/**') != '' }}
         env:
           WECHAT_APP_ID: ${{ secrets.WECHAT_APP_ID }}
           WECHAT_APP_SECRET: ${{ secrets.WECHAT_APP_SECRET }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
-          SD_ENABLED: "False"
-        run: python main.py --task github
+        run: |
+          umask 077
+          python - <<'PY'
+          import hashlib, hmac, io, os, sqlite3, subprocess, tarfile
+          from pathlib import Path
 
-      - name: "🎓 运行 体系连载"
-        if: ${{ github.event.inputs.task_type == 'aikepu' }}
+          state_dir = Path(".autowechat_state")
+          enc_path = state_dir / "delivery.enc"
+          mac_path = state_dir / "delivery.mac"
+          app_id = os.environ.get("WECHAT_APP_ID", "").strip()
+          app_secret = os.environ.get("WECHAT_APP_SECRET", "").strip()
+          if not enc_path.exists() or not mac_path.exists() or not app_id or not app_secret:
+              raise RuntimeError("Incomplete encrypted snapshot")
+
+          key_material = f"{app_id}:{app_secret}".encode("utf-8")
+          mac_key = hashlib.sha256(b"autowechat-mac:" + key_material).digest()
+          ciphertext = enc_path.read_bytes()
+          expected_mac = hmac.new(mac_key, ciphertext, hashlib.sha256).hexdigest()
+          stored_mac = mac_path.read_text(encoding="utf-8").strip()
+          if not hmac.compare_digest(expected_mac, stored_mac):
+              raise RuntimeError("Encrypted delivery state MAC verification failed")
+
+          env = dict(os.environ, DELIVERY_STATE_KEY=f"{app_id}:{app_secret}")
+          proc = subprocess.run(
+              [
+                  "openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-iter", "100000", "-d",
+                  "-in", str(enc_path), "-pass", "env:DELIVERY_STATE_KEY",
+              ],
+              check=True,
+              capture_output=True,
+              env=env,
+          )
+          root = Path(".").resolve()
+          allowed_roots = (root / "data/auto_publish.sqlite", root / "data/daily_knowledge.sqlite", root / "data" / "delivery.sqlite3", root / "data" / "delivery_receipts", root / "data" / "previews")
+          with tarfile.open(fileobj=io.BytesIO(proc.stdout), mode="r:gz") as tf:
+              for member in tf.getmembers():
+                  if not (member.isfile() or member.isdir()) or member.name.startswith("/") or ".." in Path(member.name).parts:
+                      raise RuntimeError(f"Unsafe archive member blocked: {member.name}")
+                  target = (root / member.name).resolve()
+                  if not any(target == ar or ar in target.parents for ar in allowed_roots) and target != (root / "data").resolve():
+                      raise RuntimeError(f"Unexpected archive path blocked: {member.name}")
+                  tf.extract(member, path=root)
+
+          enc_path.unlink(missing_ok=True)
+          mac_path.unlink(missing_ok=True)
+          db_path = Path("data/delivery.sqlite3")
+          if db_path.exists():
+              os.chmod(db_path, 0o600)
+              conn = sqlite3.connect(db_path)
+              try:
+                  if conn.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
+                      raise RuntimeError("Invalid delivery database")
+                  rows = conn.execute(
+                      "SELECT status, COUNT(*) FROM delivery WHERE account=? AND status IN ('CLOUD_UNCERTAIN','DRAFT_PENDING_RECORD') GROUP BY status",
+                      (app_id,),
+                  ).fetchall()
+                  if rows:
+                      summary = ", ".join(f"{st}={cnt}" for st, cnt in rows)
+                      print(f"Restored account-bound pending delivery state: {summary}")
+              finally:
+                  conn.close()
+          PY
+
+      - name: Preserve restored history before running
+        run: |
+          mkdir -m 700 "$RUNNER_TEMP/previous-history"
+          for db in data/auto_publish.sqlite data/daily_knowledge.sqlite; do
+            if [[ -f "$db" ]]; then
+              python -c 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); assert c.execute("PRAGMA integrity_check").fetchall()==[("ok",)]; c.backup(sqlite3.connect(sys.argv[2]))' "$db" "$RUNNER_TEMP/previous-history/${db##*/}"
+            fi
+          done
+
+      # A runner can disappear before its local receipt journal is uploaded.
+      # Reserve this account remotely before permitting any WeChat write.
+      - name: Reserve account for remote delivery
+        id: reserve
+        env:
+          GUARD_REF: refs/heads/autowechat-inflight-${{ steps.account_scope.outputs.account_hash }}
+        run: |
+          set -eu
+          git config user.name "AutoWeChat Bot"
+          git config user.email "bot@autowechat.local"
+          tree=$(git mktree </dev/null)
+          guard=$(printf 'AutoWeChat run %s attempt %s' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" | git commit-tree "$tree")
+          git push --force-with-lease="$GUARD_REF:" origin "$guard:$GUARD_REF" || {
+            echo "::error::Cannot reserve this account. Reconcile any interrupted delivery before clearing its inflight ref."
+            exit 1
+          }
+          echo "guard=$guard" >> "$GITHUB_OUTPUT"
+
+      - name: "运行发布工作流"
+        id: run_task
         env:
           WECHAT_APP_ID: ${{ secrets.WECHAT_APP_ID }}
           WECHAT_APP_SECRET: ${{ secrets.WECHAT_APP_SECRET }}
@@ -69,29 +194,195 @@ jobs:
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           KNOWLEDGE_TREE: ${{ vars.KNOWLEDGE_TREE }}
           SD_ENABLED: "False"
-        run: python main.py --task aikepu
+          TASK_TYPE: ${{ github.event_name == 'schedule' && 'hotspots' || github.event.inputs.task_type || 'hotspots' }}
+        run: |
+          echo "Resolved task_type=$TASK_TYPE (event=${{ github.event_name }})"
+          set +e
+          python main.py --task "$TASK_TYPE"
+          RC=$?
+          set -e
+          echo "exit_code=$RC" >> "$GITHUB_OUTPUT"
+          echo "Workflow exited with code $RC"
 
-      - name: "💡 运行 每日小知识"
-        if: ${{ github.event.inputs.task_type == 'daily_knowledge' }}
+      - name: "保全账号绑定的加密 Journal 与 Receipt（含结果未知态，防下次盲发）"
+        id: pack_delivery_state
+        if: ${{ success() && steps.run_task.outputs.status != 'skipped' }}
         env:
+          TASK_STATUS: ${{ steps.run_task.outputs.status }}
           WECHAT_APP_ID: ${{ secrets.WECHAT_APP_ID }}
           WECHAT_APP_SECRET: ${{ secrets.WECHAT_APP_SECRET }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
-          SD_ENABLED: "False"
-        run: python main.py --task daily_knowledge
+        run: |
+          umask 077
+          python - <<'PY'
+          import hashlib, hmac, json, os, shutil, sqlite3, subprocess, tarfile
+          from pathlib import Path
 
-      - name: "💾 保存历史记录"
+          app_id = os.environ.get("WECHAT_APP_ID", "").strip()
+          app_secret = os.environ.get("WECHAT_APP_SECRET", "").strip()
+          db_path = Path("data/delivery.sqlite3")
+          receipts_dir = Path("data/delivery_receipts")
+          previews_dir = Path("data/previews")
+          out_dir = Path(".autowechat_state")
+          out_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+          gh_out = Path(os.environ["GITHUB_OUTPUT"])
+
+          stage_dir = out_dir / "stage"
+          if stage_dir.exists():
+              shutil.rmtree(stage_dir)
+          stage_dir.mkdir(mode=0o700, parents=True)
+
+          previous = Path(os.environ["RUNNER_TEMP"]) / "previous-history"
+          for name in ("auto_publish.sqlite", "daily_knowledge.sqlite"):
+              src = Path("data") / name
+              if os.environ["TASK_STATUS"] not in ("success", "partial_success") or not src.exists():
+                  src = previous / name
+              if src.exists():
+                  dst = stage_dir / "data" / name
+                  dst.parent.mkdir(parents=True, exist_ok=True)
+                  with sqlite3.connect(src) as source, sqlite3.connect(dst) as target:
+                      source.backup(target)
+                      if target.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
+                          raise RuntimeError(f"Invalid history snapshot: {name}")
+
+          pending_attempts = set()
+          if db_path.exists():
+              staged_db = stage_dir / "data" / "delivery.sqlite3"
+              staged_db.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+              with sqlite3.connect(db_path) as source, sqlite3.connect(staged_db) as target:
+                  source.backup(target)
+              os.chmod(staged_db, 0o600)
+
+              # 最小权限裁剪：已收敛(DRAFT/FAILED)记录剥离正文 HTML/Markdown，仅保留未收敛项的补记上下文与账号绑定防重键
+              sconn = sqlite3.connect(staged_db)
+              try:
+                  rows = sconn.execute(
+                      "SELECT attempt_id, status, context FROM delivery WHERE account=?",
+                      (app_id,),
+                  ).fetchall()
+                  for att_id, st, ctx_raw in rows:
+                      if st in ("CLOUD_UNCERTAIN", "DRAFT_PENDING_RECORD"):
+                          pending_attempts.add(att_id)
+                      else:
+                          try:
+                              ctx = json.loads(ctx_raw or "{}")
+                              if isinstance(ctx, dict) and isinstance(ctx.get("workflow_record"), dict):
+                                  wr = dict(ctx["workflow_record"])
+                                  wr.pop("html", None)
+                                  extra = dict(wr.get("extra") or {})
+                                  extra.pop("markdown", None)
+                                  wr["extra"] = extra
+                                  ctx["workflow_record"] = wr
+                                  sconn.execute(
+                                      "UPDATE delivery SET context=? WHERE account=? AND attempt_id=?",
+                                      (json.dumps(ctx, ensure_ascii=False), app_id, att_id),
+                                  )
+                          except Exception:
+                              pass
+                  sconn.commit()
+              finally:
+                  sconn.close()
+
+          if receipts_dir.exists():
+              staged_receipts = stage_dir / "data" / "delivery_receipts"
+              shutil.copytree(receipts_dir, staged_receipts, dirs_exist_ok=True)
+
+          # 仅保全未收敛 attempt 的预览正文（加密存储，不留滞无关正文）
+          if previews_dir.exists() and pending_attempts:
+              staged_previews = stage_dir / "data" / "previews"
+              staged_previews.mkdir(mode=0o700, parents=True, exist_ok=True)
+              for att_id in sorted(pending_attempts):
+                  src = previews_dir / f"attempt_{att_id}.html"
+                  if src.exists():
+                      dst = staged_previews / src.name
+                      shutil.copy2(src, dst)
+                      os.chmod(dst, 0o600)
+
+          tar_path = out_dir / "delivery.tar.gz"
+          enc_path = out_dir / "delivery.enc"
+          mac_path = out_dir / "delivery.mac"
+          with tarfile.open(tar_path, "w:gz") as tf:
+              for child in stage_dir.iterdir():
+                  tf.add(child, arcname=child.name)
+
+          env = dict(os.environ, DELIVERY_STATE_KEY=f"{app_id}:{app_secret}")
+          subprocess.run(
+              [
+                  "openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-iter", "100000", "-salt",
+                  "-in", str(tar_path), "-out", str(enc_path), "-pass", "env:DELIVERY_STATE_KEY",
+              ],
+              check=True,
+              env=env,
+          )
+          key_material = f"{app_id}:{app_secret}".encode("utf-8")
+          mac_key = hashlib.sha256(b"autowechat-mac:" + key_material).digest()
+          mac_hex = hmac.new(mac_key, enc_path.read_bytes(), hashlib.sha256).hexdigest()
+          mac_path.write_text(mac_hex, encoding="utf-8")
+          os.chmod(enc_path, 0o600)
+          os.chmod(mac_path, 0o600)
+          tar_path.unlink(missing_ok=True)
+          shutil.rmtree(stage_dir, ignore_errors=True)
+
+          if pending_attempts:
+              print(f"::warning::Preserved {len(pending_attempts)} unresolved account-bound delivery state(s) in encrypted state to block blind resend on next run.")
+
+          with gh_out.open("a", encoding="utf-8") as fh:
+              fh.write("has_state=true\n")
+              fh.write(f"has_pending={'true' if pending_attempts else 'false'}\n")
+              fh.write(f"pending_count={len(pending_attempts)}\n")
+          PY
+
+      - name: Persist encrypted account snapshot
+        if: steps.pack_delivery_state.outputs.has_state == 'true'
+        env:
+          STATE_REF: refs/heads/autowechat-state-${{ steps.account_scope.outputs.account_hash }}
+          PARENT: ${{ steps.durable.outputs.parent }}
+        run: |
+          set -eu -o pipefail
+          export GIT_INDEX_FILE="$RUNNER_TEMP/state-index"
+          git read-tree --empty
+          for file in delivery.enc delivery.mac; do
+            blob=$(git hash-object -w ".autowechat_state/$file")
+            git update-index --add --cacheinfo "100644,$blob,$file"
+          done
+          parents=()
+          if [[ -n "$PARENT" ]]; then parents=(-p "$PARENT"); fi
+          commit=$(git -c user.name=AutoWeChat -c user.email=bot@autowechat.local commit-tree "$(git write-tree)" "${parents[@]}" -m "Save encrypted account state")
+          git push --force-with-lease="$STATE_REF:$PARENT" origin "$commit:$STATE_REF"
+
+      - name: "清理临时加密状态目录"
         if: always()
+        run: rm -rf .autowechat_state
+
+      - name: "保存已成功发布的历史记录"
+        if: ${{ steps.run_task.outputs.status != 'skipped' && (steps.run_task.outputs.exit_code == '0' || steps.run_task.outputs.exit_code == '2') }}
         run: |
           git config user.name "AutoWeChat Bot"
           git config user.email "bot@autowechat.local"
+          # 严禁将 delivery.sqlite3 / delivery_receipts / previews 正文提交至 Git 仓库
           git add data/cache/aikepu/aikepu_history.json 2>/dev/null || true
-          git add data/auto_publish.sqlite 2>/dev/null || true
-          git add data/daily_knowledge.sqlite 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "无变化，跳过提交"
           else
-            git commit -m "📝 自动更新发布历史"
+            git commit -m "chore(history): sync publish records"
             git push
+          fi
+
+      - name: Release account after durable recovery state is safe
+        if: ${{ success() && steps.reserve.outputs.guard != '' }}
+        env:
+          GUARD_REF: refs/heads/autowechat-inflight-${{ steps.account_scope.outputs.account_hash }}
+          GUARD: ${{ steps.reserve.outputs.guard }}
+        run: git push --force-with-lease="$GUARD_REF:$GUARD" origin ":$GUARD_REF"
+
+      - name: "回传最终退出状态门禁"
+        env:
+          WORKFLOW_EXIT_CODE: ${{ steps.run_task.outputs.exit_code }}
+        run: |
+          if [ "$WORKFLOW_EXIT_CODE" = "2" ]; then
+            echo "::warning::AutoWeChat finished with partial_success (exit code 2); succeeded records have been saved."
+            exit 2
+          fi
+          if [ "$WORKFLOW_EXIT_CODE" != "0" ]; then
+            echo "::error::AutoWeChat failed or was cancelled (exit code $WORKFLOW_EXIT_CODE); dirty history was not committed."
+            exit "${WORKFLOW_EXIT_CODE:-1}"
           fi

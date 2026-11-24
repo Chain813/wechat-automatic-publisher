@@ -137,19 +137,45 @@ function normalizeHistoryData(data) {
 }
 
 function filterArticles(list, tab) {
+  const st = (a) => (a.status || 'PENDING_REVIEW').toUpperCase();
   if (tab === 'pending') {
-    return list.filter(a => (a.status || '').toUpperCase() === 'PENDING_REVIEW');
+    return list.filter(a => ['PENDING_REVIEW', 'CLOUD_UNCERTAIN', 'DRAFT_PENDING_RECORD', 'APPROVING'].includes(st(a)));
   }
-  if (tab === 'approved') {
-    return list.filter(a => (a.status || '').toUpperCase() === 'APPROVED');
-  }
-  if (tab === 'unsent') {
-    return list.filter(a => !a.is_published && !a.success_status);
-  }
-  if (tab === 'sent') {
-    return list.filter(a => Boolean(a.is_published || a.success_status));
-  }
+  if (tab === 'approved') return list.filter(a => st(a) === 'APPROVED');
+  if (tab === 'unsent') return list.filter(a => !a.is_published);
+  if (tab === 'sent') return list.filter(a => Boolean(a.is_published && (a.success ?? a.success_status)));
   return list;
+}
+
+function getStatusMeta(a) {
+  const st = (a.status || 'PENDING_REVIEW').toUpperCase();
+  const map = {
+    CLOUD_UNCERTAIN: ['结果未知·禁盲推', 'status-failed'],
+    DRAFT_PENDING_RECORD: ['已建稿待补记', 'status-pending'],
+    APPROVING: ['核准推送中', 'status-pending'],
+    DRAFT: ['草稿已就绪', 'status-approved'],
+    APPROVED: ['已核准', 'status-approved'],
+    FAILED: ['推送失败', 'status-failed'],
+    REJECTED: ['门禁驳回', 'status-failed'],
+    PENDING_REVIEW: ['待审校', 'status-pending_review']
+  };
+  const [label, cls] = map[st] || [a.status || '待审校', `status-${st.toLowerCase()}`];
+  return { st, label, cls };
+}
+
+function renderPrimaryActionHtml(a, iconSize) {
+  const { st } = getStatusMeta(a);
+  const attAttr = a.attempt_id ? ` data-attempt-id="${escapeHtml(a.attempt_id)}"` : '';
+  if (st === 'CLOUD_UNCERTAIN' || st === 'APPROVING') {
+    return `<button class="btn btn-secondary btn-sm btn-audit-reconcile" data-id="${a.id}"${attAttr}>${getIcon('refresh', iconSize)} 核对草稿箱</button>`;
+  }
+  if (st === 'DRAFT_PENDING_RECORD') {
+    return `<button class="btn btn-primary btn-sm btn-audit-reconcile" data-id="${a.id}"${attAttr}>${getIcon('check', iconSize)} 补记本地状态</button>`;
+  }
+  if (st === 'DRAFT' || st === 'APPROVED' || Boolean(a.draft_id || a.media_id)) {
+    return `<span class="badge badge-success">已入草稿箱</span>`;
+  }
+  return `<button class="btn btn-primary btn-sm btn-audit-approve" data-id="${a.id}">${getIcon('check', iconSize)} 核准推送</button>`;
 }
 
 function renderArticles(articles) {
@@ -204,6 +230,7 @@ function renderTableRowHtml(a) {
   const shortFact = rawFact ? (rawFact.length > 36 ? rawFact.slice(0, 36) + '...' : rawFact) : '';
   const factBadge = shortFact ? `<span class="badge badge-neutral" title="${escapeHtml(rawFact)}">${escapeHtml(shortFact)}</span>` : '<span class="badge badge-neutral">未配置</span>';
   const previewId = a.preview_id || a.draft_id || a.media_id || a.id;
+  const { label, cls } = getStatusMeta(a);
 
   return `
     <tr data-article-id="${a.id}">
@@ -217,11 +244,11 @@ function renderTableRowHtml(a) {
       </td>
       <td>${scoreBadge}</td>
       <td>${factBadge}</td>
-      <td><span class="status-pill-small status-${(a.status || 'PENDING').toLowerCase()}">${escapeHtml(a.status || '待审校')}</span></td>
+      <td><span class="status-pill-small ${cls}" title="${escapeHtml(a.error || '')}">${escapeHtml(label)}</span></td>
       <td class="td-time">${escapeHtml(a.date || '')} ${escapeHtml(a.time || '')}</td>
       <td class="td-actions">
         <button class="btn btn-secondary btn-sm btn-audit-preview" data-preview-id="${escapeHtml(previewId)}" title="预览微信排版">${getIcon('view', 12)} 预览</button>
-        <button class="btn btn-primary btn-sm btn-audit-approve" data-id="${a.id}">${getIcon('check', 12)} 核准推送</button>
+        ${renderPrimaryActionHtml(a, 12)}
         <button class="btn btn-ghost btn-sm btn-audit-delete" data-id="${a.id}" title="删除此条">${getIcon('trash', 12)}</button>
       </td>
     </tr>
@@ -230,7 +257,8 @@ function renderTableRowHtml(a) {
 
 function renderMobileCardHtml(a) {
   const scoreBadge = getScoreBadgeHtml(a.quality_score);
-  const previewId = a.media_id || a.id;
+  const previewId = a.preview_id || a.draft_id || a.media_id || a.id;
+  const { label } = getStatusMeta(a);
 
   return `
     <div class="mobile-audit-card" data-article-id="${a.id}">
@@ -240,12 +268,13 @@ function renderMobileCardHtml(a) {
       </div>
       <div class="card-title">${escapeHtml(a.cleanTitle)}</div>
       <div class="card-meta">
-        <span>${escapeHtml(a.status || '待审校')}</span>
+        <span>${escapeHtml(label)}</span>
         <span>${escapeHtml(a.date || '')} ${escapeHtml(a.time || '')}</span>
       </div>
       <div class="card-actions-grid">
         <button class="btn btn-secondary btn-audit-preview" data-preview-id="${escapeHtml(previewId)}">${getIcon('view', 14)} 预览</button>
-        <button class="btn btn-primary btn-audit-approve" data-id="${a.id}">${getIcon('check', 14)} 核准推送</button>
+        ${renderPrimaryActionHtml(a, 14)}
+        <button class="btn btn-ghost btn-audit-delete" data-id="${a.id}" title="删除此条">${getIcon('trash', 14)} 删除</button>
       </div>
     </div>
   `;
@@ -281,9 +310,25 @@ function bindDynamicRowEvents(container) {
         const res = await api.post('/api/review/approve', { id: Number(id) });
         showToast(res.message || '文章已核准并推送草稿箱', 'success');
         loadAuditData();
-      } catch (_) {
-        btn.disabled = false;
-      }
+      } catch (_) { btn.disabled = false; loadAuditData(); }
+    });
+  });
+
+  container.querySelectorAll('.btn-audit-reconcile').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute('data-id');
+      const attemptId = btn.getAttribute('data-attempt-id');
+      if (!id && !attemptId) return;
+      btn.disabled = true;
+      try {
+        const body = {};
+        if (id) body.id = Number(id);
+        if (attemptId) body.attempt_id = attemptId;
+        const res = await api.post('/api/review/reconcile', body);
+        showToast(res.message || '核对已完成', res.review_status === 'CLOUD_UNCERTAIN' ? 'warning' : 'success');
+        loadAuditData();
+      } catch (_) { btn.disabled = false; }
     });
   });
 

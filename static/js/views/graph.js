@@ -127,8 +127,10 @@ async function loadKnowledgePacks() {
     if (!select || !res || !Array.isArray(res.trees)) return;
 
     select.innerHTML = res.trees.map(tree => {
-      const isSelected = tree.id === res.active;
-      return `<option value="${escapeHtml(tree.id)}" ${isSelected ? 'selected' : ''}>${escapeHtml(tree.name || tree.id)}</option>`;
+      const packId = tree.name || tree.id || '';
+      const packLabel = tree.title || tree.name || tree.id || '';
+      const isSelected = packId === res.active;
+      return `<option value="${escapeHtml(packId)}" ${isSelected ? 'selected' : ''}>${escapeHtml(packLabel)}</option>`;
     }).join('');
   } catch (_) {}
 }
@@ -152,9 +154,9 @@ function renderGraphUI(data) {
   const availCountEl = document.getElementById('legend-available-count');
   const lockCountEl = document.getElementById('legend-locked-count');
 
-  if (pubCountEl) pubCountEl.textContent = stats.published_count || published_ids.length;
-  if (availCountEl) availCountEl.textContent = stats.available_count || available_ids.length;
-  if (lockCountEl) lockCountEl.textContent = stats.locked_count || (nodes.length - published_ids.length - available_ids.length);
+  if (pubCountEl) pubCountEl.textContent = stats.published_count ?? published_ids.length;
+  if (availCountEl) availCountEl.textContent = stats.available_count ?? available_ids.length;
+  if (lockCountEl) lockCountEl.textContent = stats.locked_count ?? Math.max(0, nodes.length - published_ids.length - draft_ids.length - available_ids.length);
 
   for (let i = 1; i <= 4; i++) {
     const container = document.getElementById(`tier-nodes-${i}`);
@@ -162,7 +164,7 @@ function renderGraphUI(data) {
   }
 
   nodes.forEach(node => {
-    const tier = Number(node.tier) || 1;
+    const tier = Math.min(4, Math.max(1, Number(node.tier ?? node.difficulty) || 1));
     const container = document.getElementById(`tier-nodes-${tier}`) || document.getElementById('tier-nodes-1');
     if (!container) return;
 
@@ -220,7 +222,7 @@ function populateHud(node, status) {
   const tagsEl = document.getElementById('hud-node-tags');
   const prereqsEl = document.getElementById('hud-node-prereqs');
 
-  if (badgeEl) badgeEl.textContent = `阶梯 ${node.tier || 1}`;
+  if (badgeEl) badgeEl.textContent = `阶梯 ${node.tier ?? node.difficulty ?? 1}`;
   if (idEl) idEl.textContent = node.id;
   if (statusEl) {
     statusEl.textContent = status === 'published' ? '已发布' : status === 'draft' ? '草稿箱' : status === 'available' ? '今日推荐' : '锁定中';
