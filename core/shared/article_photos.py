@@ -6,8 +6,9 @@ from tempfile import TemporaryDirectory
 
 from loguru import logger
 
+import config
 from core.shared.runtime import WorkflowCancelled, check_cancelled
-from utils.image_handler import download_image, generate_default_cover, label_ai_cover, qwen_prompt_context
+from utils.image_handler import download_image, generate_default_cover, is_qwen_quota_exhausted, label_ai_cover, qwen_prompt_context
 from utils.source_photos import find_source_photo, prepare_photo_cover
 
 
@@ -58,12 +59,12 @@ def _generate_with_context(keyword, directory, article_title="", section_context
         return download_image(keyword, directory, allow_title_card=False)
 
 
-def _select_images(slots, directory, use_ai_first, cover_title="", section_contexts=None):
-    """按原文顺序匹配实图，结构化信息图或实图空缺的槽位并行生图。返回顺序优先排列实图以供选封面。"""
+def _select_images(slots, directory, use_ai_first, cover_title="", section_contexts=None, max_ai_images=1):
+    """按原文顺序匹配实图，仅允许前 max_ai_images 个缺图槽位调用 AI 生图，其余溢出槽位交由零成本卡片接管。"""
     images = {}
     seen = set()
     ctx_map = section_contexts or {}
-    with ThreadPoolExecutor(max_workers=min(3, len(slots))) as pool:
+    with ThreadPoolExecutor(max_workers=max(1, min(3, len(slots)))) as pool:
         if not use_ai_first:
             searches = {
                 index: pool.submit(find_source_photo, keyword, directory)
@@ -77,22 +78,34 @@ def _select_images(slots, directory, use_ai_first, cover_title="", section_conte
                     images[index] = (photo.path, photo)
 
         check_cancelled()
+        missing_indices = [index for index in slots if index not in images]
+        cap = max(0, int(max_ai_images))
+        ai_indices = missing_indices[:cap]
+        overflow_indices = missing_indices[cap:]
+        if overflow_indices:
+            logger.info(
+                "  [单篇生图上限={}] 仅保留 {} 个槽位调 AI 生图，其余 {} 个槽位转为零成本结构化卡片",
+                cap,
+                len(ai_indices),
+                len(overflow_indices),
+            )
+
         generations = {
             index: pool.submit(
                 _generate_with_context,
-                keyword,
+                slots[index],
                 directory / str(index),
                 cover_title or "",
                 ctx_map.get(index, ""),
                 index,
             )
-            for index, keyword in slots.items() if index not in images
+            for index in ai_indices
         }
         for index, generation in generations.items():
             path = _image_result(generation, slots[index])
             if path:
                 images[index] = (path, None)
-    return images
+    return images, overflow_indices
 
 
 def _upload_cover(path, directory, publisher, *, generated):
@@ -108,7 +121,11 @@ def _upload_cover(path, directory, publisher, *, generated):
         return None
 
 
-def prepare_article_photos(keywords, publisher, cover_title=None, *, use_ai_first=False, section_contexts=None):
+def _is_structured_card_candidate(keyword: str) -> bool:
+    return _is_infographic_brief(keyword) or any(sep in (keyword or "") for sep in ("→", "->", "=>", " vs ", " VS "))
+
+
+def prepare_article_photos(keywords, publisher, cover_title=None, *, use_ai_first=False, section_contexts=None, max_ai_images=None):
     figures = {}
     thumb_id = None
     cover_caption = ""
@@ -127,11 +144,20 @@ def prepare_article_photos(keywords, publisher, cover_title=None, *, use_ai_firs
     if not slots:
         return figures, thumb_id, cover_caption
 
+    eff_max_ai = int(getattr(config, "MAX_AI_IMAGES_PER_ARTICLE", 1)) if max_ai_images is None else int(max_ai_images)
+    eff_max_ai = max(0, eff_max_ai)
+
     with TemporaryDirectory(prefix="wechat-photos-") as temp:
         directory = Path(temp)
-        for index, (path, photo) in _select_images(
-            slots, directory, use_ai_first, cover_title=cover_title or "", section_contexts=slot_contexts,
-        ).items():
+        images, overflow_indices = _select_images(
+            slots,
+            directory,
+            use_ai_first,
+            cover_title=cover_title or "",
+            section_contexts=slot_contexts,
+            max_ai_images=eff_max_ai,
+        )
+        for index, (path, photo) in images.items():
             check_cancelled()
             try:
                 cdn_url = publisher.upload_news_image(path) if keywords else None
@@ -159,6 +185,16 @@ def prepare_article_photos(keywords, publisher, cover_title=None, *, use_ai_firs
                 figures[index] = image_html(cdn_url, caption)
             elif used_as_cover:
                 cover_caption = caption
+
+        if keywords:
+            from core.shared.article_utils import render_structured_info_card
+            for index in range(len(keywords)):
+                if index in figures or index not in slots:
+                    continue
+                kw = slots[index]
+                if (index in overflow_indices or is_qwen_quota_exhausted()) and _is_structured_card_candidate(kw):
+                    figures[index] = render_structured_info_card(kw)
+
         if cover_title and not thumb_id:
             check_cancelled()
             card = generate_default_cover(cover_title, str(Path(directory) / "cover.jpg"))

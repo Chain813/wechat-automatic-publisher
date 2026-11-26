@@ -227,8 +227,10 @@ def validate_article_structure(text: str):
         missing.append(f"> 引用金句不足 ({blockquote_count}/3)")
 
     image_placeholder_count = len(re.findall(r'【此处插入配图', text))
-    if image_placeholder_count < 3:
-        missing.append(f"配图占位符不足 ({image_placeholder_count}/3)")
+    card_placeholder_count = len(re.findall(r'【此处绘制(?:图表|架构图|流程图|示意图|逻辑图)?', text))
+    total_visual_count = image_placeholder_count + card_placeholder_count
+    if image_placeholder_count < 1 or total_visual_count < 3:
+        missing.append(f"配图/分析卡片标记不足 (配图={image_placeholder_count}, 卡片={card_placeholder_count})")
 
     from core.shared.article_utils import count_black_bold
     black_bold_count = count_black_bold(text)
@@ -238,7 +240,11 @@ def validate_article_structure(text: str):
     return len(missing) == 0, missing
 
 def _auto_add_placeholders(article, topic, min_count=3):
-    need = min_count - len(re.findall(r'【此处插入配图', article))
+    photo_count = len(re.findall(r'【此处插入配图', article))
+    card_count = len(re.findall(r'【此处绘制(?:图表|架构图|流程图|示意图|逻辑图)?', article))
+    need = min_count - (photo_count + card_count)
+    if photo_count == 0 and need <= 0:
+        need = 1
     if need <= 0:
         return article
 
@@ -391,7 +397,9 @@ def format_article_for_wechat(article: str, topic_title: str, brand: str = BRAND
         "3. **红色高亮（3–4 处）**：从作者原有最有穿透力的判断句中挑选 3–4 句，用 `**{{核心判断}}**` 包裹（保留原有条件限定）。\n"
         "4. **黑色加粗（不少于 12 处）**：用 `**关键词**`（不含花括号）自然标出关键数字、专有名词、机构/产品名与核心技术概念。\n"
         "5. **独立金句引用块（3 处）**：在关键小节后插入独立的 `> ` 引用块（每处 35–85 字），用凝练视角点出本节核心反差或结论，**严禁把上一段正文原样复制一遍**。\n"
-        "6. **信息图配图标记（3 处，结构化带文字要点）**：在 3 个关键小节后独立成行放置结构化编辑信息图标记，格式严格为 `【此处插入配图：6-12字中文图标题｜核心要素1 → 核心要素2 → 核心要素3】` 或 `【此处插入配图：6-12字对比标题｜旧模式/A方 vs 新变化/B方】`（3 张图尽量覆盖不同维度：架构流转、左右对比、核心数据/影响）；**严禁写「某领导调研/座谈现场/发布会合影」类写实人物场景**，所有数字与专有名词必须来自正文真实事实。\n"
+        "6. **1 张纯视觉核心主图 + 2 张结构化分析卡片（严禁用 AI 画流程图或字表）**：\n"
+        "   - 在第 1 个关键小节后放 **1 处**概念插画标记：`【此处插入配图：用一句具象物理隐喻概括本文核心冲突】`（例如「一扇紧闭的玻璃门前亮起的红灯」，仅用于生成 1 张《经济学人》风格纯视觉无字主图，严禁写流程图或文字标签）。\n"
+        "   - 在后两个关键小节后各放 **1 处**结构化分析卡片标记：`【此处绘制图表：6-12字标题｜要点1 → 要点2 → 要点3】` 或 `【此处绘制图表：6-12字对比标题｜A方事实 vs B方事实】`（由本地零成本排版为高清卡片；数字一律使用精确阿拉伯数字如 `-14%`、`2.7万亿`、`8.4x`，严禁写成汉字数字，所有数据必须源自正文）。\n"
         f"7. 文末保持唯一落款：`{signature}`\n\n"
         "直接输出排版后的完整 Markdown 正文（不要输出 `# 一级标题`，不要加任何解释）：\n\n"
         f"=== 待排版正文 ===\n{article}\n=== 结束 ==="

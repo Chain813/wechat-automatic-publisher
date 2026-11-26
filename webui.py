@@ -695,6 +695,9 @@ def handle_config():
             "QWEN_VL_MODEL": os.getenv("QWEN_VL_MODEL", "qwen-vl-max"),
             "IMAGE_GEN_MODEL": os.getenv("IMAGE_GEN_MODEL", "qwen-image-3.0"),
             "DIAGRAM_PARALLEL_WORKERS": os.getenv("DIAGRAM_PARALLEL_WORKERS", "5"),
+            "MAX_TOPICS_PER_RUN": os.getenv("MAX_TOPICS_PER_RUN", "1"),
+            "MAX_AI_IMAGES_PER_ARTICLE": os.getenv("MAX_AI_IMAGES_PER_ARTICLE", "1"),
+            "QWEN_IMAGE_DAILY_LIMIT": os.getenv("QWEN_IMAGE_DAILY_LIMIT", "6"),
         })
     else:
         data = request.json
@@ -707,6 +710,7 @@ def handle_config():
                      "QYWECHAT_WEBHOOK", "LLM_MODEL", "DASHSCOPE_API_KEY",
                      "QWEN_IMAGE_MODEL", "QWEN_IMAGE_REDRAW_MODEL", "QWEN_VL_MODEL",
                      "IMAGE_GEN_MODEL", "DIAGRAM_PARALLEL_WORKERS",
+                     "MAX_TOPICS_PER_RUN", "MAX_AI_IMAGES_PER_ARTICLE", "QWEN_IMAGE_DAILY_LIMIT",
                      "GITHUB_TOKEN", "LLM_BASE_URL", "ENABLE_FACT_SEARCH",
                      "BRAND_NAME", "ARTICLE_AUTHOR"]:
             if key not in data:
@@ -755,6 +759,21 @@ def handle_config():
             if hasattr(config, "DIAGRAM_PARALLEL_WORKERS"):
                 try:
                     config.DIAGRAM_PARALLEL_WORKERS = max(1, min(16, int(os.getenv("DIAGRAM_PARALLEL_WORKERS", "5"))))
+                except (TypeError, ValueError):
+                    pass
+            if hasattr(config, "MAX_TOPICS_PER_RUN"):
+                try:
+                    config.MAX_TOPICS_PER_RUN = max(1, min(5, int(os.getenv("MAX_TOPICS_PER_RUN", "1"))))
+                except (TypeError, ValueError):
+                    pass
+            if hasattr(config, "MAX_AI_IMAGES_PER_ARTICLE"):
+                try:
+                    config.MAX_AI_IMAGES_PER_ARTICLE = max(0, min(5, int(os.getenv("MAX_AI_IMAGES_PER_ARTICLE", "1"))))
+                except (TypeError, ValueError):
+                    pass
+            if hasattr(config, "QWEN_IMAGE_DAILY_LIMIT"):
+                try:
+                    config.QWEN_IMAGE_DAILY_LIMIT = max(0, min(50, int(os.getenv("QWEN_IMAGE_DAILY_LIMIT", "6"))))
                 except (TypeError, ValueError):
                     pass
             if hasattr(config, "BRAND_NAME") and os.getenv("BRAND_NAME"):

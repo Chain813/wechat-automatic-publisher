@@ -263,7 +263,9 @@ class TestArticleStyling(unittest.TestCase):
         def mock_download_step(keyword, directory, **kwargs):
             return {"第一张图": "img_slot_1.jpg", "第三张图": "img_slot_3.jpg"}.get(keyword)
 
-        with patch("core.shared.article_photos.download_image", side_effect=mock_download_step), \
+        import config
+        with patch.object(config, "MAX_AI_IMAGES_PER_ARTICLE", 3), \
+             patch("core.shared.article_photos.download_image", side_effect=mock_download_step), \
              patch.object(self.publisher, "upload_news_image", side_effect=lambda path: f"https://mmbiz.qpic.cn/{path}"):
             html_body, stats = process_article_content(
                 article,

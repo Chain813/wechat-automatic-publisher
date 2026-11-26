@@ -6,9 +6,11 @@
 """
 import os
 import re
+import json
 import time
 import threading
 import tempfile
+from datetime import datetime
 from pathlib import Path
 import config
 from core.shared.runtime import WorkflowCancelled, cancel_event, check_cancelled
@@ -518,6 +520,127 @@ _qwen_key_pool = None
 _qwen_image_limiter = None
 _qwen_image_sem = None
 
+_qwen_quota_lock = threading.Lock()
+_DEFAULT_QWEN_QUOTA_FILE = Path("data") / "qwen_image_quota.json"
+_QWEN_QUOTA_FILE = _DEFAULT_QWEN_QUOTA_FILE
+_qwen_memory_quota = {}
+
+
+def _today_str() -> str:
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def _use_memory_quota() -> bool:
+    return bool(os.getenv("PYTEST_CURRENT_TEST")) and _QWEN_QUOTA_FILE == _DEFAULT_QWEN_QUOTA_FILE
+
+
+def _memory_quota_key(today: str) -> tuple:
+    test_id = os.getenv("PYTEST_CURRENT_TEST", "").split(" ", 1)[0]
+    return (today, test_id)
+
+
+def _get_qwen_daily_limit() -> int:
+    try:
+        return max(0, int(getattr(config, "QWEN_IMAGE_DAILY_LIMIT", 6)))
+    except (TypeError, ValueError):
+        return 6
+
+
+def _load_qwen_daily_count_unlocked(today: str) -> int:
+    if _use_memory_quota():
+        return int(_qwen_memory_quota.get(_memory_quota_key(today), 0))
+    quota_path = Path(_QWEN_QUOTA_FILE)
+    if not quota_path.exists():
+        return 0
+    try:
+        data = json.loads(quota_path.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and data.get("date") == today:
+            return max(0, int(data.get("count", 0)))
+    except Exception:
+        pass
+    return 0
+
+
+def _save_qwen_daily_count_unlocked(today: str, count: int) -> None:
+    safe_count = max(0, int(count))
+    if _use_memory_quota():
+        _qwen_memory_quota[_memory_quota_key(today)] = safe_count
+        return
+    quota_path = Path(_QWEN_QUOTA_FILE)
+    quota_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps({"date": today, "count": safe_count}, ensure_ascii=False)
+    with tempfile.NamedTemporaryFile(
+        dir=quota_path.parent, mode="w", encoding="utf-8", delete=False, suffix=".tmp"
+    ) as tmp:
+        tmp.write(payload)
+        tmp_path = Path(tmp.name)
+    os.replace(tmp_path, quota_path)
+
+
+def reset_qwen_daily_quota() -> None:
+    """重置当日 Qwen-Image 生图计数（测试与运维使用）。"""
+    with _qwen_quota_lock:
+        _qwen_memory_quota.clear()
+        if not _use_memory_quota():
+            quota_path = Path(_QWEN_QUOTA_FILE)
+            if quota_path.exists():
+                try:
+                    quota_path.unlink()
+                except OSError:
+                    _save_qwen_daily_count_unlocked(_today_str(), 0)
+
+
+def get_qwen_daily_usage() -> dict:
+    """返回当日 Qwen-Image 付费生图配额使用情况。"""
+    today = _today_str()
+    limit = _get_qwen_daily_limit()
+    with _qwen_quota_lock:
+        used = _load_qwen_daily_count_unlocked(today)
+    return {
+        "date": today,
+        "used": used,
+        "limit": limit,
+        "remaining": max(0, limit - used),
+    }
+
+
+def is_qwen_quota_exhausted(needed: int = 1) -> bool:
+    """判断当日 Qwen-Image 付费生图额度是否已耗尽或被禁用。"""
+    limit = _get_qwen_daily_limit()
+    if limit <= 0:
+        return True
+    today = _today_str()
+    with _qwen_quota_lock:
+        used = _load_qwen_daily_count_unlocked(today)
+    return (used + max(1, int(needed))) > limit
+
+
+def _reserve_qwen_daily_quota(count: int = 1) -> bool:
+    """原子预占当日生图配额；超出硬上限时触发成本熔断。"""
+    needed = max(1, int(count))
+    limit = _get_qwen_daily_limit()
+    today = _today_str()
+    with _qwen_quota_lock:
+        used = _load_qwen_daily_count_unlocked(today)
+        if limit <= 0 or (used + needed) > limit:
+            logger.warning(
+                "  [成本熔断] 今日 Qwen-Image 生图已达上限 ({}/{})，跳过云端付费生图",
+                used,
+                limit,
+            )
+            return False
+        _save_qwen_daily_count_unlocked(today, used + needed)
+        return True
+
+
+def _release_qwen_daily_quota(count: int = 1) -> None:
+    """生图请求未成功返回 HTTP 200 时退还预占配额。"""
+    needed = max(1, int(count))
+    today = _today_str()
+    with _qwen_quota_lock:
+        used = _load_qwen_daily_count_unlocked(today)
+        _save_qwen_daily_count_unlocked(today, max(0, used - needed))
+
 
 def _qwen_image_throttle():
     """懒加载生图节流器 + 并发信号量（按 config 可调）"""
@@ -601,8 +724,11 @@ def _qwen_post_with_rotation(base_url, body, timeout):
 
 def _try_qwen_image_batch(prompt, target_dir, count, width=900, height=500):
     """一次请求生成 count 张图（n 参数批量，节省 QPM 与额度）。返回本地路径列表。"""
-    from config import QWEN_IMAGE_API_BASE, QWEN_IMAGE_MODEL, QWEN_IMAGE_TIMEOUT, QWEN_IMAGE_PROMPT_EXTEND, QWEN_IMAGE_SIZE
+    from config import QWEN_IMAGE_API_BASE, QWEN_IMAGE_MODEL, QWEN_IMAGE_TIMEOUT, QWEN_IMAGE_SIZE
     import base64
+    req_count = max(1, int(count))
+    if not _reserve_qwen_daily_quota(req_count):
+        return []
     body = {
         "model": QWEN_IMAGE_MODEL,
         "input": {
@@ -610,10 +736,15 @@ def _try_qwen_image_batch(prompt, target_dir, count, width=900, height=500):
                 {"role": "user", "content": [{"text": prompt}]}
             ]
         },
-        "parameters": {"prompt_extend": QWEN_IMAGE_PROMPT_EXTEND, "size": QWEN_IMAGE_SIZE, "n": int(count)},
+        "parameters": {"prompt_extend": False, "size": QWEN_IMAGE_SIZE, "n": req_count},
     }
-    status, data = _qwen_post_with_rotation(QWEN_IMAGE_API_BASE, body, QWEN_IMAGE_TIMEOUT)
+    try:
+        status, data = _qwen_post_with_rotation(QWEN_IMAGE_API_BASE, body, QWEN_IMAGE_TIMEOUT)
+    except BaseException:
+        _release_qwen_daily_quota(req_count)
+        raise
     if status != 200 or not data:
+        _release_qwen_daily_quota(req_count)
         logger.warning("  批量生图失败 HTTP {}", status)
         return []
     choices = ((data.get("output") or {}).get("choices") or [])
@@ -682,17 +813,25 @@ _qwen_prompt_tls = threading.local()
 
 _SLOT_LAYOUT_ARCHETYPES = (
     (
-        "宽屏横向三联流程/机制图",
-        "严格采用 16:9 宽屏横向并排构图，主体铺满画面横向 85% 宽度，顶部左侧配靛蓝圆角胶囊“全景脉络”加粗体主标题，下方【从左到右水平并排】3 张等宽纯白圆角立体卡片（清晰细灰边框+柔和投影），每张卡片上半部 65% 面积放一幅精致扁平轴测矢量插画、底部居中仅放 1 个粗体短标题和 1 行居中浅灰简短副标注（严禁在卡片底部绘制任何小圆点清单、小图标列表或多余小字），卡片之间用水平科技靛蓝箭头从左向右串联；严禁自上而下纵向堆叠或出现左右大面积空白。",
+        "杂志级单一隐喻主视觉",
+        "严格采用 16:9 宽屏横版构图，画面核心视觉主体紧凑居中落在中央横向 70% × 纵向 60% 安全区域内（兼容 2.35:1 封面居中裁切不切主体），四周保留至少 35% 柔和浅灰白纸面留白；用单一、极具叙事张力的概念实体隐喻表达文章核心矛盾，融合《经济学人》编辑插画与 Linear 极简几何雕塑质感，克制低饱和配色（深岩灰主调、少量科技靛蓝与一点珊瑚红/琥珀橙焦点）；严禁任何文字、严禁流程图、严禁箭头连线、严禁卡片分栏。",
     ),
     (
-        "宽屏左右双栏对比/博弈图",
-        "严格采用 16:9 宽屏左右双栏水平对比构图，主体铺满画面横向 86% 宽度，顶部左侧配靛蓝圆角胶囊“格局对照”加粗体主标题，左侧浅灰白大卡片与右侧纯白高光大卡片【水平左右并排】，各配扁平轴测科技插画及 1 个短标题+1 行核心标注，中间以醒目的圆形对比徽章和水平箭头连接；不加多余底栏，严禁竖版或上下堆叠。",
+        "视觉张力双主体对照插画",
+        "严格采用 16:9 宽屏横版构图，在同一水平视界内以两个具象象征物形成克制的体量/材质/光影视觉对照（如巨石与轻羽、开放之门与厚重屏障），核心主体严格居中落在横向 70% × 纵向 60% 封面安全区内，四周留足纯净浅灰白纸面呼吸空间；纯粹通过构图与物理隐喻传递张力，严禁任何文字、数字、箭头、流程图、对比卡片边框或徽章图标。",
     ),
     (
-        "宽屏左图右卡纵深信息图",
-        "严格采用 16:9 宽屏左右黄金分割构图，顶部左侧配靛蓝圆角胶囊“核心焦点”加粗体主标题，画面左侧 46% 区域展示一幅精致大气的扁平轴测科技主插画（含立体几何节点、微缩设备或数据柱状图），右侧 44% 区域整齐排列 3 张宽幅扁平纯白横条卡片（每条仅含 1 枚小图标+1 个短标题+1 行简短标注），严禁竖版或窄条构图。",
+        "微观焦点留白叙事插画",
+        "严格采用 16:9 宽屏横版静物叙事构图，画面中央聚焦单个极具工业设计质感的极简具象主体（哑光陶瓷、磨砂玻璃与纸面微纹理），柔和自然棚拍漫射光，大面积纯净浅色留白，视觉层次一眼可辨；严禁任何文字、标牌、屏幕字样、流程图、箭头或无关科技图标堆砌。",
     ),
+)
+
+_FORBIDDEN_PROMPT_RENDER_RE = re.compile(
+    r"主标题|副标题|顶部.*胶囊|三张.*卡片|从左到右.*箭头|流程图|引号内|标注简体中文|写上|印着|显示.*文字|“[A-Za-z0-9\u4e00-\u9fff]+”"
+)
+_PURE_VISUAL_GUARDRAIL_TAIL = (
+    "100%纯视觉无任何文字字母数字与水印，严禁流程图、箭头连线与多栏卡片，"
+    "严格16:9宽屏横版且核心主体居中落在2.35:1封面安全区内，严禁竖版。"
 )
 
 
@@ -724,7 +863,7 @@ def get_qwen_prompt_context():
 
 
 def _can_use_llm_prompt_director():
-    """是否允许调用轻量 DeepSeek 模型为通义万相 3.0 深化编辑信息图提示词。"""
+    """是否允许调用轻量 DeepSeek 模型为通义万相 3.0 构建杂志级纯视觉隐喻提示词。"""
     if os.getenv("PYTEST_CURRENT_TEST"):
         return False
     if os.getenv("QWEN_IMAGE_LLM_PROMPT", "1").strip().lower() in ("0", "false", "no", "off"):
@@ -733,56 +872,39 @@ def _can_use_llm_prompt_director():
     return bool(LLM_API_KEY or LLM_API_KEYS)
 
 
-def _build_local_infographic_prompt(keyword, article_title="", slot_index=0):
-    """本地确定性高质量浅色编辑信息图提示词（带清晰简体中文主标题与结构化节点标签）。"""
-    clean_kw = re.sub(r"\s+", " ", (keyword or "").strip())
-    if not clean_kw:
-        clean_kw = (article_title or "前沿科技机制拆解").strip()[:16]
+def _build_editorial_illustration_prompt(keyword, article_title="", slot_index=0):
+    """本地确定性杂志级纯视觉概念插画提示词（零文字、无流程图、兼容 2.35:1 封面安全区）。"""
+    raw = re.sub(r"\s+", " ", (keyword or "").strip())
+    # 剥离结构化分隔符与箭头，仅保留干净的主题意象短语，绝不让模型渲染文字
+    raw = re.sub(r"[｜|→=>]+", " ", raw)
+    raw = re.sub(r"\bvs\b", " 与 ", raw, flags=re.IGNORECASE)
+    subject = re.sub(r"\s+", " ", raw).strip(" ：:，,。")[:40]
+    if not subject:
+        subject = (article_title or "前沿科技与产业博弈").strip()[:28]
 
-    parts = [p.strip() for p in re.split(r"[｜|]", clean_kw, maxsplit=1) if p.strip()]
-    main_title = parts[0][:16]
-    raw_detail = parts[1] if len(parts) > 1 else ""
-
-    node_labels = []
-    if raw_detail:
-        for seg in re.split(r"(?:→|->|=>|\bvs\b|\bVS\b|对比|、|/|；|;)", raw_detail):
-            s = seg.strip(" ：:，,。")
-            if s and len(s) >= 2:
-                node_labels.append(s[:12])
-    node_labels = node_labels[:4]
-
-    layout_name, layout_desc = _SLOT_LAYOUT_ARCHETYPES[int(slot_index or 0) % len(_SLOT_LAYOUT_ARCHETYPES)]
-
-    if len(node_labels) >= 2:
-        quoted_nodes = "、".join(f"“{n}”" for n in node_labels)
-        content_spec = (
-            f"顶部粗体黑字主标题为“{main_title}”，主体展示 {len(node_labels)} 个清晰的纯白圆角信息卡片，"
-            f"依次标注简体中文标签 {quoted_nodes}，卡片之间用简洁科技靛蓝箭头与极简线性矢量图标连接。"
-        )
-    else:
-        sub_label = (article_title or "").strip()[:14]
-        sub_clause = f"，辅助副标题小字为“{sub_label}”" if sub_label and sub_label != main_title else ""
-        content_spec = (
-            f"顶部粗体黑字主标题为“{main_title}”{sub_clause}，"
-            f"下方以 3 个极简白底信息卡片配线性矢量图标和箭头拆解核心机制与关键影响，每张卡片配有醒目简短简体中文关键词。"
-        )
+    archetype_name, archetype_desc = _SLOT_LAYOUT_ARCHETYPES[int(slot_index or 0) % len(_SLOT_LAYOUT_ARCHETYPES)]
 
     return (
-        f"一幅严格16:9宽屏横版高端科技商业杂志编辑信息图（{layout_name}），融合《经济学人》数据新闻美学与 Linear 现代浅色几何插画质感。"
-        f"画布采用柔和浅灰蓝微点阵纸面底色，四周预留约8%清晰边距，主体【严格从左到右横向水平铺满宽屏画幅】，衬托出高质感纯白圆角卡片（清晰细灰边框与柔和投影）。{layout_desc}"
-        f"{content_spec}"
-        "每个模块卡片内必须配有精致统一的扁平轴测科技插画元素（如立体数据节点、加密棱镜、服务器机柜、信号链路或极简数据柱状图），"
-        "且每张卡片严格只显示 1 个粗体短标题与 1 行简短副标注，严禁在卡片下方追加多行小字列表。"
-        "配色高度克制且富有质感：深墨黑主文字、板岩灰次级标注、科技靛蓝主色配少量珊瑚红或琥珀橙视觉焦点；"
-        "所有简体中文采用现代粗黑无衬线字体，大字号、笔画清晰工整、零错别字。"
-        "严禁竖版构图、严禁自上而下纵向堆叠卡片、严禁左右留出大片空白、严禁赛博朋克深黑霓虹背景、严禁写实人脸或会议室照片、严禁把色号代码写进画面、无平台水印。"
+        f"一幅16:9宽屏横版高端科技商业杂志纯视觉概念插画（{archetype_name}），"
+        f"融合《经济学人》封面编辑插画叙事张力与 Stripe Press / Linear 现代极简立体雕塑质感。"
+        f"以单一极具辨识度的物理或建筑视觉隐喻表达主题意象：{subject}。"
+        f"{archetype_desc}"
+        "画布采用干净柔和的浅灰白微纹理纸面底色，柔和棚拍自然漫射光与细腻投影；"
+        "配色高度克制：深岩灰与暖白为主调，仅用少量科技靛蓝与一处珊瑚红/琥珀橙作视觉焦点。"
+        "绝对禁止在画面中渲染任何汉字、英文字母、数字、标点、品牌Logo、标签胶囊、印章、水印或屏幕微缩文字（100% 纯视觉无字画面）；"
+        "严禁流程图、严禁箭头连线、严禁多栏卡片排版、严禁堆砌晶圆/棱镜/盾牌/机柜等无关科技图标全家桶、"
+        "严禁竖版构图、严禁赛博黑底霓虹、严禁写实人脸或会议室照片。"
     )
+
+
+# 保持向后兼容别名
+_build_local_infographic_prompt = _build_editorial_illustration_prompt
 
 
 def _build_qwen_image_prompt(keyword, context=None, article_title=None, slot_index=None):
     """
-    为通义万相 Qwen-Image-3.0 构建杂志级浅色中文编辑信息图提示词。
-    优先使用轻量 LLM 结合文章标题与所在小节上下文提炼真实文字标签与版式构图，失败时平滑回退本地结构化信息图模板。
+    为通义万相 Qwen-Image-3.0 构建杂志级纯视觉无字概念插画提示词。
+    优先使用轻量 LLM 结合文章标题与所在小节上下文提炼单一具象视觉隐喻，失败或越界时平滑回退本地纯视觉模板。
     """
     tls_ctx = get_qwen_prompt_context()
     eff_title = (article_title if article_title is not None else tls_ctx.get("article_title", "")) or ""
@@ -790,10 +912,10 @@ def _build_qwen_image_prompt(keyword, context=None, article_title=None, slot_ind
     eff_slot = int(slot_index if slot_index is not None else tls_ctx.get("slot_index", 0))
 
     if not keyword or not keyword.strip():
-        return _build_local_infographic_prompt(eff_title or "前沿科技洞察", eff_title, eff_slot)
+        return _build_editorial_illustration_prompt(eff_title or "前沿科技洞察", eff_title, eff_slot)
 
     clean_kw = keyword.strip()
-    layout_name, layout_desc = _SLOT_LAYOUT_ARCHETYPES[eff_slot % len(_SLOT_LAYOUT_ARCHETYPES)]
+    archetype_name, archetype_desc = _SLOT_LAYOUT_ARCHETYPES[eff_slot % len(_SLOT_LAYOUT_ARCHETYPES)]
 
     if _can_use_llm_prompt_director():
         try:
@@ -801,54 +923,49 @@ def _build_qwen_image_prompt(keyword, context=None, article_title=None, slot_ind
             from core.shared.llm import call_deepseek_with_retry
 
             system_prompt = (
-                "你是顶级科技与商业专栏（对标《经济学人》、Stripe Press、Linear 视觉图解）的首席信息图视觉导演，"
-                "专门为中文文字渲染能力极强的通义万相 Qwen-Image-3.0 编写 16:9 宽屏横版杂志级浅色编辑信息图提示词。\n"
-                "必须严格遵守以下构图、美学与零乱码文字铁律：\n"
-                "1. **严格 16:9 宽屏横版左右展开（绝对禁止竖版感与上下堆叠）**：\n"
-                "   - 主体必须**从左到右横向水平铺满 84%-88% 宽屏画面**（左中右三联并排、左右双栏对照、或左图右卡水平分栏）。\n"
-                "   - **严禁竖版构图、严禁将多张卡片自上而下纵向堆叠在画面中间**（那会导致左右大面积留白、极像难看的竖版海报）。\n"
-                "2. **拒绝光秃秃的纯文字白板，兼具杂志插画质感**：\n"
-                "   - 画布采用柔和浅灰蓝微点阵细网格纸面底色，纯白圆角卡片配清晰细灰边框与细腻柔和投影。\n"
-                "   - 每个核心模块卡片必须配有具体、精致的扁平轴测科技插画元素（立体加密棱镜、微缩机柜、芯片晶圆、信号链路、迷你柱状图、安全锁盾等）。\n"
-                "   - 配色克制高级：深墨黑主字 + 板岩灰辅字 + 科技靛蓝主色 + 局部珊瑚红/琥珀橙作关键高亮；严格按推荐版式使用对应顶部靛蓝胶囊词，不要千篇一律都写“机制拆解”。\n"
-                "3. **零乱码文字铁律（大字号、极简短、绝不多行小字）**：\n"
-                "   - **只有需要渲染到画面上的简体中文文案才能放在双引号“...”里**，严禁把颜色色号（如 #F8FAFC）写进提示词。\n"
-                "   - 全图只包含：顶部 1 个胶囊短词（4字）+ 1 个粗体主标题（6-11字）+ 2-3 个横向并排卡片；**每张卡片主体 65% 空间留给扁平轴测插画，文字区严格只居中放 1 个粗体短标题（3-7字）+ 1 行精炼副标注（4-8字），严禁在卡片底部绘制多行项目符号列表、小图标清单或任何补充小字**（避免模型自造乱码）。\n"
-                "   - 全图引号内总汉字严格控制在 **20-42 字**之间，字号醒目疏朗。\n"
-                "4. **事实绝对保真**：专有名词、机构名与数字严格来自输入正文，严禁杜撰未出现的数字或年份。\n"
-                "5. **黑名单**：严禁竖版/纵向堆叠、严禁赛博黑底霓虹/发光大脑、严禁写实人脸/领导座谈/会议室照片、严禁随机英文乱码或水印。\n"
-                "6. **输出格式**：直接输出一段 180-300 字的完整简体中文生图提示词，不要输出标题、解释、编号或 Markdown 代码块。"
+                "你是顶级商业与科技媒体（对标《经济学人》、Stripe Press、Linear）的首席插画艺术总监，"
+                "专门为通义万相 Qwen-Image-3.0 编写 16:9 宽屏横版【纯视觉无字】概念插画提示词。\n"
+                "必须严格遵守以下视觉可读性与零文字铁律：\n"
+                "1. **100% 纯视觉无字画面（最高铁律）**：\n"
+                "   - 画面中**严禁出现任何汉字、英文字母、数字、标点、引号、标签胶囊、标题栏、图表刻度或水印**。\n"
+                "   - 提示词中绝对不要出现“主标题”“副标题”“标注”“写着”等要求渲染文字的描述，也不要使用双引号包裹任何文案。\n"
+                "2. **严禁流程图与图标堆砌**：\n"
+                "   - **绝对禁止画流程图、步骤条、箭头连线、三联卡片、双栏对比卡片或信息图排版**。\n"
+                "   - 只设计 **1 个**（最多 2 个形成对比张力的）具体、克制、富有电影感与雕塑感的物理/空间隐喻（例如：天平与巨石、玻璃门与老式红电话、悬在半空的金属齿轮、一束光穿过窄缝），禁止堆砌芯片晶圆、发光大脑、盾牌锁、服务器机柜等刻板科技图标全家桶。\n"
+                "3. **构图与封面裁切安全区（手机端一眼可读）**：\n"
+                "   - **16:9 宽屏横版构图**，所有核心主体紧凑居中落在画面中央 `70% × 60%` 安全区域内（兼容 2.35:1 封面居中裁切不裁断主体），四周保留至少 `35%` 纯净浅灰白纸面留白。\n"
+                "   - 融合《经济学人》编辑插画的巧思与极简工业模型质感（哑光陶瓷、磨砂玻璃、金属与纸面微纹理），柔和棚拍漫射光，深岩灰主调 + 少量科技靛蓝 + 一点珊瑚红/琥珀橙焦点。\n"
+                "4. **黑名单**：严禁文字、严禁流程图/箭头/卡片、严禁竖版、严禁赛博黑底霓虹、严禁写实人脸或会议室照片、严禁色号代码。\n"
+                "5. **输出格式**：直接输出一段 120–220 字的完整简体中文纯画面描写提示词，不要标题、解释、编号或 Markdown 代码块。"
             )
             user_prompt = (
                 f"文章标题：{eff_title or '未提供'}\n"
-                f"本图主题锚点：{clean_kw}\n"
-                f"必须严格遵循的横版宽屏原型：{layout_name}（{layout_desc}）\n"
-                f"所在小节正文摘录：\n{eff_section[:500] if eff_section else '（无额外摘录，请紧扣主题锚点提炼结构化信息）'}\n\n"
-                "请据此写出一段直接发给 Qwen-Image-3.0 的 16:9 宽屏横版浅色编辑信息图中文提示词："
-                "务必采用从左到右水平展开构图（绝不上下纵向堆叠），每张卡片仅保留 1 个短标题 + 1 行简短标注（严禁多行小字列表），并用“...”标出所有要渲染的简体中文。"
+                f"核心意象线索：{clean_kw}\n"
+                f"构图原型：{archetype_name}（{archetype_desc}）\n"
+                f"所在小节正文摘录：\n{eff_section[:500] if eff_section else '（无额外摘录，请紧扣主题设计一个单一物理视觉隐喻）'}\n\n"
+                "请据此写出一段直接发给 Qwen-Image-3.0 的 16:9 纯视觉无字概念插画中文提示词："
+                "只描述具象物体、材质、光影与留白构图，绝不渲染任何文字、数字、箭头、流程图或分栏卡片。"
             )
             enhanced = call_deepseek_with_retry(
                 user_prompt,
                 system_content=system_prompt,
                 model=LLM_MODEL,
                 reasoning_effort="none",
-                max_tokens=650,
+                max_tokens=500,
             )
             cleaned = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", (enhanced or "").strip()).strip()
-            if len(cleaned) >= 80 and ("“" in cleaned or '"' in cleaned):
-                # 二次硬防线：清洗任何可能诱发竖版堆叠的字眼
-                cleaned = re.sub(r"自上而下(?:串联|排列|堆叠)?", "从左到右横向串联", cleaned)
-                cleaned = re.sub(r"沿中轴纵向(?:分层|悬浮|排列)?", "横向水平并排", cleaned)
-                cleaned = re.sub(r"纵向(?:分层|堆叠|排列)", "横向水平并排", cleaned)
-                if "严禁竖版" not in cleaned:
-                    cleaned = f"{cleaned} 严格16:9宽屏横版左右展开，严禁竖版堆叠与多行小字。"
+            if len(cleaned) >= 50 and not _FORBIDDEN_PROMPT_RENDER_RE.search(cleaned):
+                if "严禁流程图" not in cleaned or "严禁竖版" not in cleaned:
+                    cleaned = f"{cleaned} {_PURE_VISUAL_GUARDRAIL_TAIL}"
                 return cleaned
+            if cleaned:
+                logger.info("  视觉导演提示词含禁用文字/流程图指令，自动回退纯视觉安全模板")
         except WorkflowCancelled:
             raise
         except Exception as e:
-            logger.warning("  LLM 视觉导演生成 Qwen-Image 提示词失败，回退本地信息图模板: {}", e)
+            logger.warning("  LLM 视觉导演生成 Qwen-Image 提示词失败，回退本地纯视觉模板: {}", e)
 
-    return _build_local_infographic_prompt(clean_kw, eff_title, eff_slot)
+    return _build_editorial_illustration_prompt(clean_kw, eff_title, eff_slot)
 
 
 def _parse_qwen_image_response(data, target_dir, prefix):
@@ -878,12 +995,13 @@ def _parse_qwen_image_response(data, target_dir, prefix):
 
 def _try_qwen_image_gen(keyword, target_dir, width=900, height=500):
     """通义万相 Qwen-Image-3.0 文本生图（DashScope/百炼，国内直连）"""
-    from config import QWEN_IMAGE_API_BASE, QWEN_IMAGE_MODEL, QWEN_IMAGE_TIMEOUT, QWEN_IMAGE_PROMPT_EXTEND, QWEN_IMAGE_SIZE
+    from config import QWEN_IMAGE_API_BASE, QWEN_IMAGE_MODEL, QWEN_IMAGE_TIMEOUT, QWEN_IMAGE_SIZE
+    if not _reserve_qwen_daily_quota(1):
+        return None
     prompt = _build_qwen_image_prompt(keyword)
-    # 当提示词已包含明确引号标注的简体中文信息图布局时，关闭云端二次改写以防中文标签被篡改或丢字
-    has_structured_text = len(prompt) >= 90 and ("“" in prompt or '"' in prompt)
+    # 强制关闭云端 prompt_extend 以防 DashScope 自动改写提示词并往画面里塞随机汉字/流程图
     force_extend = os.getenv("QWEN_IMAGE_FORCE_PROMPT_EXTEND", "").strip().lower() in ("1", "true", "yes")
-    use_prompt_extend = bool(QWEN_IMAGE_PROMPT_EXTEND) if (force_extend or not has_structured_text) else False
+    use_prompt_extend = bool(force_extend)
     logger.info("  [Qwen-Image Prompt] (extend={}) {}", use_prompt_extend, prompt[:140])
     body = {
         "model": QWEN_IMAGE_MODEL,
@@ -894,8 +1012,13 @@ def _try_qwen_image_gen(keyword, target_dir, width=900, height=500):
         },
         "parameters": {"prompt_extend": use_prompt_extend, "size": QWEN_IMAGE_SIZE},
     }
-    status, data = _qwen_post_with_rotation(QWEN_IMAGE_API_BASE, body, QWEN_IMAGE_TIMEOUT)
+    try:
+        status, data = _qwen_post_with_rotation(QWEN_IMAGE_API_BASE, body, QWEN_IMAGE_TIMEOUT)
+    except BaseException:
+        _release_qwen_daily_quota(1)
+        raise
     if status != 200 or not data:
+        _release_qwen_daily_quota(1)
         logger.warning("  Qwen-Image 生图失败 HTTP {}", status)
         return None
     return _parse_qwen_image_response(data, target_dir, "qwen")
@@ -906,13 +1029,15 @@ def _try_qwen_image_redraw(image_path, instruction, target_dir, width=900, heigh
     from config import QWEN_IMAGE_API_BASE, QWEN_IMAGE_REDRAW_MODEL, QWEN_IMAGE_TIMEOUT, QWEN_IMAGE_SIZE
     if not image_path or not os.path.exists(image_path):
         return None
+    if not _reserve_qwen_daily_quota(1):
+        return None
     import base64
     mime = "image/png" if image_path.lower().endswith(".png") else "image/jpeg"
     with open(image_path, "rb") as f:
         data_uri = f"data:{mime};base64," + base64.b64encode(f.read()).decode()
     prompt = (
         f"{instruction}。要求：生成一幅全新原创画面，保持参考图的主题与构图，"
-        "去除图中所有水印、logo 与文字标识，画质高清、风格统一，适合微信公众号配图。"
+        "去除图中所有水印、logo、任何汉字英文字母与数字标识（纯视觉无字画面），画质高清、风格统一，适合微信公众号配图。"
     )
     body = {
         "model": QWEN_IMAGE_REDRAW_MODEL,
@@ -923,8 +1048,13 @@ def _try_qwen_image_redraw(image_path, instruction, target_dir, width=900, heigh
         },
         "parameters": {"size": QWEN_IMAGE_SIZE},
     }
-    status, data = _qwen_post_with_rotation(QWEN_IMAGE_API_BASE, body, QWEN_IMAGE_TIMEOUT)
+    try:
+        status, data = _qwen_post_with_rotation(QWEN_IMAGE_API_BASE, body, QWEN_IMAGE_TIMEOUT)
+    except BaseException:
+        _release_qwen_daily_quota(1)
+        raise
     if status != 200 or not data:
+        _release_qwen_daily_quota(1)
         logger.warning("  Qwen-Image 重绘失败 HTTP {}", status)
         return None
     return _parse_qwen_image_response(data, target_dir, "qwen_redraw")
@@ -1000,6 +1130,10 @@ def _download_free_image(keyword, save_dir, purpose="body", max_retries=3):
     if not keyword or not keyword.strip() or not _get_qwen_key_pool().size:
         return None
 
+    if is_qwen_quota_exhausted():
+        logger.info("  [成本熔断] 当日 Qwen-Image 额度已满或已禁用，跳过生图: '{}'", keyword)
+        return None
+
     width, height = (900, 383) if purpose == "cover" else (900, 500)
 
     clean_kw = _sanitize_path(keyword)
@@ -1012,8 +1146,10 @@ def _download_free_image(keyword, save_dir, purpose="body", max_retries=3):
     if is_source_available("qwen"):
         for attempt in range(1, max_retries + 1):
             check_cancelled()
+            if is_qwen_quota_exhausted():
+                return None
             try:
-                # 保持原始关键词纯净，避免把“画面视角2”等技术字样污染进信息图中文文字
+                # 保持原始关键词纯净，避免把“画面视角2”等技术字样污染进画面
                 path = _try_qwen_image_gen(keyword, target_dir, width, height)
                 if path:
                     mark_source_success("qwen")

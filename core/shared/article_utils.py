@@ -1,13 +1,14 @@
 import os
 import re
 import time
-from html import unescape
+from html import escape, unescape
 from urllib.parse import urlsplit
 from concurrent.futures import ThreadPoolExecutor
 import markdown
 import requests
 from loguru import logger
 
+import config
 from config import BRAND_NAME, WECHAT_TITLE_MAX_LEN, ASSET_RETENTION_DAYS
 from core.shared.llm import filter_sensitive
 
@@ -532,6 +533,81 @@ def _apply_inline_strong_styles(html_body: str) -> str:
     )
 
 
+def render_structured_info_card(raw_brief: str, header_title: str = "📊 核心逻辑与架构解析") -> str:
+    """将 `标题｜要点1 → 要点2` 或 `标题｜A方 vs B方` 渲染为零成本高对比度 Linear Light 微信内联卡片。"""
+    text = (raw_brief or "").strip()
+    if "｜" in text or "|" in text:
+        title_part, detail_part = re.split(r"[｜|]", text, maxsplit=1)
+        card_title = title_part.strip()
+        detail = detail_part.strip()
+    else:
+        card_title = ""
+        detail = text
+
+    header_html = (
+        f'<div style="font-size: 14.5px; color: #2563eb; font-weight: bold; margin-bottom: 10px; '
+        'display: flex; align-items: center; gap: 6px;">'
+        f'<span>{escape(header_title)}</span>'
+        '</div>'
+    )
+    title_html = (
+        f'<div style="font-size: 15.5px; font-weight: 700; color: #0f172a; margin-bottom: 10px; line-height: 1.45;">'
+        f'{escape(card_title)}</div>'
+        if card_title
+        else ""
+    )
+
+    body_html = ""
+    if detail and re.search(r"(?:\bvs\b|对比)", detail, flags=re.IGNORECASE):
+        sides = [s.strip(" ：:，,。") for s in re.split(r"\s*(?:\bvs\b|\bVS\b|对比)\s*", detail) if s.strip(" ：:，,。")]
+        if len(sides) >= 2:
+            left_side, right_side = sides[0], " / ".join(sides[1:])
+            body_html = (
+                '<div style="display: flex; flex-direction: column; gap: 8px;">'
+                '<div style="padding: 10px 12px; background-color: #ffffff; border: 1px solid #e2e8f0; '
+                'border-left: 3px solid #4f5bd5; border-radius: 8px;">'
+                '<div style="font-size: 11.5px; font-weight: 700; color: #4f5bd5; margin-bottom: 3px;">对照维度 A</div>'
+                f'<div style="font-size: 14px; color: #0f172a; line-height: 1.65;">{escape(left_side)}</div>'
+                '</div>'
+                '<div style="padding: 10px 12px; background-color: #ffffff; border: 1px solid #e2e8f0; '
+                'border-left: 3px solid #e11d48; border-radius: 8px;">'
+                '<div style="font-size: 11.5px; font-weight: 700; color: #e11d48; margin-bottom: 3px;">对照维度 B</div>'
+                f'<div style="font-size: 14px; color: #0f172a; line-height: 1.65;">{escape(right_side)}</div>'
+                '</div>'
+                '</div>'
+            )
+
+    if not body_html and detail and any(sep in detail for sep in ("→", "->", "=>", "；", ";")):
+        items = [s.strip(" ：:，,。") for s in re.split(r"\s*(?:→|->|=>|；|;)\s*", detail) if s.strip(" ：:，,。")]
+        if len(items) >= 2:
+            rows = []
+            for idx, item in enumerate(items[:5], 1):
+                rows.append(
+                    '<div style="display: flex; align-items: flex-start; gap: 10px; padding: 9px 12px; '
+                    'background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px;">'
+                    f'<span style="flex-shrink: 0; font-size: 12px; font-weight: 700; color: #4f5bd5; '
+                    'background-color: #eef2ff; padding: 2px 7px; border-radius: 6px; line-height: 1.4;">'
+                    f'{idx:02d}</span>'
+                    f'<span style="font-size: 14px; color: #0f172a; line-height: 1.65;">{escape(item)}</span>'
+                    '</div>'
+                )
+            body_html = '<div style="display: flex; flex-direction: column; gap: 8px;">' + "".join(rows) + "</div>"
+
+    if not body_html:
+        body_html = (
+            f'<div style="font-size: 14px; color: #334155; line-height: 1.75; text-align: justify;">'
+            f'{escape(detail or text)}</div>'
+        )
+
+    return (
+        '<section style="margin: 24px 0; padding: 18px 20px; background-color: #f8fafc; '
+        'border: 1px solid #e2e8f0; border-left: 4px solid #2563eb; border-radius: 10px; '
+        'box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px rgba(15,23,42,0.04);">'
+        f'{header_html}{title_html}{body_html}'
+        '</section>'
+    )
+
+
 def process_article_content(article_text, publisher, use_ai_first=False, skip_photo_images=False,
                             generate_diagrams=False, *, cover_title=None, github_sources=None):
     from core.shared.runtime import check_cancelled
@@ -642,12 +718,14 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
     thumb_id = None
     cover_caption = ""
     if not skip_photo_images and (placeholders or cover_title):
+        max_ai_images = max(0, int(getattr(config, "MAX_AI_IMAGES_PER_ARTICLE", 1)))
         photo_figures, thumb_id, cover_caption = prepare_article_photos(
             placeholders,
             publisher,
             cover_title,
             use_ai_first=use_ai_first,
             section_contexts=placeholder_contexts,
+            max_ai_images=max_ai_images,
         )
 
     image_count = 0
@@ -662,8 +740,10 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
         current_idx = slot_cursor
         slot_cursor += 1
         if current_idx in photo_figures:
-            image_count += 1
-            return photo_figures[current_idx]
+            snippet = photo_figures[current_idx]
+            if "<img " in snippet:
+                image_count += 1
+            return snippet
         logger.info("  最终未匹配到合适配图，已移除占位符 #{}", current_idx + 1)
         return ""
 
@@ -753,17 +833,7 @@ def process_article_content(article_text, publisher, use_ai_first=False, skip_ph
             else:
                 title = "📊 核心逻辑与架构解析"
 
-            return (
-                '<section style="margin: 24px 0; padding: 18px 20px; background-color: #f8fafc; '
-                'border: 1px solid #e2e8f0; border-left: 4px solid #2563eb; border-radius: 10px; '
-                'box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px rgba(15,23,42,0.04);">'
-                f'<div style="font-size: 14.5px; color: #2563eb; font-weight: bold; margin-bottom: 8px; '
-                'display: flex; align-items: center; gap: 6px;">'
-                f'<span>{title}</span>'
-                '</div>'
-                f'<div style="font-size: 14px; color: #334155; line-height: 1.75; text-align: justify;">{desc}</div>'
-                '</section>'
-            )
+            return render_structured_info_card(desc, header_title=title)
 
         html_body = DIAGRAM_CARD_PATTERN.sub(_format_diagram_card, html_body)
 

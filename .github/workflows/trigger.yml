@@ -1,9 +1,9 @@
 name: "AutoWeChat 定时发布"
 
 on:
-  # 定时触发：每天早上 8:00 (北京时间) = 00:00 UTC（默认执行 hotspots）
-  schedule:
-    - cron: "0 0 * * *"
+  # 已停用每日自动定时触发以严控 API 成本；如需运行请通过 workflow_dispatch 手动触发
+  # schedule:
+  #   - cron: "0 0 * * *"
 
   # 手动触发（GitHub 手机 App 或网页 -> Actions -> Run workflow）
   workflow_dispatch:
@@ -194,6 +194,9 @@ jobs:
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           KNOWLEDGE_TREE: ${{ vars.KNOWLEDGE_TREE }}
           SD_ENABLED: "False"
+          MAX_TOPICS_PER_RUN: "1"
+          MAX_AI_IMAGES_PER_ARTICLE: "1"
+          QWEN_IMAGE_DAILY_LIMIT: "6"
           TASK_TYPE: ${{ github.event_name == 'schedule' && 'hotspots' || github.event.inputs.task_type || 'hotspots' }}
         run: |
           echo "Resolved task_type=$TASK_TYPE (event=${{ github.event_name }})"

@@ -4,10 +4,11 @@ from datetime import datetime
 from loguru import logger
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from config import MAX_TOPICS_PER_RUN, MAX_TOPIC_CANDIDATES
+import config
+from config import MAX_TOPIC_CANDIDATES
 from core.hotspots.processor import filter_tech_hotspots, generate_article, generate_digest
 from core.shared.article_utils import process_article_content, _print_review_report
-from core.shared.llm import validate_title
+from core.shared.llm import filter_sensitive, validate_title
 from utils.image_handler import reset_image_cache
 from core.pipeline.records import publish_article
 from core.pipeline.nodes import run_counted
@@ -180,6 +181,7 @@ class FetchAndSelectNode(BaseNode):
 
         selected_topics = filter_tech_hotspots(raw_data)
 
+        max_topics = max(1, int(getattr(config, "MAX_TOPICS_PER_RUN", 1)))
         if not selected_topics:
             print("📭 今日暂无符合品牌调性的重磅 AI/科技话题，尝试从前几天最新的未发送热点中挑选...")
             past_topics = _get_past_topics(days=7)
@@ -190,7 +192,7 @@ class FetchAndSelectNode(BaseNode):
                     unsent_topics.append(topic)
 
             if unsent_topics:
-                selected_topics = unsent_topics[:MAX_TOPICS_PER_RUN]
+                selected_topics = unsent_topics[:max_topics]
                 print(f"✅ 成功找到前几天未发送的优质热点：{[_to_clean_title_str(t) for t in selected_topics]}")
             else:
                 print("📭 前几天也无符合条件的未发送热点，任务结束。")
@@ -206,7 +208,7 @@ class FetchAndSelectNode(BaseNode):
         print(f"\n📋 共 {len(candidates)} 个候选话题，正在与微信草稿箱去重...")
         valid_topics = []
         for topic in candidates:
-            if len(valid_topics) >= MAX_TOPICS_PER_RUN:
+            if len(valid_topics) >= max_topics:
                 break
             is_dup, old_title = publisher.is_title_duplicate(topic, extra_existing=valid_topics)
             topic_disp = _to_clean_title_str(topic)
@@ -226,19 +228,6 @@ class FetchAndSelectNode(BaseNode):
 
 
 class ParallelPublishNode(BaseNode):
-    def _generate_article_assets(self, topic, publisher):
-        check_cancelled()
-
-        topic_str = _to_clean_title_str(topic)
-        article_text = generate_article(topic)
-        if not article_text:
-            return None
-        final_html, review_data = process_article_content(article_text, publisher, cover_title=topic_str)
-        check_cancelled()
-        if not final_html:
-            return None
-        return final_html, review_data, review_data["thumb_id"]
-
     def _publish_single_topic(self, topic, pub):
         try:
             check_cancelled()
@@ -248,22 +237,63 @@ class ParallelPublishNode(BaseNode):
             topic_str = _to_clean_title_str(topic)
             print(f"\n{'━' * 50}\n🎯 [并行] 正在处理：{topic_str}\n{'━' * 50}")
 
+            # 1. 先并发生成 Markdown 文稿与摘要（零配图成本）
             with ThreadPoolExecutor(max_workers=2) as pool:
-                future_assets = pool.submit(self._generate_article_assets, topic, pub)
+                future_article = pool.submit(generate_article, topic)
                 future_digest = pool.submit(generate_digest, topic_str)
 
-                generated = future_assets.result()
-                if not generated:
+                article_text = future_article.result()
+                if not article_text:
                     _save_publish_result(topic, success=False, error="文章生成失败", status="FAILED")
                     return topic_str, False, "文章生成失败"
 
-                final_html, review_data, thumb_id = generated
                 clean_title, title_warnings = validate_title(topic_str)
                 for warning in title_warnings:
                     print(f"  ⚠️ 标题警告: {warning}")
 
                 digest = future_digest.result()
                 digest_text = digest[:120] if digest else ""
+
+            source_url = getattr(topic, "url", "") if hasattr(topic, "url") else ""
+            fact_check_res = getattr(topic, "fact_check_result", "")
+
+            # 2. 前置主编审校门禁（在付费生图之前拦截不合格文稿，防止先烧图再报废）
+            from core.pipeline.critic import evaluate_and_repair_article, format_critic_report
+            article_text, review_res = evaluate_and_repair_article(clean_title, article_text, article_type="hotspots")
+            print(format_critic_report(review_res))
+
+            _, pre_hit_words = filter_sensitive(article_text)
+            title_too_long = len(clean_title) > int(getattr(config, "WECHAT_TITLE_MAX_LEN", 64))
+            if not review_res["passed"] or title_too_long or pre_hit_words:
+                reasons = list(review_res["critic_issues"])
+                if title_too_long:
+                    reasons.append(f"标题超长 ({len(clean_title)} 字)")
+                if pre_hit_words:
+                    reasons.append(f"命中敏感词: {pre_hit_words}")
+                err = f"未通过前置质量门禁 ({review_res['score']}分): {'; '.join(reasons)}"
+                print(f"❌ 门禁前置拦截（已跳过付费生图）：「{clean_title}」— {err}")
+                preview_html, _ = process_article_content(article_text, pub, skip_photo_images=True)
+                _save_publish_result(
+                    topic,
+                    success=False,
+                    error=err,
+                    quality_score=review_res["score"],
+                    source_url=source_url,
+                    status="REJECTED",
+                    preview_html=preview_html,
+                    thumb_id=None,
+                    fact_check_result=fact_check_res,
+                )
+                return topic_str, False, err
+
+            # 3. 门禁通过后再执行配图（最多 1 张 AI 核心图 + 零成本结构化卡片）与微信内联排版
+            check_cancelled()
+            final_html, review_data = process_article_content(article_text, pub, cover_title=clean_title)
+            check_cancelled()
+            if not final_html:
+                _save_publish_result(topic, success=False, error="排版处理失败", status="FAILED")
+                return topic_str, False, "排版处理失败"
+            thumb_id = review_data.get("thumb_id")
 
             all_ok = _print_review_report(
                 title=clean_title,
@@ -272,19 +302,12 @@ class ParallelPublishNode(BaseNode):
                 sensitive_words=review_data["sensitive_words"],
                 cover_ok=thumb_id is not None,
                 digest=digest,
+                html_bytes=review_data.get("html_bytes", 0),
             )
 
-            # 主编审校门禁与自愈闭环 (Critic & Quality Gate with Auto-Remediation)
-            from core.pipeline.critic import evaluate_and_repair_article, format_critic_report
-            final_html, review_res = evaluate_and_repair_article(clean_title, final_html, article_type="hotspots")
-            print(format_critic_report(review_res))
-
-            source_url = getattr(topic, "url", "") if hasattr(topic, "url") else ""
-            fact_check_res = getattr(topic, "fact_check_result", "")
-
-            if not review_res["passed"] or not all_ok:
-                err = f"未通过主编质量门禁 ({review_res['score']}分): {'; '.join(review_res['critic_issues'])}"
-                print(f"❌ 门禁拦截发布：「{clean_title}」— {err}")
+            if not all_ok:
+                err = f"未通过发布格式核验 ({review_res['score']}分)"
+                print(f"❌ 格式核验拦截：「{clean_title}」— {err}")
                 _save_publish_result(
                     topic,
                     success=False,
@@ -294,7 +317,7 @@ class ParallelPublishNode(BaseNode):
                     status="REJECTED",
                     preview_html=final_html,
                     thumb_id=thumb_id,
-                    fact_check_result=fact_check_res
+                    fact_check_result=fact_check_res,
                 )
                 return topic_str, False, err
 

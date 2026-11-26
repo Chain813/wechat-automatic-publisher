@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### 成本控制与纯视觉配图可读性升级
+
+- **纯视觉无字核心主图（彻底取消 AI 流程图）**：`utils/image_handler.py` 与 `prompts/hotspots_skill.md` 将 AI 生图提示词全面重构为「《经济学人》风格 16:9 纯视觉无字概念插画」（主体居中落在 `2.35:1` 封面安全区，四周保留 ≥35% 留白），显式禁止渲染任何汉字/英文/数字/流程图/箭头/分栏卡片，关闭云端 `prompt_extend` 并对 LLM 视觉导演输出实施越界正则拦截；所有数据对比与流程步骤交由零成本本地 Linear Light HTML 卡片（`render_structured_info_card()`）以高对比度阿拉伯数字清晰排版。
+- **四重硬性成本熔断**：`config.py` 新增 `MAX_AI_IMAGES_PER_ARTICLE=1`（单篇最多 1 张付费 AI 图，其余自动转本地结构化卡片）与 `QWEN_IMAGE_DAILY_LIMIT=6`（跨进程持久化每日生图硬上限，HTTP 非 200 自动退还额度），并将默认 `MAX_TOPICS_PER_RUN` 收敛为 `1`（支持 WebUI `/api/config` 热更新）；`hotspots` 与 `daily_knowledge` 流水线将 `Critic` 质量门禁前置至付费生图之前，拦截稿件零生图成本；停用 `.github/workflows/trigger.yml` 的每日定时自动触发并保留手动触发通道。
+
 ### 发布可靠性与审稿台
 
 - 微信建稿前持久化投递尝试。断连后可核对本次发送标识；已收到微信回执时可直接补记本地历史。审稿台展示对应状态，并阻止重复点击再次建稿。

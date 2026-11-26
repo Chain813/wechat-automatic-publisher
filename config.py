@@ -171,10 +171,12 @@ QWEN_IMAGE_API_BASE = os.getenv(
 QWEN_IMAGE_MODEL = os.getenv("QWEN_IMAGE_MODEL", "qwen-image-3.0")
 QWEN_IMAGE_TIMEOUT = int(os.getenv("QWEN_IMAGE_TIMEOUT", "120"))
 QWEN_IMAGE_PROMPT_EXTEND = os.getenv("QWEN_IMAGE_PROMPT_EXTEND", "1") == "1"
-QWEN_IMAGE_SIZE = os.getenv("QWEN_IMAGE_SIZE", "1280*720")  # 锁 720p 控成本（≈¥0.35/张），微信配图够用
+QWEN_IMAGE_SIZE = os.getenv("QWEN_IMAGE_SIZE", "1280*720")  # 锁 720p 控成本（≈¥0.18/张），微信配图够用
 QWEN_IMAGE_MIN_INTERVAL = float(os.getenv("QWEN_IMAGE_MIN_INTERVAL", "4"))   # 生图最小间隔秒（4s ≈ 15张/分钟，低于百炼 QPM）
 QWEN_IMAGE_MAX_CONCURRENCY = int(os.getenv("QWEN_IMAGE_MAX_CONCURRENCY", "1"))  # 生图并发上限（防突发限流）
 QWEN_IMAGE_REDRAW_MODEL = os.getenv("QWEN_IMAGE_REDRAW_MODEL", "qwen-image-3.0-pro")  # 参考图重绘用 Pro（质量优先）
+MAX_AI_IMAGES_PER_ARTICLE = int(os.getenv("MAX_AI_IMAGES_PER_ARTICLE", "1"))  # 单篇文章 AI 生图硬上限（默认 1 张核心主视觉）
+QWEN_IMAGE_DAILY_LIMIT = int(os.getenv("QWEN_IMAGE_DAILY_LIMIT", "6"))        # 每日 Qwen-Image 付费生图硬上限（0 表示禁用云端生图）
 
 # 国内识图模型：通义千问 Qwen-VL（图片质量 AI 评估，OpenAI 兼容接口）
 QWEN_VL_MODEL = os.getenv("QWEN_VL_MODEL", "qwen-vl-max")
@@ -191,7 +193,7 @@ SD_MAX_RETRIES = int(os.getenv("SD_MAX_RETRIES", "2"))   # 最大重试次数（
 SENSITIVE_WORDS = []  # 留空则跳过敏感词过滤
 
 # 15. 工作流参数
-MAX_TOPICS_PER_RUN = int(os.getenv("MAX_TOPICS_PER_RUN", "3"))      # 每次运行最多发布文章数（热点/GitHub）
+MAX_TOPICS_PER_RUN = int(os.getenv("MAX_TOPICS_PER_RUN", "1"))      # 每次运行最多发布文章数（热点/GitHub，默认 1 篇控成本）
 MAX_AIKEPU_PER_RUN = int(os.getenv("MAX_AIKEPU_PER_RUN", "1"))     # AI科普每次最多发布数（默认1篇，技能树逐日推进）
 MAX_TOPIC_CANDIDATES = int(os.getenv("MAX_TOPIC_CANDIDATES", "5"))  # 候选话题上限
 ASSET_RETENTION_DAYS = int(os.getenv("ASSET_RETENTION_DAYS", "5"))  # 素材保留天数

@@ -4,12 +4,13 @@ import hashlib
 from datetime import datetime
 from loguru import logger
 
+import config
 from daily_knowledge.engine import generate_daily_knowledge
 from core.shared.article_utils import process_article_content, _print_review_report
 from core.pipeline.records import publish_article
 from core.pipeline.nodes import run_counted
 from core.shared.runtime import WorkflowCancelled, check_cancelled
-from core.shared.llm import validate_title
+from core.shared.llm import filter_sensitive, validate_title
 from utils.image_handler import reset_image_cache
 from core.pipeline.critic import evaluate_and_repair_article, format_critic_report
 
@@ -68,43 +69,28 @@ def _run(publisher, counts):
     if len(topic_title) > 60:
         topic_title = topic_title[:57] + "..."
 
-    article_text = _normalize_and_cap_placeholders(article_text, max_images=3)
-    final_html, review_data = process_article_content(article_text, publisher, cover_title=topic_title)
-    check_cancelled()
-    thumb_id = review_data.get("thumb_id")
-    if not final_html or not thumb_id:
-        logger.warning("每日小知识缺少正文或封面，跳过草稿上传")
-        counts.record(False, "Daily knowledge generation or review failed")
-        return
-        
-    # 构建简单的摘要
-    digest_text = f"{topic_title}｜本期概念：{concept_name}"[:120]
-
-    # 打印排版与安全审查报告
-    all_ok = _print_review_report(
-        title=topic_title,
-        word_count=review_data["word_count"],
-        image_count=review_data["image_count"],
-        sensitive_words=review_data["sensitive_words"],
-        cover_ok=thumb_id is not None,
-        digest=digest_text,
-        ignore_word_count=True,
-    )
-
     clean_title, _ = validate_title(topic_title)
     title_hash = hashlib.md5(clean_title.encode('utf-8')).hexdigest()
 
-    # 4. 主编审校门禁与自愈闭环 (Critic & Quality Gate with Auto-Remediation)
-    final_html, review_res = evaluate_and_repair_article(clean_title, final_html, article_type="daily_knowledge")
+    # 构建简单的摘要
+    digest_text = f"{topic_title}｜本期概念：{concept_name}"[:120]
+
+    # 2. 前置质量门禁（在付费生图之前拦截不合格文稿）
+    article_text, review_res = evaluate_and_repair_article(clean_title, article_text, article_type="daily_knowledge")
     print(format_critic_report(review_res))
 
-    if not review_res["passed"] or not all_ok:
-        err = f"未通过每日小知识质量门禁 ({review_res['score']}分): {'; '.join(review_res['critic_issues'])}"
-        print(f"❌ 门禁拦截发布：「{clean_title}」— {err}")
+    _, pre_hit_words = filter_sensitive(article_text)
+    if not review_res["passed"] or pre_hit_words:
+        reasons = list(review_res["critic_issues"])
+        if pre_hit_words:
+            reasons.append(f"命中敏感词: {pre_hit_words}")
+        err = f"未通过每日小知识质量门禁 ({review_res['score']}分): {'; '.join(reasons)}"
+        print(f"❌ 门禁前置拦截（已跳过付费生图）：「{clean_title}」— {err}")
         try:
+            preview_html, _ = process_article_content(article_text, publisher, skip_photo_images=True)
             os.makedirs(os.path.join("data", "previews"), exist_ok=True)
             with open(os.path.join("data", "previews", f"fail_{title_hash}.html"), "w", encoding="utf-8") as f:
-                f.write(final_html)
+                f.write(preview_html)
             from core.db.manager import db_manager
             from core.db.models import ArticleHistory
             session = db_manager.get_session()
@@ -117,7 +103,7 @@ def _run(publisher, counts):
                     media_id=None,
                     error_log=err,
                     quality_score=review_res["score"],
-                    thumb_media_id=thumb_id,
+                    thumb_media_id=None,
                     status="REJECTED"
                 )
                 session.add(ah)
@@ -128,6 +114,35 @@ def _run(publisher, counts):
             raise
         except Exception as e:
             logger.warning("保存每日小知识门禁拦截记录异常: {}", e)
+        counts.record(False, "Daily knowledge generation or review failed")
+        return
+
+    # 3. 门禁通过后再执行配图与排版
+    max_ai = max(1, int(getattr(config, "MAX_AI_IMAGES_PER_ARTICLE", 1)))
+    article_text = _normalize_and_cap_placeholders(article_text, max_images=max_ai)
+    final_html, review_data = process_article_content(article_text, publisher, cover_title=topic_title)
+    check_cancelled()
+    thumb_id = review_data.get("thumb_id")
+    if not final_html or not thumb_id:
+        logger.warning("每日小知识缺少正文或封面，跳过草稿上传")
+        counts.record(False, "Daily knowledge generation or review failed")
+        return
+
+    # 打印排版与安全审查报告
+    all_ok = _print_review_report(
+        title=topic_title,
+        word_count=review_data["word_count"],
+        image_count=review_data["image_count"],
+        sensitive_words=review_data["sensitive_words"],
+        cover_ok=thumb_id is not None,
+        digest=digest_text,
+        ignore_word_count=True,
+        html_bytes=review_data.get("html_bytes", 0),
+    )
+
+    if not all_ok:
+        err = f"未通过每日小知识格式核验 ({review_res['score']}分)"
+        print(f"❌ 格式核验拦截：「{clean_title}」— {err}")
         counts.record(False, "Daily knowledge generation or review failed")
         return
 
