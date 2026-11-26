@@ -286,7 +286,7 @@ async function loadSystemSettings() {
       setSelect('llm-model', cfg.LLM_MODEL);
       setSelect('qwen-image-model', cfg.QWEN_IMAGE_MODEL);
       setSelect('qwen-vl-model', cfg.QWEN_VL_MODEL);
-      setSelect('image-gen-model', cfg.IMAGE_GEN_MODEL || 'qwen-image-3.0');
+      setSelect('image-gen-model', cfg.IMAGE_GEN_MODEL || 'gemini-nano-banana-2.1');
     }
 
     const sdEl = document.getElementById('sd-status-indicator');

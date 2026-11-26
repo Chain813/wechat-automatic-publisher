@@ -1,9 +1,11 @@
 """
 ============================================================
   AI 配图与封面生成引擎 (微信适配版)
-  策略：通义万相 Qwen-Image-3.0 -> 本地 Stable Diffusion -> Pillow 矢量卡片兜底
+  策略：Google Gemini Nano Banana 2.1 -> Qwen-Image-3.0 -> 本地 Stable Diffusion -> Pillow 矢量卡片兜底
 ============================================================
 """
+import base64
+import io
 import os
 import re
 import json
@@ -668,6 +670,50 @@ def reset_qwen_key_pool():
         _qwen_key_pool = None
 
 
+_gemini_pool_lock = threading.Lock()
+_gemini_key_pool = None
+
+
+def _get_gemini_key_pool():
+    """懒加载 Gemini Key 轮询池（GEMINI_API_KEYS 逗号分隔 > 单 GEMINI_API_KEY）"""
+    global _gemini_key_pool
+    with _gemini_pool_lock:
+        if _gemini_key_pool is None:
+            keys = list(getattr(config, "GEMINI_API_KEYS", []) or [])
+            single = (getattr(config, "GEMINI_API_KEY", "") or "").strip()
+            _gemini_key_pool = ApiKeyPool(keys or ([single] if single else []))
+        return _gemini_key_pool
+
+
+def reset_gemini_key_pool():
+    global _gemini_key_pool
+    with _gemini_pool_lock:
+        _gemini_key_pool = None
+
+
+def _is_gemini_image_preferred() -> bool:
+    provider = (getattr(config, "IMAGE_PROVIDER", "auto") or "auto").strip().lower()
+    if provider == "qwen":
+        return False
+    if provider == "gemini":
+        return True
+    active_model = (getattr(config, "IMAGE_GEN_MODEL", "") or "").strip().lower()
+    return active_model.startswith("gemini")
+
+
+def _get_active_gemini_model() -> str:
+    active_model = (getattr(config, "IMAGE_GEN_MODEL", "") or "").strip()
+    if active_model.lower().startswith("gemini"):
+        return active_model
+    return (getattr(config, "GEMINI_IMAGE_MODEL", "gemini-nano-banana-2.1") or "gemini-nano-banana-2.1").strip()
+
+
+def _resolve_gemini_aspect_ratio(purpose: str) -> str:
+    if purpose == "cover":
+        return (getattr(config, "GEMINI_IMAGE_COVER_ASPECT_RATIO", "21:9") or "21:9").strip()
+    return (getattr(config, "GEMINI_IMAGE_BODY_ASPECT_RATIO", "16:9") or "16:9").strip()
+
+
 def _qwen_post_with_rotation(base_url, body, timeout):
     """千问接口带 Key 轮询的 POST：限流/欠费/被禁自动切 Key 重试。
     返回 (status_code, json_data)，全失败返回 (None, None)。"""
@@ -935,7 +981,7 @@ def _build_qwen_image_prompt(keyword, context=None, article_title=None, slot_ind
 
             system_prompt = (
                 "你是顶级商业与科技媒体（对标《经济学人》、Stripe Press、Linear）的首席插画艺术总监，"
-                "专门为通义万相 Qwen-Image-3.0 编写 16:9 宽屏横版【纯视觉无字】概念插画提示词。\n"
+                "专门为高端 AI 图像生成模型编写 16:9 宽屏横版【纯视觉无字】概念插画提示词。\n"
                 "必须严格遵守以下视觉可读性与零文字铁律：\n"
                 "1. **100% 纯视觉无字画面（最高铁律）**：\n"
                 "   - 画面中**严禁出现任何汉字、英文字母、数字、标点、引号、标签胶囊、标题栏、图表刻度或水印**。\n"
@@ -1002,6 +1048,351 @@ def _parse_qwen_image_response(data, target_dir, prefix):
                 return path
         except Exception as e:
             logger.debug("  Qwen-Image 结果解析失败: {}", e)
+    return None
+
+
+def _build_editorial_prompt_for_purpose(keyword, purpose="body"):
+    """按用途（正文 16:9 / 封面 21:9）微调杂志级纯视觉无字提示词。"""
+    prompt = _build_qwen_image_prompt(keyword)
+    if purpose == "cover":
+        aspect = _resolve_gemini_aspect_ratio("cover")
+        if aspect == "21:9":
+            prompt = prompt.replace("16:9宽屏横版", "21:9宽银幕横版", 1)
+    return prompt
+
+
+def _has_gemini_backend() -> bool:
+    service_url = (getattr(config, "GEMINI_IMAGE_SERVICE_URL", "") or "").strip()
+    return bool(service_url) or _get_gemini_key_pool().size > 0
+
+
+def _gemini_service_post(payload: dict, timeout: int):
+    """向私有 239020 生图微服务发起请求（仅传 X-Proxy-Token，不携带 GEMINI_API_KEY），返回 (status_code, content_type, raw_bytes)。"""
+    import requests
+
+    service_url = (getattr(config, "GEMINI_IMAGE_SERVICE_URL", "") or "").strip()
+    if not service_url:
+        return None, "", b""
+    proxy_token = (getattr(config, "GEMINI_PROXY_TOKEN", "") or "").strip()
+    headers = {"Content-Type": "application/json", "User-Agent": "AutoWeChat/2.0"}
+    if proxy_token:
+        headers["X-Proxy-Token"] = proxy_token
+
+    try:
+        limiter, sem = _qwen_image_throttle()
+        while not sem.acquire(timeout=0.1):
+            check_cancelled()
+        try:
+            limiter.wait()
+            check_cancelled()
+            resp = requests.post(service_url, headers=headers, json=payload, timeout=timeout)
+        finally:
+            sem.release()
+        ctype = (resp.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+        return resp.status_code, ctype, (resp.content or b"")
+    except requests.RequestException as e:
+        logger.warning("  Gemini 私有生图服务请求异常: {}", e)
+        return None, "", b""
+
+
+def _gemini_post_with_rotation(path, body, timeout):
+    """Gemini Interactions REST POST（支持多 Key 轮询与反代 X-Proxy-Token 鉴权）。"""
+    import requests
+
+    pool = _get_gemini_key_pool()
+    if pool.size == 0:
+        return None, None
+    api_base = (getattr(config, "GEMINI_API_BASE", "https://generativelanguage.googleapis.com") or "https://generativelanguage.googleapis.com").strip().rstrip("/")
+    url = f"{api_base}{path}"
+    proxy_token = (getattr(config, "GEMINI_PROXY_TOKEN", "") or "").strip()
+
+    max_attempts = min(max(2, pool.size), 5)
+    for _ in range(max_attempts):
+        check_cancelled()
+        key = ""
+        try:
+            limiter, sem = _qwen_image_throttle()
+            while not sem.acquire(timeout=0.1):
+                check_cancelled()
+            try:
+                limiter.wait()
+                check_cancelled()
+                key = pool.get_key()
+                if not key:
+                    break
+                headers = {
+                    "Content-Type": "application/json",
+                    "Api-Revision": "2026-05-20",
+                    "x-goog-api-key": key,
+                }
+                if proxy_token:
+                    headers["X-Proxy-Token"] = proxy_token
+                resp = requests.post(url, headers=headers, json=body, timeout=timeout)
+            finally:
+                sem.release()
+
+            if resp.status_code == 200:
+                pool.report_success(key)
+                try:
+                    return resp.status_code, resp.json()
+                except Exception:
+                    return resp.status_code, None
+
+            if resp.status_code in (401, 403, 429, 500, 502, 503):
+                logger.warning("  Gemini 生图接口 HTTP {}: {}", resp.status_code, (resp.text or "")[:200])
+                pool.report_failure(key, cooldown_seconds=120 if resp.status_code == 429 else 300)
+                continue
+
+            logger.warning("  Gemini 生图请求失败 HTTP {}: {}", resp.status_code, (resp.text or "")[:240])
+            return resp.status_code, None
+        except requests.RequestException as e:
+            logger.debug("  Gemini 生图请求异常（切换 Key）: {}", e)
+            if key:
+                pool.report_failure(key)
+    return None, None
+
+
+def _save_verified_image_bytes(raw_bytes: bytes, target_dir: str, prefix: str):
+    """校验图片字节流有效性并落地到 target_dir，返回文件路径。"""
+    if not raw_bytes or len(raw_bytes) < 512:
+        return None
+    try:
+        with Image.open(io.BytesIO(raw_bytes)) as test_img:
+            test_img.verify()
+        with Image.open(io.BytesIO(raw_bytes)) as info_img:
+            fmt = (info_img.format or "jpeg").lower()
+    except Exception as exc:
+        logger.warning("  Gemini 返回图片字节校验失败: {}", exc)
+        return None
+
+    ext = ".png" if fmt == "png" else (".webp" if fmt == "webp" else ".jpg")
+    os.makedirs(target_dir, exist_ok=True)
+    path = os.path.join(target_dir, f"{prefix}_{int(time.time() * 1000)}{ext}")
+    with open(path, "wb") as f:
+        f.write(raw_bytes)
+    return path
+
+
+def _parse_gemini_image_response(data, target_dir, prefix="gemini"):
+    """解析 Gemini Interactions REST 响应中的最后一张图片（兼容 steps / outputs / output_image）。"""
+    if not isinstance(data, dict):
+        return None
+
+    candidates = []
+    steps = data.get("steps")
+    if isinstance(steps, list):
+        for step in reversed(steps):
+            if not isinstance(step, dict):
+                continue
+            content = step.get("content")
+            if not isinstance(content, list):
+                continue
+            for block in reversed(content):
+                if isinstance(block, dict) and block.get("type") == "image" and block.get("data"):
+                    candidates.append(block.get("data"))
+
+    outputs = data.get("outputs")
+    if not candidates and isinstance(outputs, list):
+        for item in reversed(outputs):
+            if isinstance(item, dict) and item.get("type") == "image" and item.get("data"):
+                candidates.append(item.get("data"))
+
+    output_image = data.get("output_image")
+    if not candidates and isinstance(output_image, dict) and output_image.get("data"):
+        candidates.append(output_image.get("data"))
+
+    for b64_payload in candidates:
+        if not isinstance(b64_payload, str):
+            continue
+        raw_b64 = b64_payload.split(",", 1)[1] if b64_payload.startswith("data:") and "," in b64_payload else b64_payload
+        try:
+            raw_bytes = base64.b64decode(raw_b64)
+        except Exception as exc:
+            logger.debug("  Gemini base64 解码失败: {}", exc)
+            continue
+        saved = _save_verified_image_bytes(raw_bytes, target_dir, prefix)
+        if saved:
+            return saved
+    return None
+
+
+def _try_gemini_image_gen(keyword, target_dir, purpose="body", width=900, height=500):
+    """Google Gemini Nano Banana 2.1 文本生图（支持 239020 私有生图微服务或直连 Interactions REST，共享每日配额熔断器）。"""
+    if not _has_gemini_backend():
+        return None
+    if not _reserve_qwen_daily_quota(1):
+        return None
+
+    model = _get_active_gemini_model()
+    aspect_ratio = _resolve_gemini_aspect_ratio(purpose)
+    image_size = (getattr(config, "GEMINI_IMAGE_SIZE", "1K") or "1K").strip().upper()
+    if image_size not in ("1K", "2K", "4K"):
+        image_size = "1K"
+    timeout = int(getattr(config, "GEMINI_IMAGE_TIMEOUT", 120) or 120)
+    thinking_level = (getattr(config, "GEMINI_IMAGE_THINKING_LEVEL", "minimal") or "").strip().lower()
+
+    prompt = _build_editorial_prompt_for_purpose(keyword, purpose=purpose)
+    logger.info("  [Gemini Prompt] (model={}, ratio={}, size={}) {}", model, aspect_ratio, image_size, prompt[:130])
+
+    service_url = (getattr(config, "GEMINI_IMAGE_SERVICE_URL", "") or "").strip()
+    if service_url:
+        svc_payload = {
+            "model": model,
+            "prompt": prompt,
+            "aspect_ratio": aspect_ratio,
+            "image_size": image_size,
+            "mime_type": "image/jpeg",
+        }
+        if thinking_level in ("minimal", "medium", "high") and any(
+            tag in model.lower() for tag in ("nano-banana", "3-pro", "3.1-flash")
+        ):
+            svc_payload["thinking_level"] = thinking_level
+
+        try:
+            status, ctype, raw_bytes = _gemini_service_post(svc_payload, timeout)
+        except BaseException:
+            _release_qwen_daily_quota(1)
+            raise
+
+        if status != 200 or not raw_bytes:
+            _release_qwen_daily_quota(1)
+            err_preview = raw_bytes.decode("utf-8", errors="ignore")[:200] if raw_bytes else ""
+            logger.warning("  Gemini 私有生图服务失败 HTTP {} {}", status, err_preview)
+            return None
+
+        if ctype.startswith("image/"):
+            path = _save_verified_image_bytes(raw_bytes, target_dir, "gemini")
+        else:
+            try:
+                path = _parse_gemini_image_response(json.loads(raw_bytes.decode("utf-8")), target_dir, "gemini")
+            except Exception:
+                path = None
+        if not path:
+            logger.warning("  Gemini 私有生图服务返回 HTTP 200 但未解析到有效图片")
+        return path
+
+    body = {
+        "model": model,
+        "input": prompt,
+        "response_format": {
+            "type": "image",
+            "mime_type": "image/jpeg",
+            "aspect_ratio": aspect_ratio,
+            "image_size": image_size,
+        },
+    }
+    if thinking_level in ("minimal", "medium", "high") and any(
+        tag in model.lower() for tag in ("nano-banana", "3-pro", "3.1-flash")
+    ):
+        body["generation_config"] = {"thinking_level": thinking_level}
+
+    try:
+        status, data = _gemini_post_with_rotation("/v1beta/interactions", body, timeout)
+    except BaseException:
+        _release_qwen_daily_quota(1)
+        raise
+
+    if status != 200 or not data:
+        _release_qwen_daily_quota(1)
+        logger.warning("  Gemini 生图失败 HTTP {}", status)
+        return None
+
+    path = _parse_gemini_image_response(data, target_dir, "gemini")
+    if not path:
+        logger.warning("  Gemini 返回 HTTP 200 但未提取到有效图片")
+    return path
+
+
+def _try_gemini_image_redraw(image_path, instruction, target_dir, width=900, height=500):
+    """基于参考图使用 Gemini Nano Banana 进行合规二次创作重绘。"""
+    if not image_path or not os.path.exists(image_path) or not _has_gemini_backend():
+        return None
+    if not _reserve_qwen_daily_quota(1):
+        return None
+
+    model = _get_active_gemini_model()
+    image_size = (getattr(config, "GEMINI_IMAGE_SIZE", "1K") or "1K").strip().upper()
+    if image_size not in ("1K", "2K", "4K"):
+        image_size = "1K"
+    timeout = int(getattr(config, "GEMINI_IMAGE_TIMEOUT", 120) or 120)
+
+    mime = "image/png" if image_path.lower().endswith(".png") else "image/jpeg"
+    with open(image_path, "rb") as f:
+        b64_img = base64.b64encode(f.read()).decode("ascii")
+
+    prompt = (
+        f"{instruction}。要求：生成一幅全新原创画面，保持参考图的主题与构图，"
+        "去除图中所有水印、logo、任何汉字英文字母与数字标识（纯视觉无字画面），"
+        "严格16:9宽屏横版构图，四周留白充分，适合微信公众号配图。"
+    )
+    aspect_ratio = _resolve_gemini_aspect_ratio("body")
+    service_url = (getattr(config, "GEMINI_IMAGE_SERVICE_URL", "") or "").strip()
+    if service_url:
+        svc_payload = {
+            "model": model,
+            "prompt": prompt,
+            "aspect_ratio": aspect_ratio,
+            "image_size": image_size,
+            "mime_type": "image/jpeg",
+            "reference_image": {"data": b64_img, "mime_type": mime},
+        }
+        try:
+            status, ctype, raw_bytes = _gemini_service_post(svc_payload, timeout)
+        except BaseException:
+            _release_qwen_daily_quota(1)
+            raise
+        if status != 200 or not raw_bytes:
+            _release_qwen_daily_quota(1)
+            logger.warning("  Gemini 私有服务重绘失败 HTTP {}", status)
+            return None
+        if ctype.startswith("image/"):
+            return _save_verified_image_bytes(raw_bytes, target_dir, "gemini_redraw")
+        try:
+            return _parse_gemini_image_response(json.loads(raw_bytes.decode("utf-8")), target_dir, "gemini_redraw")
+        except Exception:
+            return None
+
+    body = {
+        "model": model,
+        "input": [
+            {"type": "text", "text": prompt},
+            {"type": "image", "data": b64_img, "mime_type": mime},
+        ],
+        "response_format": {
+            "type": "image",
+            "mime_type": "image/jpeg",
+            "aspect_ratio": aspect_ratio,
+            "image_size": image_size,
+        },
+    }
+    try:
+        status, data = _gemini_post_with_rotation("/v1beta/interactions", body, timeout)
+    except BaseException:
+        _release_qwen_daily_quota(1)
+        raise
+
+    if status != 200 or not data:
+        _release_qwen_daily_quota(1)
+        logger.warning("  Gemini 重绘失败 HTTP {}", status)
+        return None
+
+    return _parse_gemini_image_response(data, target_dir, "gemini_redraw")
+
+
+def redraw_reference_image(image_path, instruction, target_dir, width=900, height=500):
+    """参考图合规重绘统一入口：优先 Gemini，失败时按配置自动降级 Qwen-Image Pro。"""
+    if _is_gemini_image_preferred() and _has_gemini_backend():
+        out = _try_gemini_image_redraw(image_path, instruction, target_dir, width=width, height=height)
+        if out:
+            return out
+        if getattr(config, "GEMINI_IMAGE_FALLBACK_TO_QWEN", True) and _get_qwen_key_pool().size > 0:
+            logger.info("  Gemini 重绘未返回结果，自动降级至 Qwen-Image 重绘")
+            return _try_qwen_image_redraw(image_path, instruction, target_dir, width=width, height=height)
+        return None
+    if _get_qwen_key_pool().size > 0:
+        return _try_qwen_image_redraw(image_path, instruction, target_dir, width=width, height=height)
+    if _has_gemini_backend():
+        return _try_gemini_image_redraw(image_path, instruction, target_dir, width=width, height=height)
     return None
 
 
@@ -1099,7 +1490,8 @@ def scrape_article_images(article_url, limit=10):
 
 
 _image_sources_status = {
-    "qwen": {"status": True, "last_check": 0}
+    "gemini": {"status": True, "last_check": 0},
+    "qwen": {"status": True, "last_check": 0},
 }
 
 
@@ -1133,17 +1525,32 @@ def mark_source_success(source_name):
 
 def _download_free_image(keyword, save_dir, purpose="body", max_retries=3):
     """
-    AI 生图引擎调度（全线采用 AI 文本/批量生图，禁用免费搜索网络爬虫）。
-    使用通义万相 qwen-image-3.0 生图 (需 DASHSCOPE_API_KEY, 高质量定制 AI 原创图)
-    内置 3 次重试与指数退避机制。
+    AI 生图引擎调度（全线采用 AI 文本生图，禁用免费搜索网络爬虫）。
+    默认主引擎：Google Gemini Nano Banana 2.1；自动降级：通义万相 Qwen-Image-3.0。
+    内置重试、冷却与每日生图配额硬熔断机制。
     """
     from core.shared.runtime import WorkflowCancelled, cancel_event, check_cancelled
 
-    if not keyword or not keyword.strip() or not _get_qwen_key_pool().size:
+    if not keyword or not keyword.strip():
+        return None
+
+    has_gemini = _has_gemini_backend()
+    has_qwen = _get_qwen_key_pool().size > 0
+    providers = []
+    if _is_gemini_image_preferred() and has_gemini:
+        providers.append("gemini")
+        if getattr(config, "GEMINI_IMAGE_FALLBACK_TO_QWEN", True) and has_qwen:
+            providers.append("qwen")
+    elif has_qwen:
+        providers.append("qwen")
+    elif has_gemini:
+        providers.append("gemini")
+
+    if not providers:
         return None
 
     if is_qwen_quota_exhausted():
-        logger.info("  [成本熔断] 当日 Qwen-Image 额度已满或已禁用，跳过生图: '{}'", keyword)
+        logger.info("  [成本熔断] 当日云端 AI 生图额度已满或已禁用，跳过生图: '{}'", keyword)
         return None
 
     width, height = (900, 383) if purpose == "cover" else (900, 500)
@@ -1152,37 +1559,48 @@ def _download_free_image(keyword, save_dir, purpose="body", max_retries=3):
     target_dir = os.path.join(save_dir, clean_kw)
     os.makedirs(target_dir, exist_ok=True)
 
-    logger.info("🎨 正在使用通义万相 (qwen-image-3.0) AI 生图: '{}'...", keyword)
+    for provider in providers:
+        if not is_source_available(provider):
+            continue
+        attempts = max(1, min(max_retries, 2)) if provider == "gemini" else max(1, max_retries)
+        label = f"Gemini ({_get_active_gemini_model()})" if provider == "gemini" else f"通义万相 ({config.QWEN_IMAGE_MODEL})"
+        logger.info("正在使用 {} AI 生图 [{}]: '{}'...", label, purpose, keyword)
 
-    # 1. 通义万相 qwen-image-3.0 生图 (带 3 次重试与退避机制)
-    if is_source_available("qwen"):
-        for attempt in range(1, max_retries + 1):
+        for attempt in range(1, attempts + 1):
             check_cancelled()
             if is_qwen_quota_exhausted():
                 return None
             try:
-                # 保持原始关键词纯净，避免把“画面视角2”等技术字样污染进画面
-                path = _try_qwen_image_gen(keyword, target_dir, width, height)
+                if provider == "gemini":
+                    path = _try_gemini_image_gen(keyword, target_dir, purpose=purpose, width=width, height=height)
+                else:
+                    path = _try_qwen_image_gen(keyword, target_dir, width, height)
                 if path:
-                    mark_source_success("qwen")
+                    mark_source_success(provider)
                     return path
-                
-                logger.warning("  ⚠️ 通义万相 AI 生图第 {}/{} 次未返回图片: '{}'{}", 
-                               attempt, max_retries, keyword,
-                               f"（将在 {attempt * 2}s 后发起重试）" if attempt < max_retries else "（已耗尽最大重试次数）")
-                if attempt < max_retries:
+
+                logger.warning(
+                    "  {} AI 生图第 {}/{} 次未返回图片: '{}'{}",
+                    label,
+                    attempt,
+                    attempts,
+                    keyword,
+                    f"（将在 {attempt * 2}s 后发起重试）" if attempt < attempts else "（已耗尽当前引擎重试次数）",
+                )
+                if attempt < attempts:
                     cancel_event.wait(attempt * 2)
             except WorkflowCancelled:
                 raise
             except Exception as e:
-                logger.warning("  Qwen-Image AI 生图第 {}/{} 次尝试异常: {}", attempt, max_retries, e)
-                if attempt < max_retries:
+                logger.warning("  {} AI 生图第 {}/{} 次尝试异常: {}", label, attempt, attempts, e)
+                if attempt < attempts:
                     cancel_event.wait(attempt * 2)
 
-        # 只有在 3 次重试全部失败后才标记图源暂时冷却
-        mark_source_failed("qwen")
+        mark_source_failed(provider)
+        if provider == "gemini" and "qwen" in providers:
+            logger.warning("  Gemini 生图暂不可用，自动降级至通义万相 Qwen-Image 兜底: '{}'", keyword)
 
-    logger.warning("  ⚠️ 通义万相 AI 生图在 {} 次重试后仍未成功: '{}'", max_retries, keyword)
+    logger.warning("  所有已配置的云端 AI 生图引擎均未成功: '{}'", keyword)
     return None
 
 
@@ -1298,7 +1716,7 @@ def generate_default_cover(title, save_path, purpose="cover"):
 def download_image(keyword, save_dir="assets", *, allow_title_card=True):
     """
     下载正文配图：100% AI 生图架构。
-    1. 优先通义万相 Qwen-Image-3.0 AI 生图；
+    1. 优先 Google Gemini Nano Banana 2.1 AI 生图（失败自动降级通义万相 Qwen-Image-3.0）；
     2. 备选本地 Stable Diffusion AI 生图；
     3. 兜底本地高颜值卡片。
     已彻底禁用 Bing 搜索引擎网络爬虫。
@@ -1313,8 +1731,9 @@ def download_image(keyword, save_dir="assets", *, allow_title_card=True):
     specific_dir = os.path.join(save_dir, clean_keyword)
     os.makedirs(specific_dir, exist_ok=True)
 
-    # 1. 优先通义万相 Qwen-Image-3.0 AI 生图
-    logger.info("🎨 正在发起通义万相 (Qwen-Image) AI 配图生成: '{}'...", keyword)
+    # 1. 优先云端 AI 生图（Gemini -> Qwen 自动降级）
+    active_name = _get_active_gemini_model() if _is_gemini_image_preferred() else config.QWEN_IMAGE_MODEL
+    logger.info("正在发起 AI 配图生成 ({}): '{}'...", active_name, keyword)
     best = _download_free_image(keyword, save_dir, purpose="body")
     if best:
         best = _finalize_image(best, "body")
@@ -1349,7 +1768,7 @@ def download_image(keyword, save_dir="assets", *, allow_title_card=True):
 def download_cover_image(keyword, save_dir="assets"):
     """
     下载封面图：100% AI 生图架构。
-    1. 优先通义万相 Qwen-Image-3.0 AI 封面生图；
+    1. 优先 Google Gemini Nano Banana 2.1（21:9 宽银幕）AI 封面生图（失败自动降级通义万相 Qwen-Image-3.0）；
     2. 备选本地 Stable Diffusion AI 封面生图；
     3. 兜底本地高颜值卡片。
     已彻底禁用 Bing 搜索引擎网络爬虫。
@@ -1362,8 +1781,9 @@ def download_cover_image(keyword, save_dir="assets"):
     if not os.path.exists(specific_dir):
         os.makedirs(specific_dir)
 
-    # 1. 优先通义万相 Qwen-Image-3.0 AI 封面生图
-    logger.info("🎨 正在发起通义万相 (Qwen-Image) AI 封面图生成: '{}'...", keyword)
+    # 1. 优先云端 AI 封面生图（Gemini -> Qwen 自动降级）
+    active_name = _get_active_gemini_model() if _is_gemini_image_preferred() else config.QWEN_IMAGE_MODEL
+    logger.info("正在发起 AI 封面图生成 ({}): '{}'...", active_name, keyword)
     best = _download_free_image(keyword, save_dir, purpose="cover")
     if best:
         best = _finalize_image(best, "cover")

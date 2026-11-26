@@ -107,7 +107,9 @@ def test_later_real_photo_gets_cover_and_only_missing_slot_gets_ai_caption(tmp_p
 def test_model_only_download_never_returns_local_title_card(tmp_path):
     from utils import image_handler
 
-    with patch.object(image_handler, "_get_qwen_key_pool", return_value=SimpleNamespace(size=0)), \
+    with patch("config.GEMINI_IMAGE_SERVICE_URL", ""), \
+         patch.object(image_handler, "_get_gemini_key_pool", return_value=SimpleNamespace(size=0)), \
+         patch.object(image_handler, "_get_qwen_key_pool", return_value=SimpleNamespace(size=0)), \
          patch("config.SD_ENABLED", False), \
          patch.object(image_handler, "generate_default_cover") as card:
         assert image_handler.download_image("storage", tmp_path, allow_title_card=False) is None
@@ -133,6 +135,8 @@ def test_cover_only_decodes_qwen_result_and_adds_disclosure():
     image_handler.reset_image_cache()
     try:
         with patch.object(article_photos, "find_source_photo", return_value=None), \
+             patch("config.GEMINI_IMAGE_SERVICE_URL", ""), \
+             patch.object(image_handler, "_get_gemini_key_pool", return_value=SimpleNamespace(size=0)), \
              patch.object(image_handler, "_get_qwen_key_pool", return_value=SimpleNamespace(size=1)), \
              patch.object(image_handler, "_qwen_post_with_rotation", return_value=(200, response)) as post:
             body, stats = process_article_content("本文无正文插图。", publisher, cover_title="只配封面的文章")

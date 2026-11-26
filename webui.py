@@ -124,6 +124,9 @@ _SECRET_CONFIG_KEYS = frozenset({
     "WECHAT_APP_SECRET",
     "LLM_API_KEY",
     "DASHSCOPE_API_KEY",
+    "GEMINI_API_KEY",
+    "GEMINI_API_KEYS",
+    "GEMINI_PROXY_TOKEN",
     "GITHUB_TOKEN",
     "LLM_API_KEYS",
     "DASHSCOPE_API_KEYS",
@@ -693,7 +696,14 @@ def handle_config():
             "DASHSCOPE_API_KEY": _mask_secret(os.getenv("DASHSCOPE_API_KEY", "")),
             "QWEN_IMAGE_MODEL": os.getenv("QWEN_IMAGE_MODEL", "qwen-image-3.0"),
             "QWEN_VL_MODEL": os.getenv("QWEN_VL_MODEL", "qwen-vl-max"),
-            "IMAGE_GEN_MODEL": os.getenv("IMAGE_GEN_MODEL", "qwen-image-3.0"),
+            "IMAGE_PROVIDER": os.getenv("IMAGE_PROVIDER", "auto"),
+            "IMAGE_GEN_MODEL": os.getenv("IMAGE_GEN_MODEL", "gemini-nano-banana-2.1"),
+            "GEMINI_API_KEY": _mask_secret(os.getenv("GEMINI_API_KEY", "")),
+            "GEMINI_API_BASE": os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com"),
+            "GEMINI_IMAGE_SERVICE_URL": os.getenv("GEMINI_IMAGE_SERVICE_URL", ""),
+            "GEMINI_PROXY_TOKEN": _mask_secret(os.getenv("GEMINI_PROXY_TOKEN", "")),
+            "GEMINI_IMAGE_MODEL": os.getenv("GEMINI_IMAGE_MODEL", "gemini-nano-banana-2.1"),
+            "GEMINI_IMAGE_SIZE": os.getenv("GEMINI_IMAGE_SIZE", "1K"),
             "DIAGRAM_PARALLEL_WORKERS": os.getenv("DIAGRAM_PARALLEL_WORKERS", "5"),
             "MAX_TOPICS_PER_RUN": os.getenv("MAX_TOPICS_PER_RUN", "1"),
             "MAX_AI_IMAGES_PER_ARTICLE": os.getenv("MAX_AI_IMAGES_PER_ARTICLE", "1"),
@@ -709,7 +719,9 @@ def handle_config():
         for key in ["WECHAT_APP_ID", "WECHAT_APP_SECRET", "LLM_API_KEY",
                      "QYWECHAT_WEBHOOK", "LLM_MODEL", "DASHSCOPE_API_KEY",
                      "QWEN_IMAGE_MODEL", "QWEN_IMAGE_REDRAW_MODEL", "QWEN_VL_MODEL",
-                     "IMAGE_GEN_MODEL", "DIAGRAM_PARALLEL_WORKERS",
+                     "IMAGE_PROVIDER", "IMAGE_GEN_MODEL", "GEMINI_API_KEY",
+                     "GEMINI_API_BASE", "GEMINI_IMAGE_SERVICE_URL", "GEMINI_PROXY_TOKEN", "GEMINI_IMAGE_MODEL",
+                     "GEMINI_IMAGE_SIZE", "DIAGRAM_PARALLEL_WORKERS",
                      "MAX_TOPICS_PER_RUN", "MAX_AI_IMAGES_PER_ARTICLE", "QWEN_IMAGE_DAILY_LIMIT",
                      "GITHUB_TOKEN", "LLM_BASE_URL", "ENABLE_FACT_SEARCH",
                      "BRAND_NAME", "ARTICLE_AUTHOR"]:
@@ -721,6 +733,14 @@ def handle_config():
             value = raw_val.strip()
             if len(value) > 500 or '\n' in value or '\r' in value:
                 continue  # 防止 .env 注入与异常大值
+            if key == "IMAGE_PROVIDER":
+                value = value.lower()
+                if value not in ("auto", "gemini", "qwen"):
+                    value = "auto"
+            elif key == "GEMINI_IMAGE_SIZE":
+                value = value.upper()
+                if value not in ("1K", "2K", "4K"):
+                    value = "1K"
             set_key(env_file, key, value)
         load_dotenv(env_file, override=True)
 
@@ -748,12 +768,40 @@ def handle_config():
                 if not parsed_ds_keys and config.DASHSCOPE_API_KEY:
                     parsed_ds_keys = [config.DASHSCOPE_API_KEY]
                 config.DASHSCOPE_API_KEYS = parsed_ds_keys
+            if hasattr(config, "GEMINI_API_KEY"):
+                config.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+            if hasattr(config, "GEMINI_API_KEYS"):
+                gm_keys_raw = os.getenv("GEMINI_API_KEYS", "")
+                parsed_gm_keys = [k.strip() for k in gm_keys_raw.split(",") if k.strip()]
+                if not parsed_gm_keys and getattr(config, "GEMINI_API_KEY", ""):
+                    parsed_gm_keys = [config.GEMINI_API_KEY]
+                config.GEMINI_API_KEYS = parsed_gm_keys
+            if hasattr(config, "GEMINI_API_BASE"):
+                config.GEMINI_API_BASE = os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com").strip().rstrip("/")
+            if hasattr(config, "GEMINI_IMAGE_SERVICE_URL"):
+                config.GEMINI_IMAGE_SERVICE_URL = os.getenv("GEMINI_IMAGE_SERVICE_URL", "").strip()
+            if hasattr(config, "GEMINI_PROXY_TOKEN"):
+                config.GEMINI_PROXY_TOKEN = os.getenv("GEMINI_PROXY_TOKEN", "").strip()
+            if hasattr(config, "GEMINI_IMAGE_MODEL"):
+                config.GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-nano-banana-2.1").strip()
+            if hasattr(config, "GEMINI_IMAGE_SIZE"):
+                g_size = os.getenv("GEMINI_IMAGE_SIZE", "1K").strip().upper()
+                config.GEMINI_IMAGE_SIZE = g_size if g_size in ("1K", "2K", "4K") else "1K"
+            if hasattr(config, "IMAGE_PROVIDER"):
+                img_prov = os.getenv("IMAGE_PROVIDER", "auto").strip().lower()
+                config.IMAGE_PROVIDER = img_prov if img_prov in ("auto", "gemini", "qwen") else "auto"
             config.QWEN_IMAGE_MODEL = os.getenv("QWEN_IMAGE_MODEL", "qwen-image-3.0")
             config.QWEN_VL_MODEL = os.getenv("QWEN_VL_MODEL", "qwen-vl-max")
             config.QWEN_IMAGE_REDRAW_MODEL = os.getenv("QWEN_IMAGE_REDRAW_MODEL", "qwen-image-3.0-pro")
             config.QYWECHAT_WEBHOOK = os.getenv("QYWECHAT_WEBHOOK", "")
             config.LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-v4-flash")
-            config.IMAGE_GEN_MODEL = os.getenv("IMAGE_GEN_MODEL", "qwen-image-3.0")
+            config.IMAGE_GEN_MODEL = os.getenv("IMAGE_GEN_MODEL", "gemini-nano-banana-2.1")
+            try:
+                from utils.image_handler import reset_gemini_key_pool, reset_qwen_key_pool
+                reset_gemini_key_pool()
+                reset_qwen_key_pool()
+            except Exception:
+                pass
             config.LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.deepseek.com")
             config.ENABLE_FACT_SEARCH = os.getenv("ENABLE_FACT_SEARCH", "True").lower() == "true"
             if hasattr(config, "DIAGRAM_PARALLEL_WORKERS"):
@@ -2732,7 +2780,7 @@ def redraw_article_images():
         return jsonify({"status": "error", "message": "请提供合法且可公开访问的文章链接（禁止内网/环回地址）"}), 400
 
     try:
-        from utils.image_handler import scrape_article_images, _save_image_from_url, _try_qwen_image_redraw
+        from utils.image_handler import scrape_article_images, _save_image_from_url, redraw_reference_image
         refs = scrape_article_images(article_url, limit=count)
         if not refs:
             return jsonify({"status": "error", "message": "未能从文章中抓取到图片（文章可能已删除或需登录访问）"}), 404
@@ -2749,14 +2797,14 @@ def redraw_article_images():
             ref_path = _save_image_from_url(ref_url, tmp_dir, prefix=f"ref_{i}", timeout=20)
             if not ref_path:
                 continue
-            out = _try_qwen_image_redraw(ref_path, "重绘为微信公众号配图", out_dir, width=900, height=500)
+            out = redraw_reference_image(ref_path, "重绘为微信公众号配图", out_dir, width=900, height=500)
             if out:
                 results.append({"index": len(results) + 1, "url": f"/static_assets/{os.path.basename(out)}"})
 
         if not results:
             return jsonify({
                 "status": "error",
-                "message": "重绘失败：请检查 DASHSCOPE_API_KEY 与 QWEN_IMAGE_REDRAW_MODEL 配置",
+                "message": "重绘失败：请检查 GEMINI_API_KEY / DASHSCOPE_API_KEY 及生图模型配置",
             }), 500
         return jsonify({"status": "success", "count": len(results), "images": results})
     except Exception as e:

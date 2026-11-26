@@ -159,7 +159,22 @@ WECHAT_BODY_HEIGHT = 500
 WECHAT_BODY_MAX_MB = 2
 
 # 12. 本地 Stable Diffusion & 生图模型配置
-IMAGE_GEN_MODEL = os.getenv("IMAGE_GEN_MODEL", "qwen-image-3.0")
+IMAGE_GEN_MODEL = os.getenv("IMAGE_GEN_MODEL", "gemini-nano-banana-2.1")
+IMAGE_PROVIDER = os.getenv("IMAGE_PROVIDER", "auto").strip().lower()  # auto | gemini | qwen
+
+# Google Gemini Nano Banana 生图配置
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_API_KEYS = [k.strip() for k in os.getenv("GEMINI_API_KEYS", "").split(",") if k.strip()]
+GEMINI_API_BASE = os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com").strip().rstrip("/")
+GEMINI_IMAGE_SERVICE_URL = os.getenv("GEMINI_IMAGE_SERVICE_URL", "").strip()
+GEMINI_PROXY_TOKEN = os.getenv("GEMINI_PROXY_TOKEN", "").strip()
+GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-nano-banana-2.1").strip()
+GEMINI_IMAGE_SIZE = os.getenv("GEMINI_IMAGE_SIZE", "1K").strip().upper()
+GEMINI_IMAGE_BODY_ASPECT_RATIO = os.getenv("GEMINI_IMAGE_BODY_ASPECT_RATIO", "16:9").strip()
+GEMINI_IMAGE_COVER_ASPECT_RATIO = os.getenv("GEMINI_IMAGE_COVER_ASPECT_RATIO", "21:9").strip()
+GEMINI_IMAGE_TIMEOUT = int(os.getenv("GEMINI_IMAGE_TIMEOUT", "120"))
+GEMINI_IMAGE_THINKING_LEVEL = os.getenv("GEMINI_IMAGE_THINKING_LEVEL", "minimal").strip().lower()
+GEMINI_IMAGE_FALLBACK_TO_QWEN = os.getenv("GEMINI_IMAGE_FALLBACK_TO_QWEN", "True").lower() == "true"
 
 # 国内生图模型：通义万相 qwen-image-3.0 (DashScope/百炼, OpenAI 兼容接口)
 QWEN_IMAGE_API_KEY = os.getenv("QWEN_IMAGE_API_KEY", os.getenv("DASHSCOPE_API_KEY", ""))
@@ -187,7 +202,7 @@ SD_TIMEOUT = int(os.getenv("SD_TIMEOUT", "120"))        # 单次生图超时秒�
 SD_STEPS = int(os.getenv("SD_STEPS", "15"))              # 采样步数（15 兼顾速度与质量）
 SD_MAX_RETRIES = int(os.getenv("SD_MAX_RETRIES", "2"))   # 最大重试次数（不含首次）
 
-# 12b. 图源说明：默认链路为 Qwen-Image-3.0 AI 生图 → 本地 Stable Diffusion → Pillow Linear Light 矢量卡片兜底（已禁用 Bing 爬虫抓图）
+# 12b. 图源说明：默认链路为 Gemini Nano Banana 2.1 AI 生图 → Qwen-Image-3.0 自动降级 → 本地 Stable Diffusion → Pillow Linear Light 矢量卡片兜底（已禁用 Bing 爬虫抓图）
 
 # 13. 微信敏感词列表 (部分示例，根据实际情况补充)
 SENSITIVE_WORDS = []  # 留空则跳过敏感词过滤

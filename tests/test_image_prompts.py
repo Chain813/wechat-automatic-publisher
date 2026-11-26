@@ -274,5 +274,291 @@ class TestPureVisualAndCostControl(unittest.TestCase):
         self.assertTrue(ok, missing)
 
 
+class TestGeminiImageProvider(unittest.TestCase):
+    def _make_jpeg_b64(self, size=(64, 36), color="indigo"):
+        import base64
+        from io import BytesIO
+
+        buf = BytesIO()
+        Image.new("RGB", size, color).save(buf, format="JPEG")
+        return base64.b64encode(buf.getvalue()).decode("ascii")
+
+    def test_gemini_payload_headers_and_aspect_ratios(self):
+        import requests
+        import config
+        from utils import image_handler
+        from utils.key_pool import ApiKeyPool, RateLimiter
+        from threading import Semaphore
+
+        b64_img = self._make_jpeg_b64()
+        captured_calls = []
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            captured_calls.append({"url": url, "headers": dict(headers or {}), "json": dict(json or {}), "timeout": timeout})
+            resp = Mock()
+            resp.status_code = 200
+            resp.json.return_value = {
+                "steps": [
+                    {
+                        "type": "model_output",
+                        "content": [{"type": "image", "data": b64_img, "mime_type": "image/jpeg"}],
+                    }
+                ]
+            }
+            return resp
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            quota_file = Path(tmpdir) / "quota.json"
+            with (
+                patch.object(config, "IMAGE_PROVIDER", "auto"),
+                patch.object(config, "IMAGE_GEN_MODEL", "gemini-nano-banana-2.1"),
+                patch.object(config, "GEMINI_IMAGE_SERVICE_URL", ""),
+                patch.object(config, "GEMINI_API_BASE", "https://gemini.239020.xyz/"),
+                patch.object(config, "GEMINI_PROXY_TOKEN", "proxy-secret-token"),
+                patch.object(config, "GEMINI_IMAGE_SIZE", "1K"),
+                patch.object(config, "GEMINI_IMAGE_BODY_ASPECT_RATIO", "16:9"),
+                patch.object(config, "GEMINI_IMAGE_COVER_ASPECT_RATIO", "21:9"),
+                patch.object(config, "GEMINI_IMAGE_THINKING_LEVEL", "minimal"),
+                patch.object(config, "QWEN_IMAGE_DAILY_LIMIT", 6),
+                patch.object(image_handler, "_QWEN_QUOTA_FILE", quota_file),
+                patch.object(image_handler, "_get_gemini_key_pool", return_value=ApiKeyPool(["gem-key-1234"])),
+                patch.object(image_handler, "_qwen_image_limiter", RateLimiter(0)),
+                patch.object(image_handler, "_qwen_image_sem", Semaphore(1)),
+                patch.object(requests, "post", side_effect=fake_post),
+            ):
+                image_handler.reset_qwen_daily_quota()
+                body_path = image_handler._try_gemini_image_gen("玻璃天平隐喻", tmpdir, purpose="body")
+                cover_path = image_handler._try_gemini_image_gen("玻璃天平隐喻", tmpdir, purpose="cover")
+
+            self.assertIsNotNone(body_path)
+            self.assertTrue(Path(body_path).exists())
+            self.assertIsNotNone(cover_path)
+            self.assertTrue(Path(cover_path).exists())
+
+        self.assertEqual(len(captured_calls), 2)
+        body_req, cover_req = captured_calls
+        self.assertEqual(body_req["url"], "https://gemini.239020.xyz/v1beta/interactions")
+        self.assertEqual(body_req["headers"]["Api-Revision"], "2026-05-20")
+        self.assertEqual(body_req["headers"]["x-goog-api-key"], "gem-key-1234")
+        self.assertEqual(body_req["headers"]["X-Proxy-Token"], "proxy-secret-token")
+        self.assertEqual(body_req["json"]["model"], "gemini-nano-banana-2.1")
+        self.assertEqual(
+            body_req["json"]["response_format"],
+            {"type": "image", "mime_type": "image/jpeg", "aspect_ratio": "16:9", "image_size": "1K"},
+        )
+        self.assertEqual(body_req["json"]["generation_config"], {"thinking_level": "minimal"})
+        self.assertEqual(
+            cover_req["json"]["response_format"],
+            {"type": "image", "mime_type": "image/jpeg", "aspect_ratio": "21:9", "image_size": "1K"},
+        )
+
+    def test_gemini_response_parser_supports_all_schemas_and_rejects_corrupt_bytes(self):
+        import base64
+        from utils import image_handler
+
+        b64_img = self._make_jpeg_b64()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            p1 = image_handler._parse_gemini_image_response(
+                {"steps": [{"content": [{"type": "text", "text": "ok"}, {"type": "image", "data": b64_img}]}]},
+                tmpdir,
+                "steps",
+            )
+            p2 = image_handler._parse_gemini_image_response(
+                {"outputs": [{"type": "image", "data": b64_img}]},
+                tmpdir,
+                "outputs",
+            )
+            p3 = image_handler._parse_gemini_image_response(
+                {"output_image": {"data": f"data:image/jpeg;base64,{b64_img}"}},
+                tmpdir,
+                "direct",
+            )
+            bad_b64 = base64.b64encode(b"not-an-image-at-all" * 40).decode("ascii")
+            p_bad = image_handler._parse_gemini_image_response(
+                {"output_image": {"data": bad_b64}},
+                tmpdir,
+                "bad",
+            )
+            self.assertIsNotNone(p1)
+            self.assertIsNotNone(p2)
+            self.assertIsNotNone(p3)
+            self.assertIsNone(p_bad)
+
+    def test_gemini_failure_refunds_quota_and_falls_back_to_qwen(self):
+        import requests
+        import config
+        from utils import image_handler
+        from utils.key_pool import ApiKeyPool, RateLimiter
+        from threading import Semaphore
+
+        b64_img = self._make_jpeg_b64()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            quota_file = Path(tmpdir) / "quota.json"
+            qwen_out = Path(tmpdir) / "qwen_fallback.jpg"
+            Image.new("RGB", (64, 36), "teal").save(qwen_out)
+            qwen_resp = {"output": {"choices": [{"message": {"content": [{"image": f"data:image/jpeg;base64,{b64_img}"}]}}]}}
+
+            with (
+                patch.object(config, "IMAGE_PROVIDER", "auto"),
+                patch.object(config, "IMAGE_GEN_MODEL", "gemini-nano-banana-2.1"),
+                patch.object(config, "GEMINI_IMAGE_SERVICE_URL", ""),
+                patch.object(config, "GEMINI_IMAGE_FALLBACK_TO_QWEN", True),
+                patch.object(config, "QWEN_IMAGE_DAILY_LIMIT", 6),
+                patch.object(image_handler, "_QWEN_QUOTA_FILE", quota_file),
+                patch.object(image_handler, "_get_gemini_key_pool", return_value=ApiKeyPool(["gem-1"])),
+                patch.object(image_handler, "_get_qwen_key_pool", return_value=ApiKeyPool(["qwen-1"])),
+                patch.object(image_handler, "_qwen_image_limiter", RateLimiter(0)),
+                patch.object(image_handler, "_qwen_image_sem", Semaphore(1)),
+                patch.object(image_handler, "_image_sources_status", {
+                    "gemini": {"status": True, "last_check": 0},
+                    "qwen": {"status": True, "last_check": 0},
+                }),
+                patch.object(requests, "post", return_value=Mock(status_code=503, text="upstream down")),
+                patch.object(image_handler, "_qwen_post_with_rotation", return_value=(200, qwen_resp)) as mock_qwen_post,
+                patch("core.shared.runtime.cancel_event.wait", return_value=False),
+            ):
+                image_handler.reset_qwen_daily_quota()
+                result = image_handler._download_free_image("算力边界", tmpdir, purpose="body", max_retries=2)
+                usage = image_handler.get_qwen_daily_usage()
+
+            self.assertIsNotNone(result)
+            self.assertTrue(Path(result).exists())
+            mock_qwen_post.assert_called_once()
+            # 2 次 Gemini 503 失败均全额退还配额，最终仅 Qwen 成功消耗 1 次
+            self.assertEqual(usage["used"], 1)
+
+    def test_redraw_reference_image_falls_back_to_qwen(self):
+        import config
+        from utils import image_handler
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ref = Path(tmpdir) / "ref.jpg"
+            Image.new("RGB", (64, 36), "gray").save(ref)
+            with (
+                patch.object(config, "IMAGE_PROVIDER", "auto"),
+                patch.object(config, "IMAGE_GEN_MODEL", "gemini-nano-banana-2.1"),
+                patch.object(config, "GEMINI_IMAGE_SERVICE_URL", ""),
+                patch.object(config, "GEMINI_IMAGE_FALLBACK_TO_QWEN", True),
+                patch.object(image_handler, "_get_gemini_key_pool", return_value=SimpleNamespace(size=1)),
+                patch.object(image_handler, "_get_qwen_key_pool", return_value=SimpleNamespace(size=1)),
+                patch.object(image_handler, "_try_gemini_image_redraw", return_value=None) as mock_gem_redraw,
+                patch.object(image_handler, "_try_qwen_image_redraw", return_value=str(ref)) as mock_qwen_redraw,
+            ):
+                out = image_handler.redraw_reference_image(str(ref), "重绘", tmpdir)
+
+            self.assertEqual(out, str(ref))
+            mock_gem_redraw.assert_called_once()
+            mock_qwen_redraw.assert_called_once()
+
+    def test_api_config_masks_gemini_secrets_and_hot_reloads_model(self):
+        import os
+        import config
+        import webui
+        from utils import image_handler
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            orig_cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                Path(".env").write_text(
+                    "GEMINI_API_KEY=AIzaSySecretKey9999\n"
+                    "GEMINI_PROXY_TOKEN=superproxysecret7777\n"
+                    "IMAGE_GEN_MODEL=gemini-nano-banana-2.1\n",
+                    encoding="utf-8",
+                )
+                with (
+                    patch.object(webui, "CLOUD_MODE", False),
+                    patch.object(config, "IMAGE_GEN_MODEL", config.IMAGE_GEN_MODEL),
+                    patch.object(config, "GEMINI_API_KEY", config.GEMINI_API_KEY),
+                    patch.object(config, "GEMINI_PROXY_TOKEN", config.GEMINI_PROXY_TOKEN),
+                    patch.object(config, "GEMINI_IMAGE_MODEL", config.GEMINI_IMAGE_MODEL),
+                    patch.object(config, "GEMINI_IMAGE_SIZE", config.GEMINI_IMAGE_SIZE),
+                    patch.object(config, "IMAGE_PROVIDER", config.IMAGE_PROVIDER),
+                ):
+                    webui.app.config["TESTING"] = True
+                    client = webui.app.test_client()
+
+                    get_res = client.get("/api/config")
+                    self.assertEqual(get_res.status_code, 200)
+                    payload = get_res.get_json()
+                    self.assertIn("****", payload["GEMINI_API_KEY"])
+                    self.assertTrue(payload["GEMINI_API_KEY"].endswith("9999"))
+                    self.assertIn("****", payload["GEMINI_PROXY_TOKEN"])
+                    self.assertTrue(payload["GEMINI_PROXY_TOKEN"].endswith("7777"))
+
+                    post_res = client.post(
+                        "/api/config",
+                        json={
+                            "IMAGE_GEN_MODEL": "gemini-3-pro-image",
+                            "GEMINI_API_KEY": "****9999",
+                            "GEMINI_PROXY_TOKEN": "****7777",
+                            "GEMINI_IMAGE_SIZE": "2k",
+                            "IMAGE_PROVIDER": "gemini",
+                        },
+                    )
+                    self.assertEqual(post_res.status_code, 200)
+                    self.assertEqual(config.IMAGE_GEN_MODEL, "gemini-3-pro-image")
+                    self.assertEqual(config.GEMINI_IMAGE_SIZE, "2K")
+                    self.assertEqual(config.IMAGE_PROVIDER, "gemini")
+                    self.assertEqual(config.GEMINI_API_KEY, "AIzaSySecretKey9999")
+                    self.assertEqual(config.GEMINI_PROXY_TOKEN, "superproxysecret7777")
+            finally:
+                os.chdir(orig_cwd)
+                image_handler.reset_gemini_key_pool()
+                image_handler.reset_qwen_key_pool()
+
+    def test_private_image_service_mode_sends_zero_google_key_and_saves_binary_jpeg(self):
+        from io import BytesIO
+        import requests
+        import config
+        from utils import image_handler
+        from utils.key_pool import ApiKeyPool, RateLimiter
+        from threading import Semaphore
+
+        buf = BytesIO()
+        Image.new("RGB", (1376, 768), "navy").save(buf, format="JPEG")
+        jpeg_bytes = buf.getvalue()
+        calls = []
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            calls.append({"url": url, "headers": dict(headers or {}), "json": dict(json or {})})
+            resp = Mock()
+            resp.status_code = 200
+            resp.headers = {"Content-Type": "image/jpeg"}
+            resp.content = jpeg_bytes
+            return resp
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            quota_file = Path(tmpdir) / "quota.json"
+            with (
+                patch.object(config, "IMAGE_PROVIDER", "auto"),
+                patch.object(config, "IMAGE_GEN_MODEL", "gemini-nano-banana-2.1"),
+                patch.object(config, "GEMINI_IMAGE_SERVICE_URL", "https://gemini.239020.xyz/api/generate"),
+                patch.object(config, "GEMINI_PROXY_TOKEN", "edge-token-only"),
+                patch.object(config, "GEMINI_IMAGE_SIZE", "1K"),
+                patch.object(config, "QWEN_IMAGE_DAILY_LIMIT", 6),
+                patch.object(image_handler, "_QWEN_QUOTA_FILE", quota_file),
+                patch.object(image_handler, "_get_gemini_key_pool", return_value=ApiKeyPool([])),
+                patch.object(image_handler, "_qwen_image_limiter", RateLimiter(0)),
+                patch.object(image_handler, "_qwen_image_sem", Semaphore(1)),
+                patch.object(requests, "post", side_effect=fake_post),
+            ):
+                image_handler.reset_qwen_daily_quota()
+                body_path = image_handler._try_gemini_image_gen("磨砂玻璃天平", tmpdir, purpose="body")
+                cover_path = image_handler._try_gemini_image_gen("磨砂玻璃天平", tmpdir, purpose="cover")
+
+            self.assertIsNotNone(body_path)
+            self.assertIsNotNone(cover_path)
+            with Image.open(body_path) as img:
+                self.assertEqual(img.size, (1376, 768))
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["url"], "https://gemini.239020.xyz/api/generate")
+        self.assertEqual(calls[0]["headers"].get("X-Proxy-Token"), "edge-token-only")
+        self.assertNotIn("x-goog-api-key", {k.lower() for k in calls[0]["headers"]})
+        self.assertEqual(calls[0]["json"]["aspect_ratio"], "16:9")
+        self.assertEqual(calls[1]["json"]["aspect_ratio"], "21:9")
+
+
 if __name__ == "__main__":
     unittest.main()

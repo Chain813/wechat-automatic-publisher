@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### 接入 Google Gemini Nano Banana 2.1 生图与密钥隔离架构
+
+- **Google 最新生图引擎与微信精准比例适配**：`config.py` 与 `utils/image_handler.py` 接入 `gemini-nano-banana-2.1`（正文默认 `16:9` 1K `1376x768`，独立封面 `21:9` 1K `1584x672`），通过 WebUI 设置中心与 `/api/config` 支持热切换 `gemini-nano-banana-2.1` / `gemini-3.1-flash-lite-image` / `gemini-3-pro-image` / `qwen-image-3.0`，并保留 `Gemini -> Qwen-Image-3.0 -> 本地 Pillow 矢量卡片` 自动降级及每日付费额度硬熔断。
+- **阿里云零密钥私有生图服务模式**：支持配置 `GEMINI_IMAGE_SERVICE_URL` + `GEMINI_PROXY_TOKEN` 对接 `239020.xyz` 私有 Edge 生图服务，境内服务器不持有也不传输 `GEMINI_API_KEY`，直接接收成品二进制图片流并按微信规格压缩上传。
+
 ### 成本控制与纯视觉配图可读性升级
 
 - **纯视觉无字核心主图（彻底取消 AI 流程图）**：`utils/image_handler.py` 与 `prompts/hotspots_skill.md` 将 AI 生图提示词全面重构为「《经济学人》风格 16:9 纯视觉无字概念插画」（主体居中落在 `2.35:1` 封面安全区，四周保留 ≥35% 留白），显式禁止渲染任何汉字/英文/数字/流程图/箭头/分栏卡片，关闭云端 `prompt_extend` 并对 LLM 视觉导演输出实施越界正则拦截；所有数据对比与流程步骤交由零成本本地 Linear Light HTML 卡片（`render_structured_info_card()`）以高对比度阿拉伯数字清晰排版。
