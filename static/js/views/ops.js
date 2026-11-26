@@ -291,8 +291,21 @@ async function loadSystemSettings() {
 
     const sdEl = document.getElementById('sd-status-indicator');
     if (sdEl && sd) {
-      sdEl.className = `badge ${sd.connected ? 'badge-success' : 'badge-neutral'}`;
-      sdEl.textContent = sd.connected ? `已连接 (${sd.url})` : '文字卡片兜底模式';
+      if (sd.provider === 'sd-local' && sd.connected) {
+        sdEl.className = 'badge badge-success';
+        sdEl.textContent = `已连接 (${sd.url})`;
+      } else if (sd.cloud_ready) {
+        sdEl.className = 'badge badge-success';
+        const used = sd.daily_usage?.used ?? 0;
+        const limit = sd.daily_usage?.limit ?? 6;
+        sdEl.textContent = `已就绪 (${sd.active_model} · 今日 ${used}/${limit})`;
+      } else if (sd.connected) {
+        sdEl.className = 'badge badge-success';
+        sdEl.textContent = `已连接 (${sd.url})`;
+      } else {
+        sdEl.className = 'badge badge-neutral';
+        sdEl.textContent = '文字卡片兜底模式';
+      }
     }
   } catch (err) {
     notifyOpsError('载入系统配置失败', err);

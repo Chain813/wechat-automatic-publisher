@@ -7,7 +7,7 @@
 import re
 import json
 from loguru import logger
-from config import IMAGE_GEN_MODEL
+import config
 from core.shared.llm import call_deepseek_with_retry
 
 # 配图/图表占位符正则（同时支持照片配图与技术图表占位符）
@@ -42,10 +42,11 @@ def generate_image_prompts(article_title: str, placeholders: list[str]) -> list[
 
     keywords_text = "\n".join(f"{i+1}. {kw}" for i, kw in enumerate(placeholders))
 
+    active_model = getattr(config, "IMAGE_GEN_MODEL", "gemini-nano-banana-2.1") or "gemini-nano-banana-2.1"
     user_prompt = (
         f"文章标题：{article_title}\n\n"
         f"以下是文章中需要配图的主题列表：\n{keywords_text}\n\n"
-        f"请为每一项生成一段适合 {IMAGE_GEN_MODEL} 模型的【纯视觉无字】16:9 杂志级概念插画提示词。\n\n"
+        f"请为每一项生成一段适合 {active_model} 模型的【纯视觉无字】16:9 杂志级概念插画提示词。\n\n"
         "要求：\n"
         "1. 融合《经济学人》编辑插画叙事张力与 Linear 浅灰白微纹理纸面质感（深岩灰主调 + 少量靛蓝与珊瑚红焦点），严禁赛博黑底霓虹与写实人脸\n"
         "2. 100% 纯视觉无字画面：绝对禁止渲染任何汉字、英文字母、数字、标点、标签胶囊或水印\n"

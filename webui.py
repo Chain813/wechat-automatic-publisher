@@ -229,8 +229,11 @@ def _is_safe_public_url(url: str) -> bool:
         return False
 
     def _is_blocked_ip(ip_obj) -> bool:
+        cgnat_net = ipaddress.ip_network("100.64.0.0/10")
         return bool(
-            ip_obj.is_private
+            (ip_obj.version == 4 and ip_obj in cgnat_net)
+            or not ip_obj.is_global
+            or ip_obj.is_private
             or ip_obj.is_loopback
             or ip_obj.is_link_local
             or ip_obj.is_multicast
@@ -716,6 +719,14 @@ def handle_config():
         if not os.path.exists(env_file):
             import pathlib
             pathlib.Path(env_file).touch()
+        for url_key in ("GEMINI_IMAGE_SERVICE_URL", "GEMINI_API_BASE"):
+            if url_key not in data:
+                continue
+            url_val = str(data[url_key]).strip()
+            if not url_val:
+                continue
+            if len(url_val) > 500 or "\n" in url_val or "\r" in url_val or not url_val.startswith("https://") or not _is_safe_public_url(url_val):
+                return jsonify({"status": "error", "message": f"{url_key} 必须为合法的公网 HTTPS 地址"}), 400
         for key in ["WECHAT_APP_ID", "WECHAT_APP_SECRET", "LLM_API_KEY",
                      "QYWECHAT_WEBHOOK", "LLM_MODEL", "DASHSCOPE_API_KEY",
                      "QWEN_IMAGE_MODEL", "QWEN_IMAGE_REDRAW_MODEL", "QWEN_VL_MODEL",
@@ -2684,24 +2695,91 @@ def test_sources():
 @app.route('/api/system/sd_status', methods=['GET'])
 def get_sd_status():
     try:
-        from utils.image_handler import get_sd_api_url
+        import config
+        from utils.image_handler import (
+            _get_active_gemini_model,
+            _get_active_qwen_model,
+            _get_qwen_key_pool,
+            _has_gemini_backend,
+            _is_gemini_image_preferred,
+            get_qwen_daily_usage,
+            get_sd_api_url,
+        )
+
         sd_url = get_sd_api_url()
+        daily_usage = get_qwen_daily_usage()
+        provider_cfg = (getattr(config, "IMAGE_PROVIDER", "auto") or "auto").strip().lower()
+        selected_model = (getattr(config, "IMAGE_GEN_MODEL", "") or "").strip().lower()
+        has_gemini = _has_gemini_backend()
+        has_qwen = _get_qwen_key_pool().size > 0
+
+        provider = "fallback"
+        active_model = ""
+        cloud_ready = False
+        if provider_cfg == "auto" and selected_model == "sd-local":
+            provider = "sd-local" if sd_url else "fallback"
+            active_model = "sd-local" if sd_url else ""
+        elif _is_gemini_image_preferred() and has_gemini:
+            provider = "gemini"
+            active_model = _get_active_gemini_model()
+            cloud_ready = True
+        elif provider_cfg != "gemini" and has_qwen:
+            provider = "qwen"
+            active_model = _get_active_qwen_model()
+            cloud_ready = True
+        elif has_gemini:
+            provider = "gemini"
+            active_model = _get_active_gemini_model()
+            cloud_ready = True
+        elif sd_url:
+            provider = "sd-local"
+            active_model = "sd-local"
+
+        if provider == "sd-local" and sd_url:
+            return jsonify({
+                "connected": True,
+                "url": sd_url,
+                "cloud_ready": False,
+                "provider": "sd-local",
+                "active_model": "sd-local",
+                "daily_usage": daily_usage,
+                "mode": "Stable Diffusion WebUI",
+                "message": f"已自动连通本地 SD 服务 ({sd_url})",
+            })
+        if cloud_ready:
+            return jsonify({
+                "connected": bool(sd_url),
+                "url": sd_url,
+                "cloud_ready": True,
+                "provider": provider,
+                "active_model": active_model,
+                "daily_usage": daily_usage,
+                "mode": f"云端 AI 生图 ({active_model})",
+                "message": f"已就绪 ({active_model} · 今日 {daily_usage['used']}/{daily_usage['limit']})",
+            })
         if sd_url:
             return jsonify({
                 "connected": True,
                 "url": sd_url,
+                "cloud_ready": False,
+                "provider": "sd-local",
+                "active_model": "sd-local",
+                "daily_usage": daily_usage,
                 "mode": "Stable Diffusion WebUI",
-                "message": f"已自动连通本地 SD 服务 ({sd_url})"
+                "message": f"已自动连通本地 SD 服务 ({sd_url})",
             })
-        else:
-            return jsonify({
-                "connected": False,
-                "url": None,
-                "mode": "科技风文字卡片兜底",
-                "message": "未检测到本地 SD 服务，已自动激活极速文字卡片兜底系统"
-            })
+        return jsonify({
+            "connected": False,
+            "url": None,
+            "cloud_ready": False,
+            "provider": "fallback",
+            "active_model": "",
+            "daily_usage": daily_usage,
+            "mode": "科技风文字卡片兜底",
+            "message": "未检测到云端生图凭据或本地 SD 服务，已启用文字卡片兜底系统",
+        })
     except Exception as e:
-        return jsonify({"connected": False, "error": str(e)})
+        return jsonify({"connected": False, "cloud_ready": False, "error": str(e)})
 
 
 # ---- 图片工作台 API ----

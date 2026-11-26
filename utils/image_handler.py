@@ -714,6 +714,45 @@ def _resolve_gemini_aspect_ratio(purpose: str) -> str:
     return (getattr(config, "GEMINI_IMAGE_BODY_ASPECT_RATIO", "16:9") or "16:9").strip()
 
 
+def _get_active_qwen_model() -> str:
+    active_model = (getattr(config, "IMAGE_GEN_MODEL", "") or "").strip()
+    if active_model.lower().startswith(("qwen", "wanx")):
+        return active_model
+    return (getattr(config, "QWEN_IMAGE_MODEL", "qwen-image-3.0") or "qwen-image-3.0").strip()
+
+
+def _normalize_gemini_thinking_level(model: str, level: str) -> str:
+    norm = (level or "").strip().lower()
+    if norm not in ("minimal", "medium", "high"):
+        return ""
+    low_model = (model or "").strip().lower()
+    if low_model == "gemini-3.1-flash-lite-image" and norm == "medium":
+        return "minimal"
+    return norm
+
+
+def _load_reference_image_b64(image_path: str) -> tuple[str, str]:
+    """读取参考图并转为 Gemini 兼容的 JPEG/PNG Base64；遇到 WebP 等非直传格式自动转为 RGB JPEG。"""
+    low = image_path.lower()
+    if low.endswith(".png"):
+        with open(image_path, "rb") as f:
+            return base64.b64encode(f.read()).decode("ascii"), "image/png"
+    if low.endswith((".jpg", ".jpeg")):
+        with open(image_path, "rb") as f:
+            return base64.b64encode(f.read()).decode("ascii"), "image/jpeg"
+    with Image.open(image_path) as im:
+        if im.mode in ("RGBA", "LA", "P"):
+            rgba = im.convert("RGBA")
+            bg = Image.new("RGB", rgba.size, (255, 255, 255))
+            bg.paste(rgba, mask=rgba.split()[3])
+            out_im = bg
+        else:
+            out_im = im.convert("RGB")
+        buf = io.BytesIO()
+        out_im.save(buf, format="JPEG", quality=92)
+    return base64.b64encode(buf.getvalue()).decode("ascii"), "image/jpeg"
+
+
 def _qwen_post_with_rotation(base_url, body, timeout):
     """千问接口带 Key 轮询的 POST：限流/欠费/被禁自动切 Key 重试。
     返回 (status_code, json_data)，全失败返回 (None, None)。"""
@@ -1229,7 +1268,9 @@ def _try_gemini_image_gen(keyword, target_dir, purpose="body", width=900, height
     if image_size not in ("1K", "2K", "4K"):
         image_size = "1K"
     timeout = int(getattr(config, "GEMINI_IMAGE_TIMEOUT", 120) or 120)
-    thinking_level = (getattr(config, "GEMINI_IMAGE_THINKING_LEVEL", "minimal") or "").strip().lower()
+    thinking_level = _normalize_gemini_thinking_level(
+        model, getattr(config, "GEMINI_IMAGE_THINKING_LEVEL", "minimal")
+    )
 
     prompt = _build_editorial_prompt_for_purpose(keyword, purpose=purpose)
     logger.info("  [Gemini Prompt] (model={}, ratio={}, size={}) {}", model, aspect_ratio, image_size, prompt[:130])
@@ -1243,7 +1284,7 @@ def _try_gemini_image_gen(keyword, target_dir, purpose="body", width=900, height
             "image_size": image_size,
             "mime_type": "image/jpeg",
         }
-        if thinking_level in ("minimal", "medium", "high") and any(
+        if thinking_level and any(
             tag in model.lower() for tag in ("nano-banana", "3-pro", "3.1-flash")
         ):
             svc_payload["thinking_level"] = thinking_level
@@ -1281,7 +1322,7 @@ def _try_gemini_image_gen(keyword, target_dir, purpose="body", width=900, height
             "image_size": image_size,
         },
     }
-    if thinking_level in ("minimal", "medium", "high") and any(
+    if thinking_level and any(
         tag in model.lower() for tag in ("nano-banana", "3-pro", "3.1-flash")
     ):
         body["generation_config"] = {"thinking_level": thinking_level}
@@ -1316,9 +1357,7 @@ def _try_gemini_image_redraw(image_path, instruction, target_dir, width=900, hei
         image_size = "1K"
     timeout = int(getattr(config, "GEMINI_IMAGE_TIMEOUT", 120) or 120)
 
-    mime = "image/png" if image_path.lower().endswith(".png") else "image/jpeg"
-    with open(image_path, "rb") as f:
-        b64_img = base64.b64encode(f.read()).decode("ascii")
+    b64_img, mime = _load_reference_image_b64(image_path)
 
     prompt = (
         f"{instruction}。要求：生成一幅全新原创画面，保持参考图的主题与构图，"
@@ -1398,16 +1437,17 @@ def redraw_reference_image(image_path, instruction, target_dir, width=900, heigh
 
 def _try_qwen_image_gen(keyword, target_dir, width=900, height=500):
     """通义万相 Qwen-Image-3.0 文本生图（DashScope/百炼，国内直连）"""
-    from config import QWEN_IMAGE_API_BASE, QWEN_IMAGE_MODEL, QWEN_IMAGE_TIMEOUT, QWEN_IMAGE_SIZE
+    from config import QWEN_IMAGE_API_BASE, QWEN_IMAGE_TIMEOUT, QWEN_IMAGE_SIZE
+    qwen_model = _get_active_qwen_model()
     if not _reserve_qwen_daily_quota(1):
         return None
     prompt = _build_qwen_image_prompt(keyword)
     # 强制关闭云端 prompt_extend 以防 DashScope 自动改写提示词并往画面里塞随机汉字/流程图
     force_extend = os.getenv("QWEN_IMAGE_FORCE_PROMPT_EXTEND", "").strip().lower() in ("1", "true", "yes")
     use_prompt_extend = bool(force_extend)
-    logger.info("  [Qwen-Image Prompt] (extend={}) {}", use_prompt_extend, prompt[:140])
+    logger.info("  [Qwen-Image Prompt] (model={}, extend={}) {}", qwen_model, use_prompt_extend, prompt[:140])
     body = {
-        "model": QWEN_IMAGE_MODEL,
+        "model": qwen_model,
         "input": {
             "messages": [
                 {"role": "user", "content": [{"text": prompt}]}
@@ -1534,6 +1574,12 @@ def _download_free_image(keyword, save_dir, purpose="body", max_retries=3):
     if not keyword or not keyword.strip():
         return None
 
+    provider_cfg = (getattr(config, "IMAGE_PROVIDER", "auto") or "auto").strip().lower()
+    selected_model = (getattr(config, "IMAGE_GEN_MODEL", "") or "").strip().lower()
+    if provider_cfg == "auto" and selected_model == "sd-local":
+        logger.info("  [图源路由] 当前首选模型设为 sd-local，跳过云端 AI 生图直接交由本地 SD 处理: '{}'", keyword)
+        return None
+
     has_gemini = _has_gemini_backend()
     has_qwen = _get_qwen_key_pool().size > 0
     providers = []
@@ -1541,7 +1587,7 @@ def _download_free_image(keyword, save_dir, purpose="body", max_retries=3):
         providers.append("gemini")
         if getattr(config, "GEMINI_IMAGE_FALLBACK_TO_QWEN", True) and has_qwen:
             providers.append("qwen")
-    elif has_qwen:
+    elif provider_cfg != "gemini" and has_qwen:
         providers.append("qwen")
     elif has_gemini:
         providers.append("gemini")
@@ -1563,7 +1609,7 @@ def _download_free_image(keyword, save_dir, purpose="body", max_retries=3):
         if not is_source_available(provider):
             continue
         attempts = max(1, min(max_retries, 2)) if provider == "gemini" else max(1, max_retries)
-        label = f"Gemini ({_get_active_gemini_model()})" if provider == "gemini" else f"通义万相 ({config.QWEN_IMAGE_MODEL})"
+        label = f"Gemini ({_get_active_gemini_model()})" if provider == "gemini" else f"通义万相 ({_get_active_qwen_model()})"
         logger.info("正在使用 {} AI 生图 [{}]: '{}'...", label, purpose, keyword)
 
         for attempt in range(1, attempts + 1):
@@ -1732,7 +1778,12 @@ def download_image(keyword, save_dir="assets", *, allow_title_card=True):
     os.makedirs(specific_dir, exist_ok=True)
 
     # 1. 优先云端 AI 生图（Gemini -> Qwen 自动降级）
-    active_name = _get_active_gemini_model() if _is_gemini_image_preferred() else config.QWEN_IMAGE_MODEL
+    active_name = (
+        "sd-local"
+        if (getattr(config, "IMAGE_PROVIDER", "auto") or "auto").strip().lower() == "auto"
+        and (getattr(config, "IMAGE_GEN_MODEL", "") or "").strip().lower() == "sd-local"
+        else (_get_active_gemini_model() if _is_gemini_image_preferred() else _get_active_qwen_model())
+    )
     logger.info("正在发起 AI 配图生成 ({}): '{}'...", active_name, keyword)
     best = _download_free_image(keyword, save_dir, purpose="body")
     if best:
@@ -1782,7 +1833,12 @@ def download_cover_image(keyword, save_dir="assets"):
         os.makedirs(specific_dir)
 
     # 1. 优先云端 AI 封面生图（Gemini -> Qwen 自动降级）
-    active_name = _get_active_gemini_model() if _is_gemini_image_preferred() else config.QWEN_IMAGE_MODEL
+    active_name = (
+        "sd-local"
+        if (getattr(config, "IMAGE_PROVIDER", "auto") or "auto").strip().lower() == "auto"
+        and (getattr(config, "IMAGE_GEN_MODEL", "") or "").strip().lower() == "sd-local"
+        else (_get_active_gemini_model() if _is_gemini_image_preferred() else _get_active_qwen_model())
+    )
     logger.info("正在发起 AI 封面图生成 ({}): '{}'...", active_name, keyword)
     best = _download_free_image(keyword, save_dir, purpose="cover")
     if best:

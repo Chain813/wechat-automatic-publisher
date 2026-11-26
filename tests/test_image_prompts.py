@@ -456,6 +456,21 @@ class TestGeminiImageProvider(unittest.TestCase):
         import webui
         from utils import image_handler
 
+        config_keys = (
+            "WECHAT_APP_ID", "WECHAT_APP_SECRET", "LLM_API_KEY", "LLM_API_KEYS",
+            "DASHSCOPE_API_KEY", "DASHSCOPE_API_KEYS", "QWEN_IMAGE_API_KEY",
+            "GEMINI_API_KEY", "GEMINI_API_KEYS", "GEMINI_API_BASE",
+            "GEMINI_IMAGE_SERVICE_URL", "GEMINI_PROXY_TOKEN", "GEMINI_IMAGE_MODEL",
+            "GEMINI_IMAGE_SIZE", "IMAGE_PROVIDER", "IMAGE_GEN_MODEL",
+            "QWEN_IMAGE_MODEL", "QWEN_VL_MODEL", "QWEN_IMAGE_REDRAW_MODEL",
+            "QYWECHAT_WEBHOOK", "LLM_MODEL", "LLM_BASE_URL", "ENABLE_FACT_SEARCH",
+            "DIAGRAM_PARALLEL_WORKERS", "MAX_TOPICS_PER_RUN",
+            "MAX_AI_IMAGES_PER_ARTICLE", "QWEN_IMAGE_DAILY_LIMIT",
+            "BRAND_NAME", "ARTICLE_AUTHOR", "GITHUB_TOKEN",
+        )
+        orig_env = dict(os.environ)
+        orig_cfg = {k: getattr(config, k) for k in config_keys if hasattr(config, k)}
+
         with tempfile.TemporaryDirectory() as tmpdir:
             orig_cwd = os.getcwd()
             os.chdir(tmpdir)
@@ -466,15 +481,7 @@ class TestGeminiImageProvider(unittest.TestCase):
                     "IMAGE_GEN_MODEL=gemini-nano-banana-2.1\n",
                     encoding="utf-8",
                 )
-                with (
-                    patch.object(webui, "CLOUD_MODE", False),
-                    patch.object(config, "IMAGE_GEN_MODEL", config.IMAGE_GEN_MODEL),
-                    patch.object(config, "GEMINI_API_KEY", config.GEMINI_API_KEY),
-                    patch.object(config, "GEMINI_PROXY_TOKEN", config.GEMINI_PROXY_TOKEN),
-                    patch.object(config, "GEMINI_IMAGE_MODEL", config.GEMINI_IMAGE_MODEL),
-                    patch.object(config, "GEMINI_IMAGE_SIZE", config.GEMINI_IMAGE_SIZE),
-                    patch.object(config, "IMAGE_PROVIDER", config.IMAGE_PROVIDER),
-                ):
+                with patch.object(webui, "CLOUD_MODE", False):
                     webui.app.config["TESTING"] = True
                     client = webui.app.test_client()
 
@@ -504,6 +511,10 @@ class TestGeminiImageProvider(unittest.TestCase):
                     self.assertEqual(config.GEMINI_PROXY_TOKEN, "superproxysecret7777")
             finally:
                 os.chdir(orig_cwd)
+                os.environ.clear()
+                os.environ.update(orig_env)
+                for k, v in orig_cfg.items():
+                    setattr(config, k, v)
                 image_handler.reset_gemini_key_pool()
                 image_handler.reset_qwen_key_pool()
 
@@ -558,6 +569,221 @@ class TestGeminiImageProvider(unittest.TestCase):
         self.assertNotIn("x-goog-api-key", {k.lower() for k in calls[0]["headers"]})
         self.assertEqual(calls[0]["json"]["aspect_ratio"], "16:9")
         self.assertEqual(calls[1]["json"]["aspect_ratio"], "21:9")
+
+    def test_private_image_service_503_refunds_quota_and_falls_back_to_qwen(self):
+        from io import BytesIO
+        import requests
+        import config
+        from utils import image_handler
+        from utils.key_pool import ApiKeyPool, RateLimiter
+        from threading import Semaphore
+
+        buf = BytesIO()
+        Image.new("RGB", (64, 36), "teal").save(buf, format="JPEG")
+        qwen_resp = {"output": {"choices": [{"message": {"content": [{"image": "data:image/jpeg;base64," + __import__("base64").b64encode(buf.getvalue()).decode("ascii")}]}}]}}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            quota_file = Path(tmpdir) / "quota.json"
+            with (
+                patch.object(config, "IMAGE_PROVIDER", "auto"),
+                patch.object(config, "IMAGE_GEN_MODEL", "gemini-nano-banana-2.1"),
+                patch.object(config, "GEMINI_IMAGE_SERVICE_URL", "https://gemini.239020.xyz/api/generate"),
+                patch.object(config, "GEMINI_PROXY_TOKEN", "edge-token-only"),
+                patch.object(config, "GEMINI_IMAGE_FALLBACK_TO_QWEN", True),
+                patch.object(config, "QWEN_IMAGE_DAILY_LIMIT", 6),
+                patch.object(image_handler, "_QWEN_QUOTA_FILE", quota_file),
+                patch.object(image_handler, "_get_gemini_key_pool", return_value=ApiKeyPool([])),
+                patch.object(image_handler, "_get_qwen_key_pool", return_value=ApiKeyPool(["qwen-1"])),
+                patch.object(image_handler, "_qwen_image_limiter", RateLimiter(0)),
+                patch.object(image_handler, "_qwen_image_sem", Semaphore(1)),
+                patch.object(image_handler, "_image_sources_status", {
+                    "gemini": {"status": True, "last_check": 0},
+                    "qwen": {"status": True, "last_check": 0},
+                }),
+                patch.object(requests, "post", return_value=Mock(status_code=503, headers={"Content-Type": "application/json"}, content=b'{"error":"down"}')),
+                patch.object(image_handler, "_qwen_post_with_rotation", return_value=(200, qwen_resp)) as mock_qwen,
+                patch("core.shared.runtime.cancel_event.wait", return_value=False),
+            ):
+                image_handler.reset_qwen_daily_quota()
+                result = image_handler._download_free_image("私有服务降级", tmpdir, purpose="body", max_retries=2)
+                usage = image_handler.get_qwen_daily_usage()
+
+            self.assertIsNotNone(result)
+            self.assertTrue(Path(result).exists())
+            mock_qwen.assert_called_once()
+            self.assertEqual(usage["used"], 1)
+
+    def test_private_image_service_redraw_converts_webp_to_jpeg(self):
+        import base64
+        from io import BytesIO
+        import requests
+        import config
+        from utils import image_handler
+        from utils.key_pool import ApiKeyPool, RateLimiter
+        from threading import Semaphore
+
+        out_buf = BytesIO()
+        Image.new("RGB", (1376, 768), (100, 116, 139)).save(out_buf, format="JPEG")
+        calls = []
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            calls.append({"url": url, "headers": dict(headers or {}), "json": dict(json or {})})
+            resp = Mock()
+            resp.status_code = 200
+            resp.headers = {"Content-Type": "image/jpeg"}
+            resp.content = out_buf.getvalue()
+            return resp
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            webp_path = Path(tmpdir) / "wechat_ref.webp"
+            Image.new("RGBA", (120, 80), (40, 80, 120, 200)).save(webp_path, format="WEBP")
+            quota_file = Path(tmpdir) / "quota.json"
+            with (
+                patch.object(config, "IMAGE_PROVIDER", "auto"),
+                patch.object(config, "IMAGE_GEN_MODEL", "gemini-nano-banana-2.1"),
+                patch.object(config, "GEMINI_IMAGE_SERVICE_URL", "https://gemini.239020.xyz/api/generate"),
+                patch.object(config, "GEMINI_PROXY_TOKEN", "edge-token-only"),
+                patch.object(config, "QWEN_IMAGE_DAILY_LIMIT", 6),
+                patch.object(image_handler, "_QWEN_QUOTA_FILE", quota_file),
+                patch.object(image_handler, "_get_gemini_key_pool", return_value=ApiKeyPool([])),
+                patch.object(image_handler, "_qwen_image_limiter", RateLimiter(0)),
+                patch.object(image_handler, "_qwen_image_sem", Semaphore(1)),
+                patch.object(requests, "post", side_effect=fake_post),
+            ):
+                image_handler.reset_qwen_daily_quota()
+                out = image_handler._try_gemini_image_redraw(str(webp_path), "重绘", tmpdir)
+
+            self.assertIsNotNone(out)
+            self.assertTrue(Path(out).exists())
+
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("x-goog-api-key", {k.lower() for k in calls[0]["headers"]})
+        ref_obj = calls[0]["json"]["reference_image"]
+        self.assertEqual(ref_obj["mime_type"], "image/jpeg")
+        decoded = base64.b64decode(ref_obj["data"])
+        with Image.open(BytesIO(decoded)) as ref_img:
+            self.assertEqual(ref_img.format, "JPEG")
+            self.assertEqual(ref_img.size, (120, 80))
+
+    def test_api_config_blocks_ssrf_and_non_https_gemini_urls(self):
+        import os
+        import config
+        import webui
+        from utils import image_handler
+
+        orig_env = dict(os.environ)
+        orig_url = getattr(config, "GEMINI_IMAGE_SERVICE_URL", "")
+        orig_base = getattr(config, "GEMINI_API_BASE", "")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            orig_cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                Path(".env").write_text(
+                    "GEMINI_IMAGE_SERVICE_URL=https://gemini.239020.xyz/api/generate\n"
+                    "GEMINI_API_BASE=https://generativelanguage.googleapis.com\n",
+                    encoding="utf-8",
+                )
+                with patch.object(webui, "CLOUD_MODE", False):
+                    webui.app.config["TESTING"] = True
+                    client = webui.app.test_client()
+
+                    for bad_url in (
+                        "http://127.0.0.1:5000/api/config",
+                        "https://169.254.169.254/latest/meta-data/",
+                        "https://100.100.100.200/latest/meta-data/",
+                        "http://gemini.239020.xyz/api/generate",
+                    ):
+                        r1 = client.post("/api/config", json={"GEMINI_IMAGE_SERVICE_URL": bad_url})
+                        self.assertEqual(r1.status_code, 400, f"Service URL not blocked: {bad_url}")
+                        r2 = client.post("/api/config", json={"GEMINI_API_BASE": bad_url})
+                        self.assertEqual(r2.status_code, 400, f"API base not blocked: {bad_url}")
+
+                    env_content = Path(".env").read_text(encoding="utf-8")
+                    self.assertIn("https://gemini.239020.xyz/api/generate", env_content)
+                    self.assertNotIn("169.254.169.254", env_content)
+            finally:
+                os.chdir(orig_cwd)
+                os.environ.clear()
+                os.environ.update(orig_env)
+                config.GEMINI_IMAGE_SERVICE_URL = orig_url
+                config.GEMINI_API_BASE = orig_base
+                image_handler.reset_gemini_key_pool()
+                image_handler.reset_qwen_key_pool()
+
+    def test_image_gen_model_routing_sd_local_qwen_pro_lite_thinking_and_sd_status(self):
+        import requests
+        import config
+        import webui
+        from utils import image_handler, image_prompt_gen
+        from utils.key_pool import ApiKeyPool, RateLimiter
+        from threading import Semaphore
+
+        # 1. sd-local skips cloud Gemini/Qwen
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with (
+                patch.object(config, "IMAGE_PROVIDER", "auto"),
+                patch.object(config, "IMAGE_GEN_MODEL", "sd-local"),
+                patch.object(config, "GEMINI_IMAGE_SERVICE_URL", "https://gemini.239020.xyz/api/generate"),
+                patch.object(image_handler, "_get_qwen_key_pool", return_value=ApiKeyPool(["qwen-1"])),
+                patch.object(image_handler, "_try_gemini_image_gen") as mock_gem,
+                patch.object(image_handler, "_try_qwen_image_gen") as mock_qwen,
+            ):
+                self.assertIsNone(image_handler._download_free_image("路由测试", tmpdir))
+                mock_gem.assert_not_called()
+                mock_qwen.assert_not_called()
+
+        # 2. qwen-image-3.0-pro selects qwen-image-3.0-pro even when QWEN_IMAGE_MODEL=qwen-image-3.0
+        with tempfile.TemporaryDirectory() as tmpdir:
+            quota_file = Path(tmpdir) / "quota.json"
+            with (
+                patch.object(config, "IMAGE_GEN_MODEL", "qwen-image-3.0-pro"),
+                patch.object(config, "QWEN_IMAGE_MODEL", "qwen-image-3.0"),
+                patch.object(config, "QWEN_IMAGE_DAILY_LIMIT", 6),
+                patch.object(image_handler, "_QWEN_QUOTA_FILE", quota_file),
+                patch.object(image_handler, "_qwen_post_with_rotation", return_value=(500, None)) as mock_qpost,
+            ):
+                image_handler.reset_qwen_daily_quota()
+                image_handler._try_qwen_image_gen("千问Pro路由", tmpdir)
+            self.assertEqual(mock_qpost.call_args.args[1]["model"], "qwen-image-3.0-pro")
+
+        # 3. gemini-3.1-flash-lite-image normalizes thinking_level "medium" -> "minimal"
+        self.assertEqual(
+            image_handler._normalize_gemini_thinking_level("gemini-3.1-flash-lite-image", "medium"),
+            "minimal",
+        )
+        self.assertEqual(
+            image_handler._normalize_gemini_thinking_level("gemini-nano-banana-2.1", "medium"),
+            "medium",
+        )
+
+        # 4. image_prompt_gen dynamically reads config.IMAGE_GEN_MODEL
+        captured = {}
+        with (
+            patch.object(config, "IMAGE_GEN_MODEL", "gemini-3-pro-image"),
+            patch.object(image_prompt_gen, "call_deepseek_with_retry", side_effect=lambda p, **kw: captured.setdefault("prompt", p) and "[]"),
+        ):
+            image_prompt_gen.generate_image_prompts("测试动态模型", ["算力芯片"])
+        self.assertIn("gemini-3-pro-image", captured["prompt"])
+
+        # 5. GET /api/system/sd_status reports cloud_ready, provider, active_model, and daily_usage
+        with (
+            patch.object(webui, "CLOUD_MODE", False),
+            patch.object(config, "IMAGE_PROVIDER", "auto"),
+            patch.object(config, "IMAGE_GEN_MODEL", "gemini-nano-banana-2.1"),
+            patch.object(config, "GEMINI_IMAGE_SERVICE_URL", "https://gemini.239020.xyz/api/generate"),
+            patch.object(image_handler, "get_sd_api_url", return_value=None),
+            patch.object(image_handler, "get_qwen_daily_usage", return_value={"date": "2026-11-26", "used": 1, "limit": 6, "remaining": 5}),
+        ):
+            webui.app.config["TESTING"] = True
+            client = webui.app.test_client()
+            res = client.get("/api/system/sd_status")
+            self.assertEqual(res.status_code, 200)
+            body = res.get_json()
+            self.assertTrue(body["cloud_ready"])
+            self.assertEqual(body["provider"], "gemini")
+            self.assertEqual(body["active_model"], "gemini-nano-banana-2.1")
+            self.assertEqual(body["daily_usage"]["used"], 1)
 
 
 if __name__ == "__main__":
