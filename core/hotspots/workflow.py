@@ -257,6 +257,10 @@ class ParallelPublishNode(BaseNode):
             source_url = getattr(topic, "url", "") if hasattr(topic, "url") else ""
             fact_check_res = getattr(topic, "fact_check_result", "")
 
+            draft_lines = article_text.strip().splitlines()
+            if len(draft_lines) >= 2 and draft_lines[0].strip() in ("```markdown", "```") and draft_lines[-1].strip() == "```":
+                article_text = "\n".join(draft_lines[1:-1]).strip()
+
             # 2. 前置主编审校门禁（在付费生图之前拦截不合格文稿，防止先烧图再报废）
             from core.pipeline.critic import evaluate_and_repair_article, format_critic_report
             article_text, review_res = evaluate_and_repair_article(clean_title, article_text, article_type="hotspots")
@@ -286,9 +290,9 @@ class ParallelPublishNode(BaseNode):
                 )
                 return topic_str, False, err
 
-            # 3. 门禁通过后再执行配图（最多 1 张 AI 核心图 + 零成本结构化卡片）与微信内联排版
+            # 3. 门禁通过后再执行配图（直出 1 张纯视觉 AI 核心图 + 零成本结构化卡片，跳过境外实图检索）与微信内联排版
             check_cancelled()
-            final_html, review_data = process_article_content(article_text, pub, cover_title=clean_title)
+            final_html, review_data = process_article_content(article_text, pub, use_ai_first=True, cover_title=clean_title)
             check_cancelled()
             if not final_html:
                 _save_publish_result(topic, success=False, error="排版处理失败", status="FAILED")

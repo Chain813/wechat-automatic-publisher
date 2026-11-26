@@ -85,6 +85,73 @@ class TestPureVisualAndCostControl(unittest.TestCase):
         self.assertIn("纯视觉无字", out)
         self.assertIn("严禁流程图", out)
 
+    def test_llm_visual_director_accepts_negated_bans_and_strips_decorative_quotes(self):
+        from utils import image_handler
+
+        valid_prompt = (
+            "一幅16:9宽屏横版纯视觉概念插画，浅灰白留白，中央展示“悬浮的天平”与一枚深岩灰石块，"
+            "严禁流程图、箭头连线，无主标题与副标题，柔和棚拍漫射光。"
+        )
+        with (
+            patch.object(image_handler, "_can_use_llm_prompt_director", return_value=True),
+            patch("core.shared.llm.call_deepseek_with_retry", return_value=valid_prompt),
+        ):
+            out = image_handler._build_qwen_image_prompt("算力估值天平", slot_index=0)
+
+        self.assertIn("悬浮的天平", out)
+        self.assertNotIn("“", out)
+        self.assertNotIn("”", out)
+        self.assertIn("严禁竖版", out)
+
+    def test_structured_card_strips_markdown_html_without_leaking_escaped_tags(self):
+        from core.shared.article_utils import process_article_content
+
+        md_article = (
+            "## 对比\n\n正文段落。\n\n"
+            "【此处绘制图表：估值对比｜**英伟达 8.4x** vs `AMD 29x`】\n\n"
+            "【此处绘制图表：链路｜*步骤1* → **步骤2** → `步骤3`】\n"
+        )
+        html_body, _ = process_article_content(md_article, Mock(), skip_photo_images=True)
+        self.assertIn("英伟达 8.4x", html_body)
+        self.assertIn("AMD 29x", html_body)
+        self.assertIn("步骤2", html_body)
+        self.assertNotIn("&lt;strong&gt;", html_body)
+        self.assertNotIn("&lt;code&gt;", html_body)
+        self.assertNotIn("&lt;em&gt;", html_body)
+
+    def test_hotspots_workflow_passes_use_ai_first_for_single_hero_after_critic(self):
+        from core.hotspots.workflow import ParallelPublishNode
+        from core.plugins.base import HotspotItem
+
+        node = ParallelPublishNode()
+        pub = Mock()
+        pub.access_token = "tok"
+        topic = HotspotItem(title="英伟达市值波动与算力格局", url="https://example.com/nv")
+
+        valid_article = (
+            "## 第一节冲突\n\n" + ("这是有 **事实依据** 的 **深度分析** 段落，涉及 **111 名** 与 **54 起**。" * 25) + "\n\n"
+            "> 金句一。\n\n【此处插入配图：悬在玻璃门前的铜锁隐喻】\n\n"
+            "## 第二节对照\n\n" + ("这是 **第二部分** 关于 **算力芯片** 与 **估值** 的拆解。" * 25) + "\n\n"
+            "> 金句二。\n\n【此处绘制图表：对比｜A 8.4x vs B 29x】\n\n"
+            "## 第三节收束\n\n" + ("这是 **第三部分** 关于 **工程落地** 的讨论。" * 25) + "\n\n"
+            "> 金句三。\n\n【此处绘制图表：链路｜步骤1 → 步骤2】\n"
+        )
+
+        with (
+            patch("core.hotspots.workflow.generate_article", return_value=f"```markdown\n{valid_article}\n```"),
+            patch("core.hotspots.workflow.generate_digest", return_value="冷静摘要"),
+            patch("core.hotspots.workflow.process_article_content", return_value=("<h2>OK</h2>", {
+                "word_count": 2000, "image_count": 1, "sensitive_words": [], "thumb_id": "thumb-1", "html_bytes": 1024,
+            })) as mock_proc,
+            patch("core.hotspots.workflow.publish_article", return_value=(True, None)),
+        ):
+            _, ok, err = node._publish_single_topic(topic, pub)
+
+        self.assertTrue(ok, err)
+        mock_proc.assert_called_once()
+        self.assertTrue(mock_proc.call_args.kwargs.get("use_ai_first"))
+        self.assertNotIn("```markdown", mock_proc.call_args.args[0])
+
     def test_per_article_ai_cap_limits_paid_images_to_one_and_renders_html_cards(self):
         import config
         from core.shared import article_photos

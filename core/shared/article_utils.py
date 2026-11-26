@@ -535,7 +535,13 @@ def _apply_inline_strong_styles(html_body: str) -> str:
 
 def render_structured_info_card(raw_brief: str, header_title: str = "📊 核心逻辑与架构解析") -> str:
     """将 `标题｜要点1 → 要点2` 或 `标题｜A方 vs B方` 渲染为零成本高对比度 Linear Light 微信内联卡片。"""
-    text = (raw_brief or "").strip()
+    raw_clean = unescape(re.sub(r"<[^>]+>", "", raw_brief or ""))
+    raw_clean = re.sub(
+        r"\*\*([^*]+)\*\*|__([^_]+)__|`([^`]+)`|\*(?!\s)([^*\n]+?)(?<!\s)\*",
+        lambda m: next(g for g in m.groups() if g is not None),
+        raw_clean,
+    )
+    text = raw_clean.strip()
     if "｜" in text or "|" in text:
         title_part, detail_part = re.split(r"[｜|]", text, maxsplit=1)
         card_title = title_part.strip()

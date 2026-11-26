@@ -51,3 +51,4 @@ data/delivery_receipts/
 data/cache/aikepu/*.lock
 data/cache/aikepu/*.corrupt.*
 data/review_locks/
+data/qwen_image_quota.json

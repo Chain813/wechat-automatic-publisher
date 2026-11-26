@@ -826,13 +826,24 @@ _SLOT_LAYOUT_ARCHETYPES = (
     ),
 )
 
+_NEGATION_CLAUSE_RE = re.compile(
+    r"(?:绝对)?(?:严禁|禁止|绝不|切勿|不要|杜绝|无任何|不含|无)[^，。；;\n]{0,48}"
+)
 _FORBIDDEN_PROMPT_RENDER_RE = re.compile(
-    r"主标题|副标题|顶部.*胶囊|三张.*卡片|从左到右.*箭头|流程图|引号内|标注简体中文|写上|印着|显示.*文字|“[A-Za-z0-9\u4e00-\u9fff]+”"
+    r"主标题|副标题|顶部.*胶囊|三张.*卡片|从左到右.*箭头|流程图|引号内|标注简体中文|写上|印着|显示.*文字"
 )
 _PURE_VISUAL_GUARDRAIL_TAIL = (
     "100%纯视觉无任何文字字母数字与水印，严禁流程图、箭头连线与多栏卡片，"
     "严格16:9宽屏横版且核心主体居中落在2.35:1封面安全区内，严禁竖版。"
 )
+
+
+def _has_forbidden_render_directive(text: str) -> bool:
+    """检查提示词是否包含正向要求画文字或流程图的指令（先剥离否定约束子句防误杀）。"""
+    if not text:
+        return False
+    stripped = _NEGATION_CLAUSE_RE.sub("", text)
+    return bool(_FORBIDDEN_PROMPT_RENDER_RE.search(stripped))
 
 
 @contextmanager
@@ -954,7 +965,8 @@ def _build_qwen_image_prompt(keyword, context=None, article_title=None, slot_ind
                 max_tokens=500,
             )
             cleaned = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", (enhanced or "").strip()).strip()
-            if len(cleaned) >= 50 and not _FORBIDDEN_PROMPT_RENDER_RE.search(cleaned):
+            if len(cleaned) >= 50 and not _has_forbidden_render_directive(cleaned):
+                cleaned = re.sub(r'[“”"]', "", cleaned)
                 if "严禁流程图" not in cleaned or "严禁竖版" not in cleaned:
                     cleaned = f"{cleaned} {_PURE_VISUAL_GUARDRAIL_TAIL}"
                 return cleaned
